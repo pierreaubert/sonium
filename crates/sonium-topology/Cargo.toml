@@ -1,0 +1,15 @@
+[package]
+name = "sonium-topology"
+version = "0.1.0"
+description = "Machine topology discovery, CPU placement, and bandwidth calibration for sonium workers"
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[lib]
+name = "sonium_topology"
+path = "src/lib.rs"
+
+[dependencies]
+libc = { workspace = true }
