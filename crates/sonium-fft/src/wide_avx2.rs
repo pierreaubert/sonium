@@ -11,40 +11,6 @@ use num_complex::Complex;
 
 use crate::twiddles::StageTwiddles;
 
-const DEINTERLEAVE_PD: i32 = 0b11_01_10_00;
-
-#[inline]
-unsafe fn load_complex4(ptr: *const Complex<f64>) -> (__m256d, __m256d) {
-    unsafe {
-        let lo = _mm256_loadu_pd(ptr as *const f64);
-        let hi = _mm256_loadu_pd((ptr as *const f64).add(4));
-        let re = _mm256_permute4x64_pd(_mm256_unpacklo_pd(lo, hi), DEINTERLEAVE_PD);
-        let im = _mm256_permute4x64_pd(_mm256_unpackhi_pd(lo, hi), DEINTERLEAVE_PD);
-        (re, im)
-    }
-}
-
-#[inline]
-unsafe fn store_complex4(ptr: *mut Complex<f64>, re: __m256d, im: __m256d) {
-    unsafe {
-        let re_perm = _mm256_permute4x64_pd(re, DEINTERLEAVE_PD);
-        let im_perm = _mm256_permute4x64_pd(im, DEINTERLEAVE_PD);
-        let lo = _mm256_unpacklo_pd(re_perm, im_perm);
-        let hi = _mm256_unpackhi_pd(re_perm, im_perm);
-        _mm256_storeu_pd(ptr as *mut f64, lo);
-        _mm256_storeu_pd((ptr as *mut f64).add(4), hi);
-    }
-}
-
-#[inline]
-unsafe fn cmul(a_re: __m256d, a_im: __m256d, b_re: __m256d, b_im: __m256d) -> (__m256d, __m256d) {
-    unsafe {
-        let re = _mm256_fmsub_pd(a_re, b_re, _mm256_mul_pd(a_im, b_im));
-        let im = _mm256_fmadd_pd(a_re, b_im, _mm256_mul_pd(a_im, b_re));
-        (re, im)
-    }
-}
-
 #[inline]
 unsafe fn load_complex2(ptr: *const Complex<f64>) -> (__m128d, __m128d) {
     unsafe {
@@ -105,19 +71,33 @@ unsafe fn cmul_f32(a_re: __m128, a_im: __m128, b_re: __m128, b_im: __m128) -> (_
     }
 }
 
-#[target_feature(enable = "avx2,fma")]
+#[inline]
+unsafe fn cmul_aos_f32(a: __m256, b: __m256) -> __m256 {
+    unsafe {
+        let a_re = _mm256_shuffle_ps(a, a, 0xA0);
+        let a_im = _mm256_shuffle_ps(a, a, 0xF5);
+        let b_swap = _mm256_shuffle_ps(b, b, 0xB1);
+        let p1 = _mm256_mul_ps(a_re, b);
+        let p2 = _mm256_mul_ps(a_im, b_swap);
+        _mm256_addsub_ps(p1, p2)
+    }
+}
+
+/// AVX2/FMA radix-2 stage for one `Complex<f32>` FFT in interleaved (AoS)
+/// layout: raw loads/stores, no deinterleave shuffles.
+///
 /// # Safety
 ///
-/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must describe
-/// a radix-2 stage with `src.len() == dst.len() == 2 * stage_tw.m *
-/// stage_tw.s`, `stride == src.len() / 2`, and disjoint source/destination
-/// slices. The twiddle slices must therefore contain the stage's complete
-/// `m` entries.
-pub unsafe fn stage_radix2_f64(
+/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must
+/// describe a radix-2 stage with `src.len() == dst.len() == 2 *
+/// stage_tw.m * stage_tw.s`, `stride == src.len() / 2`, and disjoint
+/// source/destination slices.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix2_f32_aos(
     stride: usize,
-    src: &[Complex<f64>],
-    dst: &mut [Complex<f64>],
-    stage_tw: &StageTwiddles<f64>,
+    src: &[Complex<f32>],
+    dst: &mut [Complex<f32>],
+    stage_tw: &StageTwiddles<f32>,
 ) {
     unsafe {
         stage_tw.debug_assert_stage_shape(2, stride, src.len(), dst.len());
@@ -131,46 +111,22 @@ pub unsafe fn stage_radix2_f64(
             let base_out = g * m_new;
 
             let mut l = 0usize;
-            if l + 4 <= m {
-                let (mut tw_re, mut tw_im) = load_complex4(tw1.as_ptr().add(l));
-                loop {
-                    let (a_re, a_im) = load_complex4(src.as_ptr().add(base_in + l));
-                    let (b_re, b_im) = load_complex4(src.as_ptr().add(base_in + l + stride));
-                    let (bt_re, bt_im) = cmul(b_re, b_im, tw_re, tw_im);
-
-                    let y0_re = _mm256_add_pd(a_re, bt_re);
-                    let y0_im = _mm256_add_pd(a_im, bt_im);
-                    let y1_re = _mm256_sub_pd(a_re, bt_re);
-                    let y1_im = _mm256_sub_pd(a_im, bt_im);
-
-                    store_complex4(dst.as_mut_ptr().add(base_out + l), y0_re, y0_im);
-                    store_complex4(dst.as_mut_ptr().add(base_out + m + l), y1_re, y1_im);
-
-                    l += 4;
-                    if l + 4 > m {
-                        break;
-                    }
-                    let (tw_re_next, tw_im_next) = load_complex4(tw1.as_ptr().add(l));
-                    tw_re = tw_re_next;
-                    tw_im = tw_im_next;
-                }
+            while l + 4 <= m {
+                let a = _mm256_loadu_ps(src.as_ptr().add(base_in + l) as *const f32);
+                let b = _mm256_loadu_ps(src.as_ptr().add(base_in + l + stride) as *const f32);
+                let tw = _mm256_loadu_ps(tw1.as_ptr().add(l) as *const f32);
+                let b = cmul_aos_f32(b, tw);
+                _mm256_storeu_ps(
+                    dst.as_mut_ptr().add(base_out + l) as *mut f32,
+                    _mm256_add_ps(a, b),
+                );
+                _mm256_storeu_ps(
+                    dst.as_mut_ptr().add(base_out + m + l) as *mut f32,
+                    _mm256_sub_ps(a, b),
+                );
+                l += 4;
             }
-
-            if l + 2 <= m {
-                let (a_re, a_im) = load_complex2(src.as_ptr().add(base_in + l));
-                let (b_re, b_im) = load_complex2(src.as_ptr().add(base_in + l + stride));
-                let (tw_re, tw_im) = load_complex2(tw1.as_ptr().add(l));
-                let (bt_re, bt_im) = cmul2(b_re, b_im, tw_re, tw_im);
-                let y0_re = _mm_add_pd(a_re, bt_re);
-                let y0_im = _mm_add_pd(a_im, bt_im);
-                let y1_re = _mm_sub_pd(a_re, bt_re);
-                let y1_im = _mm_sub_pd(a_im, bt_im);
-                store_complex2(dst.as_mut_ptr().add(base_out + l), y0_re, y0_im);
-                store_complex2(dst.as_mut_ptr().add(base_out + m + l), y1_re, y1_im);
-                l += 2;
-            }
-
-            if l < m {
+            while l < m {
                 let a = src[base_in + l];
                 let b = if l == 0 {
                     src[base_in + l + stride]
@@ -179,35 +135,38 @@ pub unsafe fn stage_radix2_f64(
                 };
                 dst[base_out + l] = a + b;
                 dst[base_out + m + l] = a - b;
+                l += 1;
             }
         }
     }
 }
 
-#[target_feature(enable = "avx2,fma")]
-#[allow(unused_assignments)]
+/// AVX2/FMA radix-4 stage for one `Complex<f32>` FFT in interleaved (AoS)
+/// layout: raw loads/stores, no deinterleave shuffles.
+///
 /// # Safety
 ///
-/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must describe
-/// a radix-4 stage with `src.len() == dst.len() == 4 * stage_tw.m *
-/// stage_tw.s`, `stride == src.len() / 4`, and disjoint source/destination
-/// slices. The twiddle slices must contain the stage's complete `m` entries.
-pub unsafe fn stage_radix4_f64(
+/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must
+/// describe a radix-4 stage with `src.len() == dst.len() == 4 *
+/// stage_tw.m * stage_tw.s`, `stride == src.len() / 4`, and disjoint
+/// source/destination slices.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix4_f32_aos(
     stride: usize,
-    src: &[Complex<f64>],
-    dst: &mut [Complex<f64>],
-    stage_tw: &StageTwiddles<f64>,
-    dir_sign: f64,
+    src: &[Complex<f32>],
+    dst: &mut [Complex<f32>],
+    stage_tw: &StageTwiddles<f32>,
+    dir_sign: f32,
 ) {
     unsafe {
         stage_tw.debug_assert_stage_shape(4, stride, src.len(), dst.len());
         let m = stage_tw.m;
         let s = stage_tw.s;
         let m_new = m * 4;
-        let _dir_v = _mm256_set1_pd(dir_sign);
-        let _sign_flip = _mm256_set1_pd(-0.0);
-        let dir_v2 = _mm_set1_pd(dir_sign);
-        let sign_flip2 = _mm_set1_pd(-0.0);
+        // Turns (d.re, d.im) into (-d.im * dir, d.re * dir) after a swap.
+        let id_sign = _mm256_set_ps(
+            dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign,
+        );
         let tw1 = stage_tw.k_slice(1);
         let tw2 = stage_tw.k_slice(2);
         let tw3 = stage_tw.k_slice(3);
@@ -217,63 +176,40 @@ pub unsafe fn stage_radix4_f64(
             let base_out = g * m_new;
 
             let mut l = 0usize;
-            if l + 2 <= m {
-                let (mut tw1_re, mut tw1_im) = load_complex2(tw1.as_ptr().add(l));
-                let (mut tw2_re, mut tw2_im) = load_complex2(tw2.as_ptr().add(l));
-                let (mut tw3_re, mut tw3_im) = load_complex2(tw3.as_ptr().add(l));
-                loop {
-                    let (x0_re, x0_im) = load_complex2(src.as_ptr().add(base_in + l));
-                    let (x1_re, x1_im) = load_complex2(src.as_ptr().add(base_in + l + stride));
-                    let (x2_re, x2_im) = load_complex2(src.as_ptr().add(base_in + l + 2 * stride));
-                    let (x3_re, x3_im) = load_complex2(src.as_ptr().add(base_in + l + 3 * stride));
+            while l + 4 <= m {
+                let x0 = _mm256_loadu_ps(src.as_ptr().add(base_in + l) as *const f32);
+                let x1 = _mm256_loadu_ps(src.as_ptr().add(base_in + l + stride) as *const f32);
+                let x2 = _mm256_loadu_ps(src.as_ptr().add(base_in + l + 2 * stride) as *const f32);
+                let x3 = _mm256_loadu_ps(src.as_ptr().add(base_in + l + 3 * stride) as *const f32);
+                let x1 = cmul_aos_f32(x1, _mm256_loadu_ps(tw1.as_ptr().add(l) as *const f32));
+                let x2 = cmul_aos_f32(x2, _mm256_loadu_ps(tw2.as_ptr().add(l) as *const f32));
+                let x3 = cmul_aos_f32(x3, _mm256_loadu_ps(tw3.as_ptr().add(l) as *const f32));
 
-                    let (x1_re, x1_im) = cmul2(x1_re, x1_im, tw1_re, tw1_im);
-                    let (x2_re, x2_im) = cmul2(x2_re, x2_im, tw2_re, tw2_im);
-                    let (x3_re, x3_im) = cmul2(x3_re, x3_im, tw3_re, tw3_im);
+                let a = _mm256_add_ps(x0, x2);
+                let b = _mm256_sub_ps(x0, x2);
+                let c = _mm256_add_ps(x1, x3);
+                let d = _mm256_sub_ps(x1, x3);
+                let id = _mm256_mul_ps(_mm256_shuffle_ps(d, d, 0xB1), id_sign);
 
-                    let a_re = _mm_add_pd(x0_re, x2_re);
-                    let a_im = _mm_add_pd(x0_im, x2_im);
-                    let b_re = _mm_sub_pd(x0_re, x2_re);
-                    let b_im = _mm_sub_pd(x0_im, x2_im);
-                    let c_re = _mm_add_pd(x1_re, x3_re);
-                    let c_im = _mm_add_pd(x1_im, x3_im);
-                    let d_re = _mm_sub_pd(x1_re, x3_re);
-                    let d_im = _mm_sub_pd(x1_im, x3_im);
-
-                    let id_re = _mm_xor_pd(_mm_mul_pd(d_im, dir_v2), sign_flip2);
-                    let id_im = _mm_mul_pd(d_re, dir_v2);
-
-                    let y0_re = _mm_add_pd(a_re, c_re);
-                    let y0_im = _mm_add_pd(a_im, c_im);
-                    let y2_re = _mm_sub_pd(a_re, c_re);
-                    let y2_im = _mm_sub_pd(a_im, c_im);
-                    let y1_re = _mm_add_pd(b_re, id_re);
-                    let y1_im = _mm_add_pd(b_im, id_im);
-                    let y3_re = _mm_sub_pd(b_re, id_re);
-                    let y3_im = _mm_sub_pd(b_im, id_im);
-
-                    store_complex2(dst.as_mut_ptr().add(base_out + l), y0_re, y0_im);
-                    store_complex2(dst.as_mut_ptr().add(base_out + m + l), y1_re, y1_im);
-                    store_complex2(dst.as_mut_ptr().add(base_out + 2 * m + l), y2_re, y2_im);
-                    store_complex2(dst.as_mut_ptr().add(base_out + 3 * m + l), y3_re, y3_im);
-
-                    l += 2;
-                    if l + 2 > m {
-                        break;
-                    }
-                    let (tw1_re_next, tw1_im_next) = load_complex2(tw1.as_ptr().add(l));
-                    let (tw2_re_next, tw2_im_next) = load_complex2(tw2.as_ptr().add(l));
-                    let (tw3_re_next, tw3_im_next) = load_complex2(tw3.as_ptr().add(l));
-                    tw1_re = tw1_re_next;
-                    tw1_im = tw1_im_next;
-                    tw2_re = tw2_re_next;
-                    tw2_im = tw2_im_next;
-                    tw3_re = tw3_re_next;
-                    tw3_im = tw3_im_next;
-                }
+                _mm256_storeu_ps(
+                    dst.as_mut_ptr().add(base_out + l) as *mut f32,
+                    _mm256_add_ps(a, c),
+                );
+                _mm256_storeu_ps(
+                    dst.as_mut_ptr().add(base_out + m + l) as *mut f32,
+                    _mm256_add_ps(b, id),
+                );
+                _mm256_storeu_ps(
+                    dst.as_mut_ptr().add(base_out + 2 * m + l) as *mut f32,
+                    _mm256_sub_ps(a, c),
+                );
+                _mm256_storeu_ps(
+                    dst.as_mut_ptr().add(base_out + 3 * m + l) as *mut f32,
+                    _mm256_sub_ps(b, id),
+                );
+                l += 4;
             }
-
-            if l < m {
+            while l < m {
                 let x0 = src[base_in + l];
                 let (x1, x2, x3) = if l == 0 {
                     (
@@ -299,27 +235,394 @@ pub unsafe fn stage_radix4_f64(
                 dst[base_out + 3 * m + l] = b - id;
                 l += 1;
             }
-            if l < m {
+        }
+    }
+}
+
+/// AoS radix-8 butterfly over four interleaved `Complex<f32>` lanes, via
+/// the even/odd radix-4 decomposition (`Y[k] = E[k] + w8^k·O[k]`).
+#[inline]
+unsafe fn radix8_aos_f32(
+    x0: __m256,
+    x1: __m256,
+    x2: __m256,
+    x3: __m256,
+    x4: __m256,
+    x5: __m256,
+    x6: __m256,
+    x7: __m256,
+    id_sign: __m256,
+    dir_sign: f32,
+) -> (
+    __m256,
+    __m256,
+    __m256,
+    __m256,
+    __m256,
+    __m256,
+    __m256,
+    __m256,
+) {
+    unsafe {
+        let c = std::f32::consts::FRAC_1_SQRT_2;
+        let w81 = _mm256_set_ps(
+            dir_sign * c, c, dir_sign * c, c, dir_sign * c, c, dir_sign * c, c,
+        );
+        let w83 = _mm256_set_ps(
+            dir_sign * c, -c, dir_sign * c, -c, dir_sign * c, -c, dir_sign * c, -c,
+        );
+        let (e0, e1, e2, e3) = radix4_aos_f32(x0, x2, x4, x6, id_sign);
+        let (o0, o1, o2, o3) = radix4_aos_f32(x1, x3, x5, x7, id_sign);
+        let o1 = cmul_aos_f32(o1, w81);
+        let o2 = _mm256_mul_ps(_mm256_shuffle_ps(o2, o2, 0xB1), id_sign);
+        let o3 = cmul_aos_f32(o3, w83);
+        (
+            _mm256_add_ps(e0, o0),
+            _mm256_add_ps(e1, o1),
+            _mm256_add_ps(e2, o2),
+            _mm256_add_ps(e3, o3),
+            _mm256_sub_ps(e0, o0),
+            _mm256_sub_ps(e1, o1),
+            _mm256_sub_ps(e2, o2),
+            _mm256_sub_ps(e3, o3),
+        )
+    }
+}
+
+/// AVX2/FMA radix-8 stage for one `Complex<f32>` FFT in interleaved (AoS)
+/// layout.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must
+/// describe a radix-8 stage with `src.len() == dst.len() == 8 *
+/// stage_tw.m * stage_tw.s`, `stride == src.len() / 8`, and disjoint
+/// source/destination slices.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix8_f32_aos(
+    stride: usize,
+    src: &[Complex<f32>],
+    dst: &mut [Complex<f32>],
+    stage_tw: &StageTwiddles<f32>,
+    dir_sign: f32,
+) {
+    unsafe {
+        stage_tw.debug_assert_stage_shape(8, stride, src.len(), dst.len());
+        let m = stage_tw.m;
+        let s = stage_tw.s;
+        let m_new = m * 8;
+        let id_sign = _mm256_set_ps(
+            dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign,
+        );
+        let tw1 = stage_tw.k_slice(1);
+        let tw2 = stage_tw.k_slice(2);
+        let tw3 = stage_tw.k_slice(3);
+        let tw4 = stage_tw.k_slice(4);
+        let tw5 = stage_tw.k_slice(5);
+        let tw6 = stage_tw.k_slice(6);
+        let tw7 = stage_tw.k_slice(7);
+        let src_ptr = src.as_ptr();
+        let dst_ptr = dst.as_mut_ptr();
+
+        for g in 0..s {
+            let base_in = g * m;
+            let base_out = g * m_new;
+
+            let mut l = 0usize;
+            while l + 4 <= m {
+                let x0 = _mm256_loadu_ps(src_ptr.add(base_in + l) as *const f32);
+                let x1 = _mm256_loadu_ps(src_ptr.add(base_in + l + stride) as *const f32);
+                let x2 = _mm256_loadu_ps(src_ptr.add(base_in + l + 2 * stride) as *const f32);
+                let x3 = _mm256_loadu_ps(src_ptr.add(base_in + l + 3 * stride) as *const f32);
+                let x4 = _mm256_loadu_ps(src_ptr.add(base_in + l + 4 * stride) as *const f32);
+                let x5 = _mm256_loadu_ps(src_ptr.add(base_in + l + 5 * stride) as *const f32);
+                let x6 = _mm256_loadu_ps(src_ptr.add(base_in + l + 6 * stride) as *const f32);
+                let x7 = _mm256_loadu_ps(src_ptr.add(base_in + l + 7 * stride) as *const f32);
+                let x1 = cmul_aos_f32(x1, _mm256_loadu_ps(tw1.as_ptr().add(l) as *const f32));
+                let x2 = cmul_aos_f32(x2, _mm256_loadu_ps(tw2.as_ptr().add(l) as *const f32));
+                let x3 = cmul_aos_f32(x3, _mm256_loadu_ps(tw3.as_ptr().add(l) as *const f32));
+                let x4 = cmul_aos_f32(x4, _mm256_loadu_ps(tw4.as_ptr().add(l) as *const f32));
+                let x5 = cmul_aos_f32(x5, _mm256_loadu_ps(tw5.as_ptr().add(l) as *const f32));
+                let x6 = cmul_aos_f32(x6, _mm256_loadu_ps(tw6.as_ptr().add(l) as *const f32));
+                let x7 = cmul_aos_f32(x7, _mm256_loadu_ps(tw7.as_ptr().add(l) as *const f32));
+                let (y0, y1, y2, y3, y4, y5, y6, y7) =
+                    radix8_aos_f32(x0, x1, x2, x3, x4, x5, x6, x7, id_sign, dir_sign);
+                _mm256_storeu_ps(dst_ptr.add(base_out + l) as *mut f32, y0);
+                _mm256_storeu_ps(dst_ptr.add(base_out + m + l) as *mut f32, y1);
+                _mm256_storeu_ps(dst_ptr.add(base_out + 2 * m + l) as *mut f32, y2);
+                _mm256_storeu_ps(dst_ptr.add(base_out + 3 * m + l) as *mut f32, y3);
+                _mm256_storeu_ps(dst_ptr.add(base_out + 4 * m + l) as *mut f32, y4);
+                _mm256_storeu_ps(dst_ptr.add(base_out + 5 * m + l) as *mut f32, y5);
+                _mm256_storeu_ps(dst_ptr.add(base_out + 6 * m + l) as *mut f32, y6);
+                _mm256_storeu_ps(dst_ptr.add(base_out + 7 * m + l) as *mut f32, y7);
+                l += 4;
+            }
+            while l < m {
                 let x0 = src[base_in + l];
-                let x1 = src[base_in + l + stride] * tw1[l];
-                let x2 = src[base_in + l + 2 * stride] * tw2[l];
-                let x3 = src[base_in + l + 3 * stride] * tw3[l];
-                let a = x0 + x2;
-                let b = x0 - x2;
-                let c = x1 + x3;
-                let d = x1 - x3;
-                let id = Complex::new(-d.im * dir_sign, d.re * dir_sign);
-                dst[base_out + l] = a + c;
-                dst[base_out + m + l] = b + id;
-                dst[base_out + 2 * m + l] = a - c;
-                dst[base_out + 3 * m + l] = b - id;
+                let (x1, x2, x3, x4, x5, x6, x7) = if l == 0 {
+                    (
+                        src[base_in + l + stride],
+                        src[base_in + l + 2 * stride],
+                        src[base_in + l + 3 * stride],
+                        src[base_in + l + 4 * stride],
+                        src[base_in + l + 5 * stride],
+                        src[base_in + l + 6 * stride],
+                        src[base_in + l + 7 * stride],
+                    )
+                } else {
+                    (
+                        src[base_in + l + stride] * tw1[l],
+                        src[base_in + l + 2 * stride] * tw2[l],
+                        src[base_in + l + 3 * stride] * tw3[l],
+                        src[base_in + l + 4 * stride] * tw4[l],
+                        src[base_in + l + 5 * stride] * tw5[l],
+                        src[base_in + l + 6 * stride] * tw6[l],
+                        src[base_in + l + 7 * stride] * tw7[l],
+                    )
+                };
+                let (y0, y1, y2, y3, y4, y5, y6, y7) = crate::codelets::scalar::radix8(
+                    x0, x1, x2, x3, x4, x5, x6, x7, dir_sign,
+                );
+                dst[base_out + l] = y0;
+                dst[base_out + m + l] = y1;
+                dst[base_out + 2 * m + l] = y2;
+                dst[base_out + 3 * m + l] = y3;
+                dst[base_out + 4 * m + l] = y4;
+                dst[base_out + 5 * m + l] = y5;
+                dst[base_out + 6 * m + l] = y6;
+                dst[base_out + 7 * m + l] = y7;
                 l += 1;
             }
-            if l < m {
+        }
+    }
+}
+
+/// AVX2/FMA radix-8 first stage (`m == 1`, twiddle-free) for one
+/// `Complex<f32>` FFT in interleaved (AoS) layout, vectorised over groups.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must
+/// describe a radix-8 stage with `stage_tw.m == 1` and
+/// `src.len() == dst.len() == 8 * stage_tw.s`, and source/destination
+/// slices must be disjoint.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix8_f32_m1(
+    src: &[Complex<f32>],
+    dst: &mut [Complex<f32>],
+    stage_tw: &StageTwiddles<f32>,
+    dir_sign: f32,
+) {
+    unsafe {
+        debug_assert_eq!(stage_tw.m, 1);
+        debug_assert_eq!(stage_tw.radix, 8);
+        let s = stage_tw.s;
+        let stride = s;
+        let id_sign = _mm256_set_ps(
+            dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign,
+        );
+        let src_ptr = src.as_ptr();
+
+        let mut g = 0usize;
+        while g + 4 <= s {
+            let x0 = _mm256_loadu_ps(src_ptr.add(g) as *const f32);
+            let x1 = _mm256_loadu_ps(src_ptr.add(g + stride) as *const f32);
+            let x2 = _mm256_loadu_ps(src_ptr.add(g + 2 * stride) as *const f32);
+            let x3 = _mm256_loadu_ps(src_ptr.add(g + 3 * stride) as *const f32);
+            let x4 = _mm256_loadu_ps(src_ptr.add(g + 4 * stride) as *const f32);
+            let x5 = _mm256_loadu_ps(src_ptr.add(g + 5 * stride) as *const f32);
+            let x6 = _mm256_loadu_ps(src_ptr.add(g + 6 * stride) as *const f32);
+            let x7 = _mm256_loadu_ps(src_ptr.add(g + 7 * stride) as *const f32);
+            let (y0, y1, y2, y3, y4, y5, y6, y7) =
+                radix8_aos_f32(x0, x1, x2, x3, x4, x5, x6, x7, id_sign, dir_sign);
+            // Each y holds groups g..g+4 for one output k; scatter one
+            // complex per group, eight elements apart.
+            for (k, y) in [y0, y1, y2, y3, y4, y5, y6, y7].iter().enumerate() {
+                let mut tmp = [0.0f32; 8];
+                _mm256_storeu_ps(tmp.as_mut_ptr(), *y);
+                dst[8 * g + k] = Complex::new(tmp[0], tmp[1]);
+                dst[8 * (g + 1) + k] = Complex::new(tmp[2], tmp[3]);
+                dst[8 * (g + 2) + k] = Complex::new(tmp[4], tmp[5]);
+                dst[8 * (g + 3) + k] = Complex::new(tmp[6], tmp[7]);
+            }
+            g += 4;
+        }
+        while g < s {
+            let ys = crate::codelets::scalar::radix8(
+                src[g],
+                src[g + stride],
+                src[g + 2 * stride],
+                src[g + 3 * stride],
+                src[g + 4 * stride],
+                src[g + 5 * stride],
+                src[g + 6 * stride],
+                src[g + 7 * stride],
+                dir_sign,
+            );
+            dst[8 * g] = ys.0;
+            dst[8 * g + 1] = ys.1;
+            dst[8 * g + 2] = ys.2;
+            dst[8 * g + 3] = ys.3;
+            dst[8 * g + 4] = ys.4;
+            dst[8 * g + 5] = ys.5;
+            dst[8 * g + 6] = ys.6;
+            dst[8 * g + 7] = ys.7;
+            g += 1;
+        }
+    }
+}
+
+/// AoS complex multiply for two interleaved `Complex<f64>` lanes.
+#[inline]
+unsafe fn cmul_aos_f64(a: __m256d, b: __m256d) -> __m256d {
+    unsafe {
+        let a_re = _mm256_shuffle_pd(a, a, 0x00);
+        let a_im = _mm256_shuffle_pd(a, a, 0x0F);
+        let b_swap = _mm256_shuffle_pd(b, b, 0x05);
+        let p1 = _mm256_mul_pd(a_re, b);
+        let p2 = _mm256_mul_pd(a_im, b_swap);
+        _mm256_addsub_pd(p1, p2)
+    }
+}
+
+/// AVX2/FMA radix-2 stage for one `Complex<f64>` FFT in interleaved (AoS)
+/// layout: raw loads/stores, no deinterleave shuffles.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must
+/// describe a radix-2 stage with `src.len() == dst.len() == 2 *
+/// stage_tw.m * stage_tw.s`, `stride == src.len() / 2`, and disjoint
+/// source/destination slices.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix2_f64_aos(
+    stride: usize,
+    src: &[Complex<f64>],
+    dst: &mut [Complex<f64>],
+    stage_tw: &StageTwiddles<f64>,
+) {
+    unsafe {
+        stage_tw.debug_assert_stage_shape(2, stride, src.len(), dst.len());
+        let m = stage_tw.m;
+        let s = stage_tw.s;
+        let m_new = m * 2;
+        let tw1 = stage_tw.k_slice(1);
+
+        for g in 0..s {
+            let base_in = g * m;
+            let base_out = g * m_new;
+
+            let mut l = 0usize;
+            while l + 2 <= m {
+                let a = _mm256_loadu_pd(src.as_ptr().add(base_in + l) as *const f64);
+                let b = _mm256_loadu_pd(src.as_ptr().add(base_in + l + stride) as *const f64);
+                let tw = _mm256_loadu_pd(tw1.as_ptr().add(l) as *const f64);
+                let b = cmul_aos_f64(b, tw);
+                _mm256_storeu_pd(
+                    dst.as_mut_ptr().add(base_out + l) as *mut f64,
+                    _mm256_add_pd(a, b),
+                );
+                _mm256_storeu_pd(
+                    dst.as_mut_ptr().add(base_out + m + l) as *mut f64,
+                    _mm256_sub_pd(a, b),
+                );
+                l += 2;
+            }
+            while l < m {
+                let a = src[base_in + l];
+                let b = if l == 0 {
+                    src[base_in + l + stride]
+                } else {
+                    src[base_in + l + stride] * tw1[l]
+                };
+                dst[base_out + l] = a + b;
+                dst[base_out + m + l] = a - b;
+                l += 1;
+            }
+        }
+    }
+}
+
+/// AVX2/FMA radix-4 stage for one `Complex<f64>` FFT in interleaved (AoS)
+/// layout: raw loads/stores, no deinterleave shuffles.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must
+/// describe a radix-4 stage with `src.len() == dst.len() == 4 *
+/// stage_tw.m * stage_tw.s`, `stride == src.len() / 4`, and disjoint
+/// source/destination slices.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix4_f64_aos(
+    stride: usize,
+    src: &[Complex<f64>],
+    dst: &mut [Complex<f64>],
+    stage_tw: &StageTwiddles<f64>,
+    dir_sign: f64,
+) {
+    unsafe {
+        stage_tw.debug_assert_stage_shape(4, stride, src.len(), dst.len());
+        let m = stage_tw.m;
+        let s = stage_tw.s;
+        let m_new = m * 4;
+        let id_sign = _mm256_set_pd(dir_sign, -dir_sign, dir_sign, -dir_sign);
+        let tw1 = stage_tw.k_slice(1);
+        let tw2 = stage_tw.k_slice(2);
+        let tw3 = stage_tw.k_slice(3);
+
+        for g in 0..s {
+            let base_in = g * m;
+            let base_out = g * m_new;
+
+            let mut l = 0usize;
+            while l + 2 <= m {
+                let x0 = _mm256_loadu_pd(src.as_ptr().add(base_in + l) as *const f64);
+                let x1 = _mm256_loadu_pd(src.as_ptr().add(base_in + l + stride) as *const f64);
+                let x2 = _mm256_loadu_pd(src.as_ptr().add(base_in + l + 2 * stride) as *const f64);
+                let x3 = _mm256_loadu_pd(src.as_ptr().add(base_in + l + 3 * stride) as *const f64);
+                let x1 = cmul_aos_f64(x1, _mm256_loadu_pd(tw1.as_ptr().add(l) as *const f64));
+                let x2 = cmul_aos_f64(x2, _mm256_loadu_pd(tw2.as_ptr().add(l) as *const f64));
+                let x3 = cmul_aos_f64(x3, _mm256_loadu_pd(tw3.as_ptr().add(l) as *const f64));
+
+                let a = _mm256_add_pd(x0, x2);
+                let b = _mm256_sub_pd(x0, x2);
+                let c = _mm256_add_pd(x1, x3);
+                let d = _mm256_sub_pd(x1, x3);
+                let id = _mm256_mul_pd(_mm256_shuffle_pd(d, d, 0x05), id_sign);
+
+                _mm256_storeu_pd(
+                    dst.as_mut_ptr().add(base_out + l) as *mut f64,
+                    _mm256_add_pd(a, c),
+                );
+                _mm256_storeu_pd(
+                    dst.as_mut_ptr().add(base_out + m + l) as *mut f64,
+                    _mm256_add_pd(b, id),
+                );
+                _mm256_storeu_pd(
+                    dst.as_mut_ptr().add(base_out + 2 * m + l) as *mut f64,
+                    _mm256_sub_pd(a, c),
+                );
+                _mm256_storeu_pd(
+                    dst.as_mut_ptr().add(base_out + 3 * m + l) as *mut f64,
+                    _mm256_sub_pd(b, id),
+                );
+                l += 2;
+            }
+            while l < m {
                 let x0 = src[base_in + l];
-                let x1 = src[base_in + l + stride] * tw1[l];
-                let x2 = src[base_in + l + 2 * stride] * tw2[l];
-                let x3 = src[base_in + l + 3 * stride] * tw3[l];
+                let (x1, x2, x3) = if l == 0 {
+                    (
+                        src[base_in + l + stride],
+                        src[base_in + l + 2 * stride],
+                        src[base_in + l + 3 * stride],
+                    )
+                } else {
+                    (
+                        src[base_in + l + stride] * tw1[l],
+                        src[base_in + l + 2 * stride] * tw2[l],
+                        src[base_in + l + 3 * stride] * tw3[l],
+                    )
+                };
                 let a = x0 + x2;
                 let b = x0 - x2;
                 let c = x1 + x3;
@@ -335,14 +638,198 @@ pub unsafe fn stage_radix4_f64(
     }
 }
 
+/// AoS radix-8 butterfly over two interleaved `Complex<f64>` lanes, via
+/// the even/odd radix-4 decomposition (`Y[k] = E[k] + w8^k·O[k]`).
+#[inline]
+unsafe fn radix8_aos_f64(
+    x0: __m256d,
+    x1: __m256d,
+    x2: __m256d,
+    x3: __m256d,
+    x4: __m256d,
+    x5: __m256d,
+    x6: __m256d,
+    x7: __m256d,
+    id_sign: __m256d,
+    dir_sign: f64,
+) -> (
+    __m256d,
+    __m256d,
+    __m256d,
+    __m256d,
+    __m256d,
+    __m256d,
+    __m256d,
+    __m256d,
+) {
+    unsafe {
+        let c = std::f64::consts::FRAC_1_SQRT_2;
+        let w81 = _mm256_set_pd(dir_sign * c, c, dir_sign * c, c);
+        let w83 = _mm256_set_pd(dir_sign * c, -c, dir_sign * c, -c);
+        let (e0, e1, e2, e3) = radix4_aos_f64(x0, x2, x4, x6, id_sign);
+        let (o0, o1, o2, o3) = radix4_aos_f64(x1, x3, x5, x7, id_sign);
+        let o1 = cmul_aos_f64(o1, w81);
+        let o2 = _mm256_mul_pd(_mm256_shuffle_pd(o2, o2, 0x05), id_sign);
+        let o3 = cmul_aos_f64(o3, w83);
+        (
+            _mm256_add_pd(e0, o0),
+            _mm256_add_pd(e1, o1),
+            _mm256_add_pd(e2, o2),
+            _mm256_add_pd(e3, o3),
+            _mm256_sub_pd(e0, o0),
+            _mm256_sub_pd(e1, o1),
+            _mm256_sub_pd(e2, o2),
+            _mm256_sub_pd(e3, o3),
+        )
+    }
+}
+
+/// AVX2/FMA radix-8 stage for one `Complex<f64>` FFT in interleaved (AoS)
+/// layout.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must
+/// describe a radix-8 stage with `src.len() == dst.len() == 8 *
+/// stage_tw.m * stage_tw.s`, `stride == src.len() / 8`, and disjoint
+/// source/destination slices.
 #[target_feature(enable = "avx2,fma")]
-#[allow(unused_assignments)]
+pub unsafe fn stage_radix8_f64_aos(
+    stride: usize,
+    src: &[Complex<f64>],
+    dst: &mut [Complex<f64>],
+    stage_tw: &StageTwiddles<f64>,
+    dir_sign: f64,
+) {
+    unsafe {
+        stage_tw.debug_assert_stage_shape(8, stride, src.len(), dst.len());
+        let m = stage_tw.m;
+        let s = stage_tw.s;
+        let m_new = m * 8;
+        let id_sign = _mm256_set_pd(dir_sign, -dir_sign, dir_sign, -dir_sign);
+        let tw = [
+            stage_tw.k_slice(1),
+            stage_tw.k_slice(2),
+            stage_tw.k_slice(3),
+            stage_tw.k_slice(4),
+            stage_tw.k_slice(5),
+            stage_tw.k_slice(6),
+            stage_tw.k_slice(7),
+        ];
+
+        for g in 0..s {
+            let base_in = g * m;
+            let base_out = g * m_new;
+
+            let mut l = 0usize;
+            while l + 2 <= m {
+                let mut x = [_mm256_setzero_pd(); 8];
+                for (k, xk) in x.iter_mut().enumerate() {
+                    *xk = _mm256_loadu_pd(src.as_ptr().add(base_in + l + k * stride) as *const f64);
+                }
+                for (xk, twk) in x.iter_mut().skip(1).zip(tw.iter()) {
+                    *xk = cmul_aos_f64(*xk, _mm256_loadu_pd(twk.as_ptr().add(l) as *const f64));
+                }
+                let y = radix8_aos_f64(x, id_sign, dir_sign);
+                for (k, yk) in y.iter().enumerate() {
+                    _mm256_storeu_pd(dst.as_mut_ptr().add(base_out + k * m + l) as *mut f64, *yk);
+                }
+                l += 2;
+            }
+            while l < m {
+                let mut x = [src[base_in + l]; 8];
+                for k in 1..8 {
+                    x[k] = if l == 0 {
+                        src[base_in + l + k * stride]
+                    } else {
+                        src[base_in + l + k * stride] * tw[k - 1][l]
+                    };
+                }
+                let (y0, y1, y2, y3, y4, y5, y6, y7) = crate::codelets::scalar::radix8(
+                    x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], dir_sign,
+                );
+                dst[base_out + l] = y0;
+                dst[base_out + m + l] = y1;
+                dst[base_out + 2 * m + l] = y2;
+                dst[base_out + 3 * m + l] = y3;
+                dst[base_out + 4 * m + l] = y4;
+                dst[base_out + 5 * m + l] = y5;
+                dst[base_out + 6 * m + l] = y6;
+                dst[base_out + 7 * m + l] = y7;
+                l += 1;
+            }
+        }
+    }
+}
+
+/// AVX2/FMA radix-8 first stage (`m == 1`, twiddle-free) for one
+/// `Complex<f64>` FFT in interleaved (AoS) layout, vectorised over groups.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must
+/// describe a radix-8 stage with `stage_tw.m == 1` and
+/// `src.len() == dst.len() == 8 * stage_tw.s`, and source/destination
+/// slices must be disjoint.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix8_f64_m1(
+    src: &[Complex<f64>],
+    dst: &mut [Complex<f64>],
+    stage_tw: &StageTwiddles<f64>,
+    dir_sign: f64,
+) {
+    unsafe {
+        debug_assert_eq!(stage_tw.m, 1);
+        debug_assert_eq!(stage_tw.radix, 8);
+        let s = stage_tw.s;
+        let stride = s;
+        let id_sign = _mm256_set_pd(dir_sign, -dir_sign, dir_sign, -dir_sign);
+        let base = dst.as_mut_ptr();
+
+        let mut g = 0usize;
+        while g + 2 <= s {
+            let mut x = [_mm256_setzero_pd(); 8];
+            for (k, xk) in x.iter_mut().enumerate() {
+                *xk = _mm256_loadu_pd(src.as_ptr().add(g + k * stride) as *const f64);
+            }
+            let y = radix8_aos_f64(x, id_sign, dir_sign);
+            // y[k] holds groups (g, g+1) for output k, stored eight apart.
+            for (k, yk) in y.iter().enumerate() {
+                _mm_storeu_pd(base.add(8 * g + k) as *mut f64, _mm256_castpd256_pd128(*yk));
+                _mm_storeu_pd(
+                    base.add(8 * (g + 1) + k) as *mut f64,
+                    _mm256_extractf128_pd(*yk, 1),
+                );
+            }
+            g += 2;
+        }
+        while g < s {
+            let mut x = [src[g]; 8];
+            for k in 1..8 {
+                x[k] = src[g + k * stride];
+            }
+            let ys = crate::codelets::scalar::radix8(
+                x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], dir_sign,
+            );
+            let out = [ys.0, ys.1, ys.2, ys.3, ys.4, ys.5, ys.6, ys.7];
+            for k in 0..8 {
+                dst[8 * g + k] = out[k];
+            }
+            g += 1;
+        }
+    }
+}
+
+/// AVX2/FMA radix-4 last-stage (`s == 1`) for one `Complex<f64>` FFT in
+/// interleaved (AoS) layout.
+///
 /// # Safety
 ///
 /// The caller must provide AVX2 and FMA at runtime. `stage_tw.s` must equal
-/// one, `src.len() == dst.len() == 4 * stage_tw.m`, and source and destination
-/// slices must be disjoint. The stage twiddle slices must contain `m` entries.
-pub unsafe fn stage_radix4_f64_s1(
+/// one, `src.len() == dst.len() == 4 * stage_tw.m`, and source and
+/// destination slices must be disjoint.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix4_f64_s1_aos(
     src: &[Complex<f64>],
     dst: &mut [Complex<f64>],
     stage_tw: &StageTwiddles<f64>,
@@ -351,70 +838,43 @@ pub unsafe fn stage_radix4_f64_s1(
     unsafe {
         let m = stage_tw.m;
         debug_assert_eq!(stage_tw.s, 1);
-        let dir_v2 = _mm_set1_pd(dir_sign);
-        let sign_flip2 = _mm_set1_pd(-0.0);
+        let id_sign = _mm256_set_pd(dir_sign, -dir_sign, dir_sign, -dir_sign);
         let tw1 = stage_tw.k_slice(1);
         let tw2 = stage_tw.k_slice(2);
         let tw3 = stage_tw.k_slice(3);
 
         let mut l = 0usize;
-        if l + 2 <= m {
-            let (mut tw1_re, mut tw1_im) = load_complex2(tw1.as_ptr().add(l));
-            let (mut tw2_re, mut tw2_im) = load_complex2(tw2.as_ptr().add(l));
-            let (mut tw3_re, mut tw3_im) = load_complex2(tw3.as_ptr().add(l));
-            loop {
-                let (x0_re, x0_im) = load_complex2(src.as_ptr().add(l));
-                let (x1_re, x1_im) = load_complex2(src.as_ptr().add(l + m));
-                let (x2_re, x2_im) = load_complex2(src.as_ptr().add(l + 2 * m));
-                let (x3_re, x3_im) = load_complex2(src.as_ptr().add(l + 3 * m));
+        while l + 2 <= m {
+            let x0 = _mm256_loadu_pd(src.as_ptr().add(l) as *const f64);
+            let x1 = _mm256_loadu_pd(src.as_ptr().add(l + m) as *const f64);
+            let x2 = _mm256_loadu_pd(src.as_ptr().add(l + 2 * m) as *const f64);
+            let x3 = _mm256_loadu_pd(src.as_ptr().add(l + 3 * m) as *const f64);
+            let x1 = cmul_aos_f64(x1, _mm256_loadu_pd(tw1.as_ptr().add(l) as *const f64));
+            let x2 = cmul_aos_f64(x2, _mm256_loadu_pd(tw2.as_ptr().add(l) as *const f64));
+            let x3 = cmul_aos_f64(x3, _mm256_loadu_pd(tw3.as_ptr().add(l) as *const f64));
 
-                let (x1_re, x1_im) = cmul2(x1_re, x1_im, tw1_re, tw1_im);
-                let (x2_re, x2_im) = cmul2(x2_re, x2_im, tw2_re, tw2_im);
-                let (x3_re, x3_im) = cmul2(x3_re, x3_im, tw3_re, tw3_im);
+            let a = _mm256_add_pd(x0, x2);
+            let b = _mm256_sub_pd(x0, x2);
+            let c = _mm256_add_pd(x1, x3);
+            let d = _mm256_sub_pd(x1, x3);
+            let id = _mm256_mul_pd(_mm256_shuffle_pd(d, d, 0x05), id_sign);
 
-                let a_re = _mm_add_pd(x0_re, x2_re);
-                let a_im = _mm_add_pd(x0_im, x2_im);
-                let b_re = _mm_sub_pd(x0_re, x2_re);
-                let b_im = _mm_sub_pd(x0_im, x2_im);
-                let c_re = _mm_add_pd(x1_re, x3_re);
-                let c_im = _mm_add_pd(x1_im, x3_im);
-                let d_re = _mm_sub_pd(x1_re, x3_re);
-                let d_im = _mm_sub_pd(x1_im, x3_im);
-
-                let id_re = _mm_xor_pd(_mm_mul_pd(d_im, dir_v2), sign_flip2);
-                let id_im = _mm_mul_pd(d_re, dir_v2);
-
-                let y0_re = _mm_add_pd(a_re, c_re);
-                let y0_im = _mm_add_pd(a_im, c_im);
-                let y2_re = _mm_sub_pd(a_re, c_re);
-                let y2_im = _mm_sub_pd(a_im, c_im);
-                let y1_re = _mm_add_pd(b_re, id_re);
-                let y1_im = _mm_add_pd(b_im, id_im);
-                let y3_re = _mm_sub_pd(b_re, id_re);
-                let y3_im = _mm_sub_pd(b_im, id_im);
-
-                store_complex2(dst.as_mut_ptr().add(l), y0_re, y0_im);
-                store_complex2(dst.as_mut_ptr().add(m + l), y1_re, y1_im);
-                store_complex2(dst.as_mut_ptr().add(2 * m + l), y2_re, y2_im);
-                store_complex2(dst.as_mut_ptr().add(3 * m + l), y3_re, y3_im);
-
-                l += 2;
-                if l + 2 > m {
-                    break;
-                }
-                let (tw1_re_next, tw1_im_next) = load_complex2(tw1.as_ptr().add(l));
-                let (tw2_re_next, tw2_im_next) = load_complex2(tw2.as_ptr().add(l));
-                let (tw3_re_next, tw3_im_next) = load_complex2(tw3.as_ptr().add(l));
-                tw1_re = tw1_re_next;
-                tw1_im = tw1_im_next;
-                tw2_re = tw2_re_next;
-                tw2_im = tw2_im_next;
-                tw3_re = tw3_re_next;
-                tw3_im = tw3_im_next;
-            }
+            _mm256_storeu_pd(dst.as_mut_ptr().add(l) as *mut f64, _mm256_add_pd(a, c));
+            _mm256_storeu_pd(
+                dst.as_mut_ptr().add(m + l) as *mut f64,
+                _mm256_add_pd(b, id),
+            );
+            _mm256_storeu_pd(
+                dst.as_mut_ptr().add(2 * m + l) as *mut f64,
+                _mm256_sub_pd(a, c),
+            );
+            _mm256_storeu_pd(
+                dst.as_mut_ptr().add(3 * m + l) as *mut f64,
+                _mm256_sub_pd(b, id),
+            );
+            l += 2;
         }
-
-        if l < m {
+        while l < m {
             let x0 = src[l];
             let (x1, x2, x3) = if l == 0 {
                 (src[l + m], src[l + 2 * m], src[l + 3 * m])
@@ -436,37 +896,762 @@ pub unsafe fn stage_radix4_f64_s1(
             dst[3 * m + l] = b - id;
             l += 1;
         }
-        if l < m {
-            let x0 = src[l];
-            let x1 = src[l + m] * tw1[l];
-            let x2 = src[l + 2 * m] * tw2[l];
-            let x3 = src[l + 3 * m] * tw3[l];
-            let a = x0 + x2;
-            let b = x0 - x2;
-            let c = x1 + x3;
-            let d = x1 - x3;
-            let id = Complex::new(-d.im * dir_sign, d.re * dir_sign);
-            dst[l] = a + c;
-            dst[m + l] = b + id;
-            dst[2 * m + l] = a - c;
-            dst[3 * m + l] = b - id;
+    }
+}
+
+/// AoS radix-4 butterfly over two interleaved `Complex<f64>` lanes.
+#[inline]
+unsafe fn radix4_aos_f64(
+    x0: __m256d,
+    x1: __m256d,
+    x2: __m256d,
+    x3: __m256d,
+    id_sign: __m256d,
+) -> (__m256d, __m256d, __m256d, __m256d) {
+    unsafe {
+        let a = _mm256_add_pd(x0, x2);
+        let b = _mm256_sub_pd(x0, x2);
+        let c = _mm256_add_pd(x1, x3);
+        let d = _mm256_sub_pd(x1, x3);
+        let id = _mm256_mul_pd(_mm256_shuffle_pd(d, d, 0x05), id_sign);
+        (
+            _mm256_add_pd(a, c),
+            _mm256_add_pd(b, id),
+            _mm256_sub_pd(a, c),
+            _mm256_sub_pd(b, id),
+        )
+    }
+}
+
+/// AVX2/FMA fused final pair: a radix-4 stage (`stage_a`, two or four
+/// groups) followed by the closing radix-2/radix-4 stage (`stage_b`,
+/// `s == 1`), executed in place on `buffer`. Mathematically identical to
+/// running the two Stockham stages back to back; the intermediate values
+/// never leave registers.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `buffer.len()` must
+/// equal `4 * stage_a.m * stage_a.s`, `stage_b` must be the Stockham
+/// successor of `stage_a`, and `stage_a.radix == 4`.
+#[allow(clippy::needless_range_loop)]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn fused_final_pair_f64_core(
+    src: *const Complex<f64>,
+    dst: *mut Complex<f64>,
+    stage_a: &StageTwiddles<f64>,
+    stage_b: &StageTwiddles<f64>,
+    dir_sign: f64,
+) {
+    unsafe {
+        let m_a = stage_a.m;
+        let s_a = stage_a.s;
+        let n = 4 * m_a * s_a;
+        debug_assert_eq!(stage_a.radix, 4);
+        debug_assert_eq!(n, 4 * m_a * s_a);
+        debug_assert_eq!(stage_b.s, 1);
+        let stride = n / 4;
+        let id_sign = _mm256_set_pd(dir_sign, -dir_sign, dir_sign, -dir_sign);
+        let tw_a1 = stage_a.k_slice(1);
+        let tw_a2 = stage_a.k_slice(2);
+        let tw_a3 = stage_a.k_slice(3);
+
+        let mut l = 0usize;
+        while l + 2 <= m_a {
+            // Stage-A points for each group a, vectorised over (l, l+1).
+            let mut p = [[_mm256_setzero_pd(); 4]; 4];
+            for (a, point) in p.iter_mut().enumerate().take(s_a) {
+                let off = a * m_a + l;
+                let x0 = _mm256_loadu_pd(src.add(off) as *const f64);
+                let x1 = _mm256_loadu_pd(src.add(off + stride) as *const f64);
+                let x2 = _mm256_loadu_pd(src.add(off + 2 * stride) as *const f64);
+                let x3 = _mm256_loadu_pd(src.add(off + 3 * stride) as *const f64);
+                let x1 = cmul_aos_f64(x1, _mm256_loadu_pd(tw_a1.as_ptr().add(l) as *const f64));
+                let x2 = cmul_aos_f64(x2, _mm256_loadu_pd(tw_a2.as_ptr().add(l) as *const f64));
+                let x3 = cmul_aos_f64(x3, _mm256_loadu_pd(tw_a3.as_ptr().add(l) as *const f64));
+                let (y0, y1, y2, y3) = radix4_aos_f64(x0, x1, x2, x3, id_sign);
+                *point = [y0, y1, y2, y3];
+            }
+
+            if stage_b.radix == 4 {
+                let tw_b1 = stage_b.k_slice(1);
+                let tw_b2 = stage_b.k_slice(2);
+                let tw_b3 = stage_b.k_slice(3);
+                for c in 0..4 {
+                    let off = c * m_a + l;
+                    let x0 = p[0][c];
+                    let x1 = cmul_aos_f64(
+                        p[1][c],
+                        _mm256_loadu_pd(tw_b1.as_ptr().add(off) as *const f64),
+                    );
+                    let x2 = cmul_aos_f64(
+                        p[2][c],
+                        _mm256_loadu_pd(tw_b2.as_ptr().add(off) as *const f64),
+                    );
+                    let x3 = cmul_aos_f64(
+                        p[3][c],
+                        _mm256_loadu_pd(tw_b3.as_ptr().add(off) as *const f64),
+                    );
+                    let (y0, y1, y2, y3) = radix4_aos_f64(x0, x1, x2, x3, id_sign);
+                    _mm256_storeu_pd(dst.add(off) as *mut f64, y0);
+                    _mm256_storeu_pd(dst.add(off + 4 * m_a) as *mut f64, y1);
+                    _mm256_storeu_pd(dst.add(off + 8 * m_a) as *mut f64, y2);
+                    _mm256_storeu_pd(dst.add(off + 12 * m_a) as *mut f64, y3);
+                }
+            } else {
+                debug_assert_eq!(stage_b.radix, 2);
+                debug_assert_eq!(s_a, 2);
+                let tw_b = stage_b.k_slice(1);
+                for c in 0..4 {
+                    let off = c * m_a + l;
+                    let b = cmul_aos_f64(
+                        p[1][c],
+                        _mm256_loadu_pd(tw_b.as_ptr().add(off) as *const f64),
+                    );
+                    let a = p[0][c];
+                    _mm256_storeu_pd(dst.add(off) as *mut f64, _mm256_add_pd(a, b));
+                    _mm256_storeu_pd(dst.add(off + n / 2) as *mut f64, _mm256_sub_pd(a, b));
+                }
+            }
+            l += 2;
+        }
+        while l < m_a {
+            // Scalar tail: identical math on one lane.
+            let mut p = [[Complex::new(0.0, 0.0); 4]; 4];
+            for (a, point) in p.iter_mut().enumerate().take(s_a) {
+                let off = a * m_a + l;
+                let x0 = *src.add(off);
+                let x1 = *src.add(off + stride) * tw_a1[l];
+                let x2 = *src.add(off + 2 * stride) * tw_a2[l];
+                let x3 = *src.add(off + 3 * stride) * tw_a3[l];
+                let a_ = x0 + x2;
+                let b_ = x0 - x2;
+                let c_ = x1 + x3;
+                let d_ = x1 - x3;
+                let id = Complex::new(-d_.im * dir_sign, d_.re * dir_sign);
+                *point = [a_ + c_, b_ + id, a_ - c_, b_ - id];
+            }
+            if stage_b.radix == 4 {
+                let tw_b1 = stage_b.k_slice(1);
+                let tw_b2 = stage_b.k_slice(2);
+                let tw_b3 = stage_b.k_slice(3);
+                for c in 0..4 {
+                    let off = c * m_a + l;
+                    let x0 = p[0][c];
+                    let x1 = p[1][c] * tw_b1[off];
+                    let x2 = p[2][c] * tw_b2[off];
+                    let x3 = p[3][c] * tw_b3[off];
+                    let a_ = x0 + x2;
+                    let b_ = x0 - x2;
+                    let c_ = x1 + x3;
+                    let d_ = x1 - x3;
+                    let id = Complex::new(-d_.im * dir_sign, d_.re * dir_sign);
+                    *dst.add(off) = a_ + c_;
+                    *dst.add(off + 4 * m_a) = b_ + id;
+                    *dst.add(off + 8 * m_a) = a_ - c_;
+                    *dst.add(off + 12 * m_a) = b_ - id;
+                }
+            } else {
+                let tw_b = stage_b.k_slice(1);
+                for c in 0..4 {
+                    let off = c * m_a + l;
+                    let b = p[1][c] * tw_b[off];
+                    *dst.add(off) = p[0][c] + b;
+                    *dst.add(off + n / 2) = p[0][c] - b;
+                }
+            }
             l += 1;
         }
-        if l < m {
-            let x0 = src[l];
-            let x1 = src[l + m] * tw1[l];
-            let x2 = src[l + 2 * m] * tw2[l];
-            let x3 = src[l + 3 * m] * tw3[l];
+    }
+}
+
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn fused_final_pair_f64(
+    buffer: &mut [Complex<f64>],
+    stage_a: &StageTwiddles<f64>,
+    stage_b: &StageTwiddles<f64>,
+    dir_sign: f64,
+) {
+    unsafe {
+        fused_final_pair_f64_core(
+            buffer.as_ptr(),
+            buffer.as_mut_ptr(),
+            stage_a,
+            stage_b,
+            dir_sign,
+        );
+    }
+}
+
+
+/// AVX2/FMA fused first pair: the `m == 1` radix-4 stage plus its radix-4
+/// successor (`m == 4`), out of place. Mathematically identical to running
+/// the two Stockham stages back to back.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `stage0` must describe
+/// a radix-4 stage with `m == 1`, `stage1` its radix-4 successor with
+/// `m == 4`, and source/destination slices must be disjoint with equal
+/// length `4 * stage0.s`.
+#[allow(clippy::needless_range_loop)]
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn fused_first2_f64(
+    src: &[Complex<f64>],
+    dst: &mut [Complex<f64>],
+    stage0: &StageTwiddles<f64>,
+    stage1: &StageTwiddles<f64>,
+    dir_sign: f64,
+) {
+    unsafe {
+        debug_assert_eq!(stage0.radix, 4);
+        debug_assert_eq!(stage0.m, 1);
+        debug_assert_eq!(stage1.radix, 4);
+        debug_assert_eq!(stage1.m, 4);
+        debug_assert_eq!(stage0.s, stage1.s * 4);
+        let groups = stage1.s;
+        let stride = stage0.s;
+        let id_sign = _mm256_set_pd(dir_sign, -dir_sign, dir_sign, -dir_sign);
+        let tw1 = stage1.k_slice(1);
+        let tw2 = stage1.k_slice(2);
+        let tw3 = stage1.k_slice(3);
+        // Stage-1 twiddles are scalars per (k, l); broadcast once.
+        let mut w1 = [_mm256_setzero_pd(); 4];
+        let mut w2 = [_mm256_setzero_pd(); 4];
+        let mut w3 = [_mm256_setzero_pd(); 4];
+        for l in 0..4 {
+            w1[l] = _mm256_set_pd(tw1[l].im, tw1[l].re, tw1[l].im, tw1[l].re);
+            w2[l] = _mm256_set_pd(tw2[l].im, tw2[l].re, tw2[l].im, tw2[l].re);
+            w3[l] = _mm256_set_pd(tw3[l].im, tw3[l].re, tw3[l].im, tw3[l].re);
+        }
+        let w = [w1, w2, w3];
+
+        let mut g = 0usize;
+        while g + 2 <= groups {
+            // Stage 0 (twiddle-free) for the four A-groups, two groups per
+            // register over g.
+            let mut a = [[_mm256_setzero_pd(); 4]; 4];
+            for k in 0..4 {
+                let off = g + k * groups;
+                let x0 = _mm256_loadu_pd(src.as_ptr().add(off) as *const f64);
+                let x1 = _mm256_loadu_pd(src.as_ptr().add(off + stride) as *const f64);
+                let x2 = _mm256_loadu_pd(src.as_ptr().add(off + 2 * stride) as *const f64);
+                let x3 = _mm256_loadu_pd(src.as_ptr().add(off + 3 * stride) as *const f64);
+                let (y0, y1, y2, y3) = radix4_aos_f64(x0, x1, x2, x3, id_sign);
+                a[k] = [y0, y1, y2, y3];
+            }
+            // Stage 1: butterfly over k per component l. Each output
+            // register holds groups (g, g + 1) for one (b, l); the two
+            // groups land sixteen elements apart in `dst`.
+            for l in 0..4 {
+                let x0 = a[0][l];
+                let x1 = cmul_aos_f64(a[1][l], w[0][l]);
+                let x2 = cmul_aos_f64(a[2][l], w[1][l]);
+                let x3 = cmul_aos_f64(a[3][l], w[2][l]);
+                let ys = radix4_aos_f64(x0, x1, x2, x3, id_sign);
+                for (b, y) in [ys.0, ys.1, ys.2, ys.3].iter().enumerate() {
+                    let out0 = dst.as_mut_ptr().add(g * 16 + b * 4 + l) as *mut f64;
+                    let out1 = dst.as_mut_ptr().add((g + 1) * 16 + b * 4 + l) as *mut f64;
+                    _mm_storeu_pd(out0, _mm256_castpd256_pd128(*y));
+                    _mm_storeu_pd(out1, _mm256_extractf128_pd(*y, 1));
+                }
+            }
+            g += 2;
+        }
+        while g < groups {
+            let h0 = g;
+            let h1 = g + groups;
+            let h2 = g + 2 * groups;
+            let h3 = g + 3 * groups;
+            let mut a = [[Complex::new(0.0, 0.0); 4]; 4];
+            for (k, h) in [h0, h1, h2, h3].iter().enumerate() {
+                let x0 = src[*h];
+                let x1 = src[*h + stride];
+                let x2 = src[*h + 2 * stride];
+                let x3 = src[*h + 3 * stride];
+                let a_ = x0 + x2;
+                let b_ = x0 - x2;
+                let c_ = x1 + x3;
+                let d_ = x1 - x3;
+                let id = Complex::new(-d_.im * dir_sign, d_.re * dir_sign);
+                a[k] = [a_ + c_, b_ + id, a_ - c_, b_ - id];
+            }
+            let base = g * 16;
+            for l in 0..4 {
+                let x0 = a[0][l];
+                let x1 = a[1][l] * tw1[l];
+                let x2 = a[2][l] * tw2[l];
+                let x3 = a[3][l] * tw3[l];
+                let a_ = x0 + x2;
+                let b_ = x0 - x2;
+                let c_ = x1 + x3;
+                let d_ = x1 - x3;
+                let id = Complex::new(-d_.im * dir_sign, d_.re * dir_sign);
+                dst[base + l] = a_ + c_;
+                dst[base + 4 + l] = b_ + id;
+                dst[base + 8 + l] = a_ - c_;
+                dst[base + 12 + l] = b_ - id;
+            }
+            g += 1;
+        }
+    }
+}
+
+/// AVX2/FMA fused first pair (f32): the `m == 1` radix-4 stage plus its
+/// radix-4 successor (`m == 4`), out of place. f32 counterpart of
+/// [`fused_first2_f64`], vectorised over four groups per register.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `stage0` must describe
+/// a radix-4 stage with `m == 1`, `stage1` its radix-4 successor with
+/// `m == 4`, and source/destination slices must be disjoint with equal
+/// length `4 * stage0.s`.
+#[target_feature(enable = "avx2,fma")]
+#[allow(clippy::needless_range_loop)]
+pub unsafe fn fused_first2_f32(
+    src: &[Complex<f32>],
+    dst: &mut [Complex<f32>],
+    stage0: &StageTwiddles<f32>,
+    stage1: &StageTwiddles<f32>,
+    dir_sign: f32,
+) {
+    unsafe {
+        debug_assert_eq!(stage0.radix, 4);
+        debug_assert_eq!(stage0.m, 1);
+        debug_assert_eq!(stage1.radix, 4);
+        debug_assert_eq!(stage1.m, 4);
+        debug_assert_eq!(stage0.s, stage1.s * 4);
+        let groups = stage1.s;
+        let stride = stage0.s;
+        let id_sign = _mm256_set_ps(
+            dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign,
+        );
+        let tw1 = stage1.k_slice(1);
+        let tw2 = stage1.k_slice(2);
+        let tw3 = stage1.k_slice(3);
+        // Stage-1 twiddles are scalars per (k, l); broadcast once.
+        let mut w1 = [_mm256_setzero_ps(); 4];
+        let mut w2 = [_mm256_setzero_ps(); 4];
+        let mut w3 = [_mm256_setzero_ps(); 4];
+        for l in 0..4 {
+            w1[l] = _mm256_set_ps(tw1[l].im, tw1[l].re, tw1[l].im, tw1[l].re, tw1[l].im, tw1[l].re, tw1[l].im, tw1[l].re);
+            w2[l] = _mm256_set_ps(tw2[l].im, tw2[l].re, tw2[l].im, tw2[l].re, tw2[l].im, tw2[l].re, tw2[l].im, tw2[l].re);
+            w3[l] = _mm256_set_ps(tw3[l].im, tw3[l].re, tw3[l].im, tw3[l].re, tw3[l].im, tw3[l].re, tw3[l].im, tw3[l].re);
+        }
+        let w = [w1, w2, w3];
+
+        let mut g = 0usize;
+        while g + 4 <= groups {
+            // Stage 0 (twiddle-free) for the four A-groups, four groups per
+            // register over g.
+            let mut a = [[_mm256_setzero_ps(); 4]; 4];
+            for k in 0..4 {
+                let off = g + k * groups;
+                let x0 = _mm256_loadu_ps(src.as_ptr().add(off) as *const f32);
+                let x1 = _mm256_loadu_ps(src.as_ptr().add(off + stride) as *const f32);
+                let x2 = _mm256_loadu_ps(src.as_ptr().add(off + 2 * stride) as *const f32);
+                let x3 = _mm256_loadu_ps(src.as_ptr().add(off + 3 * stride) as *const f32);
+                let (y0, y1, y2, y3) = radix4_aos_f32(x0, x1, x2, x3, id_sign);
+                a[k] = [y0, y1, y2, y3];
+            }
+            // Stage 1: butterfly over k per component l. Each output
+            // register holds groups g..g+4 for one (b, l); the four groups
+            // land sixteen elements apart in `dst`.
+            for l in 0..4 {
+                let x0 = a[0][l];
+                let x1 = cmul_aos_f32(a[1][l], w[0][l]);
+                let x2 = cmul_aos_f32(a[2][l], w[1][l]);
+                let x3 = cmul_aos_f32(a[3][l], w[2][l]);
+                let ys = radix4_aos_f32(x0, x1, x2, x3, id_sign);
+                for (b, y) in [ys.0, ys.1, ys.2, ys.3].iter().enumerate() {
+                    let mut tmp = [0.0f32; 8];
+                    _mm256_storeu_ps(tmp.as_mut_ptr(), *y);
+                    for j in 0..4 {
+                        dst[(g + j) * 16 + b * 4 + l] =
+                            Complex::new(tmp[2 * j], tmp[2 * j + 1]);
+                    }
+                }
+            }
+            g += 4;
+        }
+        while g < groups {
+            let h0 = g;
+            let h1 = g + groups;
+            let h2 = g + 2 * groups;
+            let h3 = g + 3 * groups;
+            let mut a = [[Complex::new(0.0, 0.0); 4]; 4];
+            for (k, h) in [h0, h1, h2, h3].iter().enumerate() {
+                let x0 = src[*h];
+                let x1 = src[*h + stride];
+                let x2 = src[*h + 2 * stride];
+                let x3 = src[*h + 3 * stride];
+                let a_ = x0 + x2;
+                let b_ = x0 - x2;
+                let c_ = x1 + x3;
+                let d_ = x1 - x3;
+                let id = Complex::new(-d_.im * dir_sign, d_.re * dir_sign);
+                a[k] = [a_ + c_, b_ + id, a_ - c_, b_ - id];
+            }
+            let base = g * 16;
+            for l in 0..4 {
+                let x0 = a[0][l];
+                let x1 = a[1][l] * tw1[l];
+                let x2 = a[2][l] * tw2[l];
+                let x3 = a[3][l] * tw3[l];
+                let a_ = x0 + x2;
+                let b_ = x0 - x2;
+                let c_ = x1 + x3;
+                let d_ = x1 - x3;
+                let id = Complex::new(-d_.im * dir_sign, d_.re * dir_sign);
+                dst[base + l] = a_ + c_;
+                dst[base + 4 + l] = b_ + id;
+                dst[base + 8 + l] = a_ - c_;
+                dst[base + 12 + l] = b_ - id;
+            }
+            g += 1;
+        }
+    }
+}
+
+/// AoS radix-4 butterfly over four interleaved `Complex<f32>` lanes.
+#[inline]
+unsafe fn radix4_aos_f32(
+    x0: __m256,
+    x1: __m256,
+    x2: __m256,
+    x3: __m256,
+    id_sign: __m256,
+) -> (__m256, __m256, __m256, __m256) {
+    unsafe {
+        let a = _mm256_add_ps(x0, x2);
+        let b = _mm256_sub_ps(x0, x2);
+        let c = _mm256_add_ps(x1, x3);
+        let d = _mm256_sub_ps(x1, x3);
+        let id = _mm256_mul_ps(_mm256_shuffle_ps(d, d, 0xB1), id_sign);
+        (
+            _mm256_add_ps(a, c),
+            _mm256_add_ps(b, id),
+            _mm256_sub_ps(a, c),
+            _mm256_sub_ps(b, id),
+        )
+    }
+}
+
+/// AVX2/FMA fused final pair (f32): a radix-4 stage (`stage_a`, two or
+/// four groups) followed by the closing radix-2/radix-4 stage (`stage_b`,
+/// `s == 1`), executed in place on `buffer`. See
+/// [`fused_final_pair_f64`] for the contract.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime, `buffer.len()` must
+/// equal `4 * stage_a.m * stage_a.s`, `stage_b` must be the Stockham
+/// successor of `stage_a`, and `stage_a.radix == 4`.
+#[allow(clippy::needless_range_loop)]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn fused_final_pair_f32_core(
+    src: *const Complex<f32>,
+    dst: *mut Complex<f32>,
+    stage_a: &StageTwiddles<f32>,
+    stage_b: &StageTwiddles<f32>,
+    dir_sign: f32,
+) {
+    unsafe {
+        let m_a = stage_a.m;
+        let s_a = stage_a.s;
+        let n = 4 * m_a * s_a;
+        debug_assert_eq!(stage_a.radix, 4);
+        debug_assert_eq!(n, 4 * m_a * s_a);
+        debug_assert_eq!(stage_b.s, 1);
+        let stride = n / 4;
+        let id_sign = _mm256_set_ps(
+            dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign,
+        );
+        let tw_a1 = stage_a.k_slice(1);
+        let tw_a2 = stage_a.k_slice(2);
+        let tw_a3 = stage_a.k_slice(3);
+
+        let mut l = 0usize;
+        while l + 4 <= m_a {
+            let mut p = [[_mm256_setzero_ps(); 4]; 4];
+            for (a, point) in p.iter_mut().enumerate().take(s_a) {
+                let off = a * m_a + l;
+                let x0 = _mm256_loadu_ps(src.add(off) as *const f32);
+                let x1 = _mm256_loadu_ps(src.add(off + stride) as *const f32);
+                let x2 = _mm256_loadu_ps(src.add(off + 2 * stride) as *const f32);
+                let x3 = _mm256_loadu_ps(src.add(off + 3 * stride) as *const f32);
+                let x1 = cmul_aos_f32(x1, _mm256_loadu_ps(tw_a1.as_ptr().add(l) as *const f32));
+                let x2 = cmul_aos_f32(x2, _mm256_loadu_ps(tw_a2.as_ptr().add(l) as *const f32));
+                let x3 = cmul_aos_f32(x3, _mm256_loadu_ps(tw_a3.as_ptr().add(l) as *const f32));
+                let (y0, y1, y2, y3) = radix4_aos_f32(x0, x1, x2, x3, id_sign);
+                *point = [y0, y1, y2, y3];
+            }
+
+            if stage_b.radix == 4 {
+                let tw_b1 = stage_b.k_slice(1);
+                let tw_b2 = stage_b.k_slice(2);
+                let tw_b3 = stage_b.k_slice(3);
+                for c in 0..4 {
+                    let off = c * m_a + l;
+                    let x0 = p[0][c];
+                    let x1 = cmul_aos_f32(
+                        p[1][c],
+                        _mm256_loadu_ps(tw_b1.as_ptr().add(off) as *const f32),
+                    );
+                    let x2 = cmul_aos_f32(
+                        p[2][c],
+                        _mm256_loadu_ps(tw_b2.as_ptr().add(off) as *const f32),
+                    );
+                    let x3 = cmul_aos_f32(
+                        p[3][c],
+                        _mm256_loadu_ps(tw_b3.as_ptr().add(off) as *const f32),
+                    );
+                    let (y0, y1, y2, y3) = radix4_aos_f32(x0, x1, x2, x3, id_sign);
+                    _mm256_storeu_ps(dst.add(off) as *mut f32, y0);
+                    _mm256_storeu_ps(dst.add(off + 4 * m_a) as *mut f32, y1);
+                    _mm256_storeu_ps(dst.add(off + 8 * m_a) as *mut f32, y2);
+                    _mm256_storeu_ps(dst.add(off + 12 * m_a) as *mut f32, y3);
+                }
+            } else {
+                debug_assert_eq!(stage_b.radix, 2);
+                debug_assert_eq!(s_a, 2);
+                let tw_b = stage_b.k_slice(1);
+                for c in 0..4 {
+                    let off = c * m_a + l;
+                    let b = cmul_aos_f32(
+                        p[1][c],
+                        _mm256_loadu_ps(tw_b.as_ptr().add(off) as *const f32),
+                    );
+                    let a = p[0][c];
+                    _mm256_storeu_ps(dst.add(off) as *mut f32, _mm256_add_ps(a, b));
+                    _mm256_storeu_ps(dst.add(off + n / 2) as *mut f32, _mm256_sub_ps(a, b));
+                }
+            }
+            l += 4;
+        }
+        while l < m_a {
+            let mut p = [[Complex::new(0.0, 0.0); 4]; 4];
+            for (a, point) in p.iter_mut().enumerate().take(s_a) {
+                let off = a * m_a + l;
+                let x0 = *src.add(off);
+                let x1 = *src.add(off + stride) * tw_a1[l];
+                let x2 = *src.add(off + 2 * stride) * tw_a2[l];
+                let x3 = *src.add(off + 3 * stride) * tw_a3[l];
+                let a_ = x0 + x2;
+                let b_ = x0 - x2;
+                let c_ = x1 + x3;
+                let d_ = x1 - x3;
+                let id = Complex::new(-d_.im * dir_sign, d_.re * dir_sign);
+                *point = [a_ + c_, b_ + id, a_ - c_, b_ - id];
+            }
+            if stage_b.radix == 4 {
+                let tw_b1 = stage_b.k_slice(1);
+                let tw_b2 = stage_b.k_slice(2);
+                let tw_b3 = stage_b.k_slice(3);
+                for c in 0..4 {
+                    let off = c * m_a + l;
+                    let x0 = p[0][c];
+                    let x1 = p[1][c] * tw_b1[off];
+                    let x2 = p[2][c] * tw_b2[off];
+                    let x3 = p[3][c] * tw_b3[off];
+                    let a_ = x0 + x2;
+                    let b_ = x0 - x2;
+                    let c_ = x1 + x3;
+                    let d_ = x1 - x3;
+                    let id = Complex::new(-d_.im * dir_sign, d_.re * dir_sign);
+                    *dst.add(off) = a_ + c_;
+                    *dst.add(off + 4 * m_a) = b_ + id;
+                    *dst.add(off + 8 * m_a) = a_ - c_;
+                    *dst.add(off + 12 * m_a) = b_ - id;
+                }
+            } else {
+                let tw_b = stage_b.k_slice(1);
+                for c in 0..4 {
+                    let off = c * m_a + l;
+                    let b = p[1][c] * tw_b[off];
+                    *dst.add(off) = p[0][c] + b;
+                    *dst.add(off + n / 2) = p[0][c] - b;
+                }
+            }
+            l += 1;
+        }
+    }
+}
+
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn fused_final_pair_f32(
+    buffer: &mut [Complex<f32>],
+    stage_a: &StageTwiddles<f32>,
+    stage_b: &StageTwiddles<f32>,
+    dir_sign: f32,
+) {
+    unsafe {
+        fused_final_pair_f32_core(
+            buffer.as_ptr(),
+            buffer.as_mut_ptr(),
+            stage_a,
+            stage_b,
+            dir_sign,
+        );
+    }
+}
+
+/// AVX2/FMA radix-4 stage for the `m == 1` case (the first stage of a
+/// power-of-two plan): one butterfly per group, no twiddles (the only
+/// twiddle is `w^0 = 1`). Four groups ride one AoS register per input
+/// stream — the butterfly needs no deinterleave — and a 4×4 register
+/// transpose produces the Stockham output order `dst[4g + a]`.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must
+/// describe a radix-4 stage with `stage_tw.m == 1`, and source and
+/// destination slices must be disjoint with equal length `4 * s`.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix4_f32_m1(
+    src: &[Complex<f32>],
+    dst: &mut [Complex<f32>],
+    stage_tw: &StageTwiddles<f32>,
+    dir_sign: f32,
+) {
+    unsafe {
+        debug_assert_eq!(stage_tw.radix, 4);
+        debug_assert_eq!(stage_tw.m, 1);
+        let s = stage_tw.s;
+        let stride = s;
+        // Per-complex multiplier turning (d.re, d.im) into
+        // (-d.im * dir, d.re * dir) after an in-pair swap.
+        let id_sign = _mm256_set_ps(
+            dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign, dir_sign, -dir_sign,
+        );
+
+        let mut g = 0usize;
+        while g + 4 <= s {
+            let x0 = _mm256_loadu_ps(src.as_ptr().add(g) as *const f32);
+            let x1 = _mm256_loadu_ps(src.as_ptr().add(stride + g) as *const f32);
+            let x2 = _mm256_loadu_ps(src.as_ptr().add(2 * stride + g) as *const f32);
+            let x3 = _mm256_loadu_ps(src.as_ptr().add(3 * stride + g) as *const f32);
+
+            let a = _mm256_add_ps(x0, x2);
+            let b = _mm256_sub_ps(x0, x2);
+            let c = _mm256_add_ps(x1, x3);
+            let d = _mm256_sub_ps(x1, x3);
+            // id = (-d.im * dir, d.re * dir) per complex pair.
+            let d_swap = _mm256_shuffle_ps(d, d, 0xB1);
+            let id = _mm256_mul_ps(d_swap, id_sign);
+
+            let y0 = _mm256_add_ps(a, c);
+            let y1 = _mm256_add_ps(b, id);
+            let y2 = _mm256_sub_ps(a, c);
+            let y3 = _mm256_sub_ps(b, id);
+
+            // Transpose 4 streams × 4 groups (complex = one 64-bit lane):
+            // O_j = [Y0(gj) Y1(gj) Y2(gj) Y3(gj)].
+            let u0 = _mm256_unpacklo_pd(_mm256_castps_pd(y0), _mm256_castps_pd(y1));
+            let u1 = _mm256_unpackhi_pd(_mm256_castps_pd(y0), _mm256_castps_pd(y1));
+            let u2 = _mm256_unpacklo_pd(_mm256_castps_pd(y2), _mm256_castps_pd(y3));
+            let u3 = _mm256_unpackhi_pd(_mm256_castps_pd(y2), _mm256_castps_pd(y3));
+            let out = dst.as_mut_ptr().add(4 * g) as *mut f32;
+            _mm256_storeu_ps(out, _mm256_castpd_ps(_mm256_permute2f128_pd(u0, u2, 0x20)));
+            _mm256_storeu_ps(
+                out.add(8),
+                _mm256_castpd_ps(_mm256_permute2f128_pd(u1, u3, 0x20)),
+            );
+            _mm256_storeu_ps(
+                out.add(16),
+                _mm256_castpd_ps(_mm256_permute2f128_pd(u0, u2, 0x31)),
+            );
+            _mm256_storeu_ps(
+                out.add(24),
+                _mm256_castpd_ps(_mm256_permute2f128_pd(u1, u3, 0x31)),
+            );
+            g += 4;
+        }
+        while g < s {
+            let x0 = src[g];
+            let x1 = src[stride + g];
+            let x2 = src[2 * stride + g];
+            let x3 = src[3 * stride + g];
             let a = x0 + x2;
             let b = x0 - x2;
             let c = x1 + x3;
             let d = x1 - x3;
             let id = Complex::new(-d.im * dir_sign, d.re * dir_sign);
-            dst[l] = a + c;
-            dst[m + l] = b + id;
-            dst[2 * m + l] = a - c;
-            dst[3 * m + l] = b - id;
-            l += 1;
+            dst[4 * g] = a + c;
+            dst[4 * g + 1] = b + id;
+            dst[4 * g + 2] = a - c;
+            dst[4 * g + 3] = b - id;
+            g += 1;
+        }
+    }
+}
+
+/// AVX2/FMA radix-4 stage for the `m == 1` case, f64: two groups per
+/// register; see [`stage_radix4_f32_m1`] for the layout contract.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime. `stage_tw` must
+/// describe a radix-4 stage with `stage_tw.m == 1`, and source and
+/// destination slices must be disjoint with equal length `4 * s`.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix4_f64_m1(
+    src: &[Complex<f64>],
+    dst: &mut [Complex<f64>],
+    stage_tw: &StageTwiddles<f64>,
+    dir_sign: f64,
+) {
+    unsafe {
+        debug_assert_eq!(stage_tw.radix, 4);
+        debug_assert_eq!(stage_tw.m, 1);
+        let s = stage_tw.s;
+        let stride = s;
+        let id_sign = _mm256_set_pd(dir_sign, -dir_sign, dir_sign, -dir_sign);
+
+        let mut g = 0usize;
+        while g + 2 <= s {
+            let x0 = _mm256_loadu_pd(src.as_ptr().add(g) as *const f64);
+            let x1 = _mm256_loadu_pd(src.as_ptr().add(stride + g) as *const f64);
+            let x2 = _mm256_loadu_pd(src.as_ptr().add(2 * stride + g) as *const f64);
+            let x3 = _mm256_loadu_pd(src.as_ptr().add(3 * stride + g) as *const f64);
+
+            let a = _mm256_add_pd(x0, x2);
+            let b = _mm256_sub_pd(x0, x2);
+            let c = _mm256_add_pd(x1, x3);
+            let d = _mm256_sub_pd(x1, x3);
+            let d_swap = _mm256_shuffle_pd(d, d, 0x05);
+            let id = _mm256_mul_pd(d_swap, id_sign);
+
+            let y0 = _mm256_add_pd(a, c);
+            let y1 = _mm256_add_pd(b, id);
+            let y2 = _mm256_sub_pd(a, c);
+            let y3 = _mm256_sub_pd(b, id);
+
+            // O = [Y0(g) Y1(g) | Y2(g) Y3(g)] then the same for g + 1:
+            // each output register is one group's four results.
+            let out = dst.as_mut_ptr().add(4 * g) as *mut f64;
+            _mm256_storeu_pd(out, _mm256_permute2f128_pd(y0, y1, 0x20));
+            _mm256_storeu_pd(out.add(4), _mm256_permute2f128_pd(y2, y3, 0x20));
+            _mm256_storeu_pd(out.add(8), _mm256_permute2f128_pd(y0, y1, 0x31));
+            _mm256_storeu_pd(out.add(12), _mm256_permute2f128_pd(y2, y3, 0x31));
+            g += 2;
+        }
+        while g < s {
+            let x0 = src[g];
+            let x1 = src[stride + g];
+            let x2 = src[2 * stride + g];
+            let x3 = src[3 * stride + g];
+            let a = x0 + x2;
+            let b = x0 - x2;
+            let c = x1 + x3;
+            let d = x1 - x3;
+            let id = Complex::new(-d.im * dir_sign, d.re * dir_sign);
+            dst[4 * g] = a + c;
+            dst[4 * g + 1] = b + id;
+            dst[4 * g + 2] = a - c;
+            dst[4 * g + 3] = b - id;
+            g += 1;
         }
     }
 }
@@ -867,7 +2052,7 @@ mod tests {
         let mut dst_avx2 = vec![Complex64::new(0.0, 0.0); n];
         scalar_stage_radix2(stride, &src, &mut dst_scalar, &stage_tw);
         unsafe {
-            stage_radix2_f64(stride, &src, &mut dst_avx2, &stage_tw);
+            stage_radix2_f64_aos(stride, &src, &mut dst_avx2, &stage_tw);
         }
         assert_close(&dst_scalar, &dst_avx2);
     }
@@ -884,7 +2069,7 @@ mod tests {
         let mut dst_avx2 = vec![Complex64::new(0.0, 0.0); n];
         scalar_stage_radix4(stride, &src, &mut dst_scalar, &stage_tw, dir_sign);
         unsafe {
-            stage_radix4_f64(stride, &src, &mut dst_avx2, &stage_tw, dir_sign);
+            stage_radix4_f64_aos(stride, &src, &mut dst_avx2, &stage_tw, dir_sign);
         }
         assert_close(&dst_scalar, &dst_avx2);
     }
@@ -900,7 +2085,7 @@ mod tests {
         let mut dst_avx2 = vec![Complex64::new(0.0, 0.0); n];
         scalar_stage_radix4(n / 4, &src, &mut dst_scalar, &stage_tw, dir_sign);
         unsafe {
-            stage_radix4_f64_s1(&src, &mut dst_avx2, &stage_tw, dir_sign);
+            stage_radix4_f64_s1_aos(&src, &mut dst_avx2, &stage_tw, dir_sign);
         }
         assert_close(&dst_scalar, &dst_avx2);
     }

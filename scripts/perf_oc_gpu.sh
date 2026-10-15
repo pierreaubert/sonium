@@ -42,6 +42,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 deck="${1:-}"
 output="${2:-${repo_root}/perf/oc}"
+if [ "$#" -gt 2 ]; then
+    echo "perf-oc-gpu takes <deck> [out_dir] only; steps come from PERF_OC_GPU_STEPS, ignoring nothing (got extra '${3}')" >&2
+    exit 1
+fi
 steps="${PERF_OC_GPU_STEPS:-2000}"
 smoke="${PERF_OC_GPU_SMOKE:-0}"
 force="${PERF_OC_GPU_FORCE:-0}"
@@ -156,7 +160,11 @@ if [ "${ncu}" = "1" ]; then
         } >>"${console}" 2>&1
         cp "${work}/ncu.txt" "${output}/${deck}_cuda_ncu.txt"
     else
-        echo "ncu capture failed (this box needs root NVreg_RestrictProfilingToAdminHost=0); device-timed walls stand" | tee -a "${console}"
+        {
+            echo "=== ncu SpeedOfLight N=${ncu_steps} (FAILED) ==="
+            echo "ncu capture failed (this box needs root NVreg_RestrictProfilingToAdminHost=0); device-timed walls stand"
+            tail -n 20 "${work}/ncu.txt"
+        } | tee -a "${console}"
     fi
 fi
 

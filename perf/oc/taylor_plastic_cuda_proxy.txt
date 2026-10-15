@@ -1,0 +1,38 @@
+deck: taylor_plastic
+proxy: sonium/perf/oc/taylor_plastic_cuda_proxy.cu
+nvcc: Build cuda_13.3.r13.3/compiler.38244171_0
+gpu: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+steps: 2000
+note: console captured via the perf_oc_gpu.sh flow mirrored by hand (the
+checked-in script reads the proxy from its own repo tree; the parent reruns
+it verbatim post-merge). Machine profile re-measured same-day on this box.
+The sonium deck is 123 steps; N=2000 overruns the stop (timing only, wall
+keeps rising, erosion continues). The N=123 pair is the deck rate.
+=== machine_profile ===
+device: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+compute capability: 12.0
+SMs: 188, max threads/SM: 1536, shared/SM: 100 KB
+L2 cache: 128.0 MB
+global mem: 95.0 GB, bus width: 512 bit
+(clocks via nvidia-smi; legacy clockRate fields removed in CUDA 13)
+empty-launch: 6.847 us/launch (2000 launches, device time)
+launch+sync roundtrip: 8.274 us/step (host-driven floor)
+4KB H2D+D2H roundtrip: 14.798 us (pinned)
+H2D pinned BW: 22.0 GB/s (256 MB)
+D2H pinned BW: 28.0 GB/s (256 MB)
+STREAM triad: 2160 GB/s (achieved DRAM ceiling)
+FP64 MAD: 479.9 GFLOP/s (achieved compute ceiling)
+done
+=== proxy N=1 ===
+nstep=1 wall=0.001 s (1485.024 us/step) dz=0.000000e+00 plas=0.000000e+00 fnz=0.000000e+00 eroded=0 maxep=0.000000e+00
+=== proxy N=123 (deck) ===
+nstep=123 wall=0.917 s (7452.091 us/step) dz=6.641264e-04 plas=1.820981e-01 fnz=-3.973061e+04 eroded=45 maxep=1.820981e-01
+nstep=123 wall=0.917 s (7452.467 us/step) dz=6.641264e-04 plas=1.820981e-01 fnz=-3.973061e+04 eroded=45 maxep=1.820981e-01
+=== proxy N=2000 (overrun, timing only) ===
+nstep=2000 wall=10.666 s (5333.221 us/step) dz=1.453723e-02 plas=1.820981e-01 fnz=-1.294281e+04 eroded=225 maxep=1.820981e-01
+nstep=2000 wall=10.583 s (5291.268 us/step) dz=1.453723e-02 plas=1.820981e-01 fnz=-1.294281e+04 eroded=225 maxep=1.820981e-01
+=== proxy EMPTY N=2000 ===
+nstep=2000 wall=0.076 s (38.132 us/step) dz=1.453723e-02 plas=0.000000e+00 fnz=-9.250382e+03 eroded=0 maxep=0.000000e+00
+nstep=2000 wall=0.076 s (38.134 us/step) dz=1.453723e-02 plas=0.000000e+00 fnz=-9.250382e+03 eroded=0 maxep=0.000000e+00
+=== proxy EMPTY N=123 (deck) ===
+nstep=123 wall=0.004 s (35.144 us/step) dz=6.801456e-04 plas=0.000000e+00 fnz=-5.714529e+03 eroded=0 maxep=0.000000e+00

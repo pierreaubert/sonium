@@ -120,13 +120,14 @@ fn sonium_arm_rejects_miniqa_cleanly() {
 }
 
 #[test]
-fn sonium_arm_reports_unsupported_deck_reason() {
-    // N-deck harness: shells resolve as C3 but have no native arm,
-    // so the failure names the unsupported card (fast, no timing).
-    let (mut command, _) = base("shell_reason");
+fn sonium_arm_reports_unsupported_card_reason() {
+    // N-deck harness: axisym resolves as C3 but has no native arm
+    // (Unit 1 proposal: axisymmetric kernel), so the failure names
+    // the unsupported card (fast, no timing).
+    let (mut command, _) = base("card_reason");
     let output = command
         .arg("--deck")
-        .arg("shell_clamped_plate")
+        .arg("axisym_cylinder")
         .arg("--quick")
         .arg("--sonium-only")
         .output()
@@ -135,17 +136,17 @@ fn sonium_arm_reports_unsupported_deck_reason() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stdout.contains("FAILED: qa-oc-bench"), "stdout: {stdout}");
-    assert!(stderr.contains("/SHELL"), "stderr: {stderr}");
+    assert!(stderr.contains("/ANALY"), "stderr: {stderr}");
 }
 
 #[test]
 fn nonconforming_deck_dir_fails_closed_with_reason() {
-    // N-deck harness: the foam76 decks carry no C3-named starter
+    // N-deck harness: crash_box_original carries no C3-named starter
     // pair, so resolution names the missing artifact (no timing).
-    let (mut command, _) = base("foam76_reason");
+    let (mut command, _) = base("crash_reason");
     let output = command
         .arg("--deck")
-        .arg("foam76_compression")
+        .arg("crash_box_original")
         .arg("--quick")
         .arg("--sonium-only")
         .output()
@@ -156,9 +157,77 @@ fn nonconforming_deck_dir_fails_closed_with_reason() {
     assert!(stdout.contains("FAILED: qa-oc-bench"), "stdout: {stdout}");
     assert!(stderr.contains("misses"), "stderr: {stderr}");
     assert!(
-        stderr.contains("foam76_compression_0000.rad"),
+        stderr.contains("crash_box_original_0000.rad"),
         "stderr: {stderr}"
     );
+}
+
+#[test]
+fn sonium_quick_shell_clamped_plate_emits_valid_bundle() {
+    // Unit 4 flip: the shell arm now serves shell decks (slow:
+    // thin-shell dt bound needs ~100k steps even for --quick).
+    let (mut command, bundle) = base("shell_quick");
+    let output = command
+        .arg("--deck")
+        .arg("shell_clamped_plate")
+        .arg("--quick")
+        .arg("--sonium-only")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "stdout: {stdout}");
+    assert!(stdout.contains("SUCCESS: qa-oc-bench"), "stdout: {stdout}");
+    let text = std::fs::read_to_string(&bundle).unwrap();
+    let parsed = sonium_bench::oc_compare::parse_bundle_json(&text).unwrap();
+    assert_eq!(parsed.rows.len(), 1);
+    assert_eq!(parsed.rows[0].side, Side::Sonium);
+    assert_eq!(parsed.rows[0].deck, "shell_clamped_plate");
+    assert!(parsed.rows[0].correctness_passed);
+}
+
+#[test]
+fn sonium_quick_cantilever_emits_valid_bundle() {
+    // Unit 1: the EAS-linear path serves the bending decks.
+    let (mut command, bundle) = base("cantilever_quick");
+    let output = command
+        .arg("--deck")
+        .arg("cantilever")
+        .arg("--quick")
+        .arg("--sonium-only")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "stdout: {stdout}");
+    assert!(stdout.contains("SUCCESS: qa-oc-bench"), "stdout: {stdout}");
+    let text = std::fs::read_to_string(&bundle).unwrap();
+    let parsed = sonium_bench::oc_compare::parse_bundle_json(&text).unwrap();
+    assert_eq!(parsed.rows.len(), 1);
+    assert_eq!(parsed.rows[0].side, Side::Sonium);
+    assert_eq!(parsed.rows[0].deck, "cantilever");
+    assert!(parsed.rows[0].correctness_passed);
+}
+
+#[test]
+fn sonium_quick_foam76_compression_emits_valid_bundle() {
+    // Unit 3 flip: the foam replay arm serves the foam decks.
+    let (mut command, bundle) = base("foam_quick");
+    let output = command
+        .arg("--deck")
+        .arg("foam76_compression")
+        .arg("--quick")
+        .arg("--sonium-only")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "stdout: {stdout}");
+    assert!(stdout.contains("SUCCESS: qa-oc-bench"), "stdout: {stdout}");
+    let text = std::fs::read_to_string(&bundle).unwrap();
+    let parsed = sonium_bench::oc_compare::parse_bundle_json(&text).unwrap();
+    assert_eq!(parsed.rows.len(), 1);
+    assert_eq!(parsed.rows[0].side, Side::Sonium);
+    assert_eq!(parsed.rows[0].deck, "foam76_compression");
+    assert!(parsed.rows[0].correctness_passed);
+    assert_eq!(parsed.rows[0].dof, 24);
 }
 
 #[test]

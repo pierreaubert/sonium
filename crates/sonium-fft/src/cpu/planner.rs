@@ -13,6 +13,17 @@ use crate::{FftPlan, FftPlanError};
 
 type PlanCache<T> = RwLock<HashMap<(usize, FftDirection), Arc<dyn FftPlan<T>>>>;
 
+/// Length above which the planner auto-selects the six-step decomposition
+/// instead of the ping-pong Stockham driver. On x86_64, criterion
+/// measurements (`fft_compare`) show the Stockham driver ahead of the
+/// current six-step implementation at every measured size (six-step
+/// trails by 1.7× or more at 4096–4M points, more for f32), so the
+/// crossover sits at the edge of the measured range. Other architectures
+/// keep the historical 64K crossover. `SixStepFftPlan` remains available as
+/// an explicit plan choice on every architecture.
+#[cfg(target_arch = "x86_64")]
+const SIX_STEP_THRESHOLD: usize = 1 << 24;
+#[cfg(not(target_arch = "x86_64"))]
 const SIX_STEP_THRESHOLD: usize = 64 * 1024;
 
 /// CPU SIMD dispatch policy for FFT plans.

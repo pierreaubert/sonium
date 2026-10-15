@@ -1464,6 +1464,18 @@ where
         let merge_start = std::time::Instant::now();
         let mut csr = mono.to_csr();
         apply_dirichlet_to_csr(&mut csr, &mut rhs, &is_bc, &bc_values);
+        // UNIT5 (oc-opt G0): env-gated CSR stats for proxy validation.
+        // Reports the Dirichlet-conditioned system the Krylov loop sees.
+        if std::env::var("SONIUM_UNIT5_CSR_STATS").as_deref() == Ok("1") {
+            let rhs_norm = rhs.iter().map(|value| value * value).sum::<f64>().sqrt();
+            eprintln!(
+                "UNIT5_CSR picard={} n={} nnz={} rhs_norm={:.12e}",
+                iter + 1,
+                rhs.len(),
+                csr.values.len(),
+                rhs_norm
+            );
+        }
         let merge_elapsed = merge_start.elapsed();
         let assemble_elapsed = iter_start.elapsed();
 

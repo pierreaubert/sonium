@@ -75,6 +75,52 @@ pub fn radix4<T: FftScalar>(
     (y0, y1, y2, y3)
 }
 
+/// Radix-8 butterfly via the even/odd radix-4 decomposition:
+/// `Y[k] = E[k] + w8^k·O[k]`, `Y[k+4] = E[k] − w8^k·O[k]` where `E`/`O`
+/// are the radix-4 DFTs of the even/odd inputs and
+/// `w8 = exp(dir_sign · 2π i / 8)`, so `w8^k ∈ {1, (1+dir·i)/√2, dir·i,
+/// (−1+dir·i)/√2}`.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+pub fn radix8<T: FftScalar>(
+    x0: Complex<T>,
+    x1: Complex<T>,
+    x2: Complex<T>,
+    x3: Complex<T>,
+    x4: Complex<T>,
+    x5: Complex<T>,
+    x6: Complex<T>,
+    x7: Complex<T>,
+    dir_sign: T,
+) -> (
+    Complex<T>,
+    Complex<T>,
+    Complex<T>,
+    Complex<T>,
+    Complex<T>,
+    Complex<T>,
+    Complex<T>,
+    Complex<T>,
+) {
+    let (e0, e1, e2, e3) = radix4(x0, x2, x4, x6, dir_sign);
+    let (o0, o1, o2, o3) = radix4(x1, x3, x5, x7, dir_sign);
+    // √2/2 = 0.70710678118654752440… (17 sig digits round to nearest f64).
+    let c = T::from_f64(std::f64::consts::FRAC_1_SQRT_2).unwrap();
+    let o1 = o1 * Complex::new(c, dir_sign * c);
+    let o2 = cplx_i_rot(o2).scale(dir_sign);
+    let o3 = o3 * Complex::new(-c, dir_sign * c);
+    (
+        e0 + o0,
+        e1 + o1,
+        e2 + o2,
+        e3 + o3,
+        e0 - o0,
+        e1 - o1,
+        e2 - o2,
+        e3 - o3,
+    )
+}
+
 /// Radix-5 butterfly. Internal roots: 1, w, w², w³, w⁴ where
 /// w = exp(dir_sign · 2π i / 5). Implemented with Rader's reduction
 /// constants (two real multiplies for cos, two for sin).

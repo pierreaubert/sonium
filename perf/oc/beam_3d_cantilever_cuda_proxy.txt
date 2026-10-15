@@ -1,0 +1,21 @@
+deck: beam_3d_cantilever
+proxy: sonium/perf/oc/beam_3d_cantilever_cuda_proxy.cu
+nvcc: Build cuda_13.3.r13.3/compiler.38244171_0
+gpu: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+note: console captured manually (perf_oc_gpu.sh flow: build + N=1 + N=20000 + full-N fidelity); GPU idle (0%, no compute procs) at each run; CPU load high during device-timed runs (device timing unaffected)
+=== proxy N=1 ===
+ke_check: sum=5.722046e-06 max=3.523256e+09 null=2.384e-06 ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+nstep=1 wall=0.001 s (600.896 us/step) tip_dy=1.310939e-14 max|f|=0.000e+00
+=== proxy N=20000 ===
+ke_check: sum=5.722046e-06 max=3.523256e+09 null=2.384e-06 ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+nstep=20000 wall=9.852 s (492.610 us/step) tip_dy=1.941402e-04 max|f|=8.898e+02
+=== proxy full-N (t=1.0 s) ===
+ke_check: sum=5.722046e-06 max=3.523256e+09 null=2.384e-06 ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+nstep=326371 wall=161.455 s (494.698 us/step) tip_dy=3.123639e-03 max|f|=1.431e+04
+=== proxy EMPTY N=20000 (2 repeats; one 6.184 us/step run discarded as GPU-shared with a peer proxy) ===
+ke_check: sum=5.722046e-06 max=3.523256e+09 null=2.384e-06 ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+nstep=20000 wall=0.057 s (2.855 us/step) tip_dy=1.748180e-02 max|f|=0.000e+00
+nstep=20000 wall=0.057 s (2.855 us/step) tip_dy=1.748180e-02 max|f|=0.000e+00
+=== fidelity anchors ===
+cpu sonium final tip dy = 3.123846e-3 (probe gate passed, 5% tol)
+engine serial tip dy     = 3.117480e-3 (probe gate passed, 5% tol; wall run under elevated load, preliminary)

@@ -1,0 +1,30 @@
+deck: cantilever
+proxy: sonium/perf/oc/cantilever_cuda_proxy.cu
+nvcc: Build cuda_13.3.r13.3/compiler.38244171_0
+gpu: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+note: console captured manually (perf_oc_gpu.sh flow: build + N=1 + N=2000/20000 + EMPTY + full-N fidelity); GPU idle (0%, no compute procs) at each run; CPU load high during device-timed runs (device timing unaffected)
+=== proxy N=1 ===
+ke_check: sum=5.722046e-06 max=3.523256e+09 null=2.384e-06 ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+nstep=1 wall=0.001 s (599.680 us/step) tip_dz=1.310939e-15 max|f|=0.000e+00
+=== proxy N=2000 ===
+ke_check: sum=5.722046e-06 max=3.523256e+09 null=2.384e-06 ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+nstep=2000 wall=0.986 s (493.053 us/step) tip_dz=7.472666e-07 max|f|=2.534e+00
+=== proxy N=20000 ===
+ke_check: sum=5.722046e-06 max=3.523256e+09 null=2.384e-06 ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+nstep=20000 wall=9.858 s (492.899 us/step) tip_dz=1.941402e-05 max|f|=8.898e+01
+=== proxy EMPTY N=20000 ===
+ke_check: sum=5.722046e-06 max=3.523256e+09 null=2.384e-06 ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+nstep=20000 wall=0.057 s (2.854 us/step) tip_dz=1.748180e-03 max|f|=0.000e+00
+=== proxy full-N (t=1.0 s) repeat 1 ===
+ke_check: sum=5.722046e-06 max=3.523256e+09 null=2.384e-06 ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+nstep=326371 wall=160.723 s (492.454 us/step) tip_dz=3.123639e-04 max|f|=1.431e+03
+=== proxy full-N (t=1.0 s) repeat 2 ===
+ke_check: sum=5.722046e-06 max=3.523256e+09 null=2.384e-06 ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+nstep=326371 wall=161.421 s (494.595 us/step) tip_dz=3.123639e-04 max|f|=1.431e+03
+=== host-vs-rust stiffness cross-check ===
+proxy ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09
+rust  ke0=1.562977e+09 ke100=3.523256e+09 ke575=3.523256e+09 (temporary sonium-fem dump test, since removed)
+=== fidelity anchors ===
+cpu sonium final tip dz = 3.123846e-4 (probe gate passed, 5% tol)
+eas static replica tip   = 3.135526e-4 (sonium-fem linear_cure_unlocks test)
+engine serial tip dz     = 3.117511e-4 (probe gate passed, 5% tol)

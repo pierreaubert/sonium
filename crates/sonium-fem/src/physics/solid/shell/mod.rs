@@ -14,6 +14,7 @@ pub mod layered;
 pub mod mitc4;
 pub mod nonlinear;
 pub mod nonlinear_quad;
+pub mod probe;
 pub mod revolution;
 mod section;
 pub mod thickness;

@@ -21,6 +21,40 @@ pub struct RealFftPlan<T: FftScalar> {
     inverse: Arc<dyn FftPlan<T>>,
     packed_forward: Option<Arc<dyn FftPlan<T>>>,
     packed_inverse: Option<Arc<dyn FftPlan<T>>>,
+    /// Plan-time packed-recombination factors, one per output bin:
+    /// forward `(sin θ, -cos θ)` with `θ = -2πk/n`, inverse
+    /// `(-sin φ, cos φ)` with `φ = 2πk/n`. Hoisting these out of the
+    /// per-call loops removes one `sincos` per bin per transform.
+    /// Empty for odd `n` (the packed path is unused there).
+    forward_factors: Vec<Complex<T>>,
+    inverse_factors: Vec<Complex<T>>,
+}
+
+/// Build the packed-recombination factor tables for length `n`.
+fn build_recombination_factors<T: FftScalar>(n: usize) -> (Vec<Complex<T>>, Vec<Complex<T>>) {
+    if !n.is_multiple_of(2) {
+        return (Vec::new(), Vec::new());
+    }
+    let m = n / 2;
+    let mut forward = Vec::with_capacity(m + 1);
+    for k in 0..=m {
+        let theta = -std::f64::consts::TAU * k as f64 / n as f64;
+        let (sin, cos) = sonium_fastmath::sincos_scalar(theta);
+        forward.push(Complex::new(
+            T::from_f64(sin).unwrap(),
+            T::from_f64(-cos).unwrap(),
+        ));
+    }
+    let mut inverse = Vec::with_capacity(m);
+    for k in 0..m {
+        let theta = std::f64::consts::TAU * k as f64 / n as f64;
+        let (sin, cos) = sonium_fastmath::sincos_scalar(theta);
+        inverse.push(Complex::new(
+            T::from_f64(-sin).unwrap(),
+            T::from_f64(cos).unwrap(),
+        ));
+    }
+    (forward, inverse)
 }
 
 impl<T: FftScalar> RealFftPlan<T> {
@@ -41,6 +75,7 @@ impl<T: FftScalar> RealFftPlan<T> {
     /// plans share its cache.
     pub fn with_planner(n: usize, planner: &CpuFftPlanner<T>) -> Self {
         assert!(n > 0, "real FFT length must be positive");
+        let (forward_factors, inverse_factors) = build_recombination_factors(n);
         Self {
             n,
             forward: planner.plan(n, FftDirection::Forward),
@@ -51,6 +86,8 @@ impl<T: FftScalar> RealFftPlan<T> {
             packed_inverse: n
                 .is_multiple_of(2)
                 .then(|| planner.plan(n / 2, FftDirection::Inverse)),
+            forward_factors,
+            inverse_factors,
         }
     }
 
@@ -71,12 +108,15 @@ impl<T: FftScalar> RealFftPlan<T> {
         } else {
             None
         };
+        let (forward_factors, inverse_factors) = build_recombination_factors(n);
         Ok(Self {
             n,
             forward,
             inverse,
             packed_forward,
             packed_inverse,
+            forward_factors,
+            inverse_factors,
         })
     }
 
@@ -150,10 +190,8 @@ impl<T: FftScalar> RealFftPlan<T> {
                 let b = Complex::new(work[mirror].re, -work[mirror].im);
                 let sum = a + b;
                 let diff = a - b;
-                let theta = -std::f64::consts::TAU * k as f64 / self.n as f64;
-                let (sin, cos) = sonium_fastmath::sincos_scalar(theta);
-                // -i exp(i theta) = sin(theta) - i cos(theta).
-                let factor = Complex::new(T::from_f64(sin).unwrap(), T::from_f64(-cos).unwrap());
+                // -i exp(i theta) = sin(theta) - i cos(theta), precomputed.
+                let factor = self.forward_factors[k];
                 output[k] = (sum + factor * diff) * scale;
             }
         } else {
@@ -198,10 +236,8 @@ impl<T: FftScalar> RealFftPlan<T> {
                 let mirror = Complex::new(input[m - k].re, -input[m - k].im);
                 let sum = x + mirror;
                 let diff = x - mirror;
-                let theta = std::f64::consts::TAU * k as f64 / self.n as f64;
-                let (sin, cos) = sonium_fastmath::sincos_scalar(theta);
-                // i exp(+i theta) = -sin(theta) + i cos(theta).
-                let factor = Complex::new(T::from_f64(-sin).unwrap(), T::from_f64(cos).unwrap());
+                // i exp(+i theta) = -sin(theta) + i cos(theta), precomputed.
+                let factor = self.inverse_factors[k];
                 work[k] = (sum + factor * diff) * T::from_f64(0.5).unwrap();
             }
             packed.process_with_scratch(work, &mut fft_scratch[..packed.scratch_len()]);

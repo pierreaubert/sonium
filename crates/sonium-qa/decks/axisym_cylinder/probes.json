@@ -1,0 +1,22 @@
+{
+  "case": "axisym_cylinder",
+  "engine": "OpenCourant double-precision CommitID 33e68517 (harvested history.csv; energies per radian)",
+  "units": "SI",
+  "note": "Channels are raw th_to_csv titles: the TH title 'radial response' carries no node/brick/shell/wall keyword, so no normalization applies and the padded title is the key. Expectations are the final hold samples (t=0.002495 s); the 80-sample hold (t>=0.0021 s) is settled to std/mean 1.5e-5 and matches the plane-strain Lame solution to 0.02%. rel_tol 1% is ~500x the observed hold ripple.",
+  "probes": [
+    {
+      "label": "bore DY",
+      "channel": "radial response                          34                                           DY",
+      "expected": 4.767315e-07,
+      "abs_tol": 1.0e-09,
+      "rel_tol": 1.0e-02
+    },
+    {
+      "label": "outer DY",
+      "channel": "radial response                          66                                           DY",
+      "expected": 3.033525e-07,
+      "abs_tol": 1.0e-09,
+      "rel_tol": 1.0e-02
+    }
+  ]
+}

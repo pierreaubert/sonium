@@ -140,3 +140,29 @@ schur|schur-cheb`): a polynomial pressure block is too weak for TG
 (stalls, honest fallback), Chebyshev pressure converges, and AMG
 pressure remains f64-only. The implementation is backend-generic, so
 CUDA and Metal share the same code path.
+
+## oc-opt 2026-10-15, Unit 5 (preliminary --quick diagnostics)
+
+- Phase S re-verified GREEN: sonium-only 1t 15.0-15.8 s, 20 Picard, Ghia
+  0.0162 < 0.03 (engine serial baseline 226.3 s; one same-day engine cell
+  read 285 s under load-spike contamination and was discarded for timing).
+- Phase M stays RED with a proof: sonium 15.8 s -> ~12 s (1.2-1.3x) vs
+  engine 226 s -> 54.5 s smp16 (4.1x). Per-Picard profile: solve phase 8.0 s
+  fully serial (1.00x at 16t), assembly 7.8 s -> 3.8 s (forms 2.2x). Even a
+  zero-cost solve caps sonium at ~2.0x, below the 4.1x gate. A forcing-term
+  schedule (loose early linear tolerances) was tried and reverted: the
+  warm-started Picard stalls without tight solves (50 iterations, no
+  convergence). Filed as shared proposals P1-P3 (solver/assembly threading
+  levers live outside the unit fence; the M efficiency-ratio criterion may
+  need a category amendment for implicit-vs-explicit decks).
+- Phase G0 filed: `sonium/perf/oc/ns_lid_cavity_cuda_{proxy.cu,proxy.txt,
+  roofline.md}`. Persistent-kernel GMRES(30)+ILU(0) proxy at exact deck
+  topology (operator entry-verified 261513/261513 to <= 1.8e-17 against a
+  native dump; N=330 true residual and 18/18 centerline values match the
+  native first-Picard state). Device cost 5.39 ms/GMRES-iteration vs 0.65 ms
+  CPU (8.3x short); full-deck projection 73.5 s vs 15.8 s (4.7x short);
+  limiter is 522 sequential ILU wavefronts through ~10 us cooperative syncs.
+  G1 gate: FAIL for the faithful port. The existing 1.34x CUDA-backend win
+  stands (different algorithm: polynomial/Chebyshev, no triangular solve).
+- Shared deliverable: `sonium/perf/oc-gpu-machine.md` (machine ceilings +
+  G0 method note for all units).

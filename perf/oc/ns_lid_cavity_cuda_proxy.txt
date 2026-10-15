@@ -1,0 +1,38 @@
+deck: ns_lid_cavity
+proxy: /home/pierre/src/all_of_sonium/.muse/worktrees/subagent-v2-01a13e2a-6cf8-7c60-871e-a86bd2292216-01a13e89-f81e-74d0-844a-fdc218e90ce8/sonium/perf/oc/ns_lid_cavity_cuda_proxy.cu
+nvcc: Build cuda_13.3.r13.3/compiler.38244171_0
+gpu: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+steps: 2000
+=== machine_profile ===
+device: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+compute capability: 12.0
+SMs: 188, max threads/SM: 1536, shared/SM: 100 KB
+L2 cache: 128.0 MB
+global mem: 95.0 GB, bus width: 512 bit
+(clocks via nvidia-smi; legacy clockRate fields removed in CUDA 13)
+empty-launch: 2.505 us/launch (2000 launches, device time)
+launch+sync roundtrip: 6.756 us/step (host-driven floor)
+4KB H2D+D2H roundtrip: 11.743 us (pinned)
+H2D pinned BW: 26.6 GB/s (256 MB)
+D2H pinned BW: 28.6 GB/s (256 MB)
+STREAM triad: 2158 GB/s (achieved DRAM ceiling)
+FP64 MAD: 543.8 GFLOP/s (achieved compute ceiling)
+done
+=== proxy N=1 ===
+proxy: n=12675 nnz=261513 rhs_norm=8.062648448246e+00 tau0=8.138021e-03 ilu_skipped=0 L_nnz=124419 U_nnz=124419 L_levels=261(wmax=127) U_levels=261(wmax=96)
+host_N1: beta=9.499642252194e+00 est1=2.300935195775e-01 (device must match)
+launch: blocks=128 threads=128 (coop_max=564)
+nstep=1 wall=0.010 s (10153.184 us/step) res0=1.000000e+00 res1=2.300935e-01 res30=-1.000000e+00 res330=-1.000000e+00 resN=2.300935e-01 true_res=3.048469e-02 tol_hit=-1 reorths=1 breakdown=0 identical=1
+centerline y,u,p: 0.000000,0.000000e+00,4.014991e-45 0.125000,4.585950e-22,-2.459190e-41 0.250000,5.767632e-19,-4.525205e-36 0.375000,6.846358e-16,-6.245204e-31 0.500000,7.944496e-13,0.000000e+00 0.625000,9.172749e-10,8.589262e-18 0.750000,1.058554e-06,2.377399e-12 0.875000,1.221734e-03,6.580341e-07 1.000000,1.030386e+00,6.114369e-02
+=== proxy N=2000 ===
+proxy: n=12675 nnz=261513 rhs_norm=8.062648448246e+00 tau0=8.138021e-03 ilu_skipped=0 L_nnz=124419 U_nnz=124419 L_levels=261(wmax=127) U_levels=261(wmax=96)
+host_N1: beta=9.499642252194e+00 est1=2.300935195775e-01 (device must match)
+launch: blocks=128 threads=128 (coop_max=564)
+nstep=2000 wall=10.779 s (5389.357 us/step) res0=1.000000e+00 res1=2.300935e-01 res30=2.361827e-02 res330=9.660892e-07 resN=1.254345e-09 true_res=1.861837e-11 tol_hit=1235 reorths=1749 breakdown=0 identical=1
+centerline y,u,p: 0.000000,0.000000e+00,1.499406e-05 0.125000,-6.801432e-02,1.109240e-05 0.250000,-1.191518e-01,7.933137e-06 0.375000,-1.648195e-01,4.430283e-06 0.500000,-1.949969e-01,0.000000e+00 0.625000,-1.710223e-01,-6.188540e-06 0.750000,-1.586393e-02,-1.100341e-05 0.875000,3.670503e-01,-8.060009e-06 1.000000,1.000000e+00,4.245663e-05
+=== proxy EMPTY N=2000 ===
+proxy: n=12675 nnz=261513 rhs_norm=8.062648448246e+00 tau0=8.138021e-03 ilu_skipped=0 L_nnz=124419 U_nnz=124419 L_levels=261(wmax=127) U_levels=261(wmax=96)
+host_N1: beta=9.499642252194e+00 est1=2.300935195775e-01 (device must match)
+launch: blocks=128 threads=128 (coop_max=564)
+nstep=2000 wall=0.285 s (142.600 us/step) res0=1.000000e+00 res1=4.781452e-19 res30=0.000000e+00 res330=0.000000e+00 resN=0.000000e+00 true_res=8.747958e-01 tol_hit=1 reorths=7 breakdown=1 identical=1
+centerline y,u,p: 0.000000,0.000000e+00,0.000000e+00 0.125000,0.000000e+00,0.000000e+00 0.250000,0.000000e+00,0.000000e+00 0.375000,0.000000e+00,0.000000e+00 0.500000,0.000000e+00,0.000000e+00 0.625000,0.000000e+00,0.000000e+00 0.750000,0.000000e+00,0.000000e+00 0.875000,0.000000e+00,0.000000e+00 1.000000,1.252498e-01,-5.431843e-20

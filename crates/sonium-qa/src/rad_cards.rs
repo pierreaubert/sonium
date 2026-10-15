@@ -1,7 +1,7 @@
 //! OpenCourant deck card families and header normalization.
 //!
 //! This module owns the [`CardKind`] enum covering the 319 normalized card
-//! headers in `sonium/miniqa_cards.txt` plus seven structural extras needed
+//! headers in `sonium/miniqa_cards.txt` plus eight structural extras needed
 //! for a complete corpus parse, and the [`parse_header`] normalization that
 //! maps raw deck header lines onto `(CardKind, id)` pairs.
 //!
@@ -44,10 +44,11 @@ macro_rules! define_kinds {
         /// OpenCourant deck card family.
         ///
         /// Each variant names one normalized deck header (see
-        /// `sonium/miniqa_cards.txt`). The seven [`CardKind::is_extra`]
+        /// `sonium/miniqa_cards.txt`). The eight [`CardKind::is_extra`]
         /// variants cover headers the inventory misses: include-only
-        /// cards, submodel markers, the `/INIVEL/T+G` ALE type, and the
-        /// writer-emitted `/TH/TITLE` and `/MAT/LAW2` cards.
+        /// cards, submodel markers, the `/INIVEL/T+G` ALE type, the
+        /// writer-emitted `/TH/TITLE` and `/MAT/LAW2` cards, and the
+        /// bare `/DT/BRICK` dt-scale card our foam engine decks carry.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub enum CardKind {
             $(
@@ -183,6 +184,7 @@ define_kinds! {
     DfsDetpoin => "/DFS/DETPOIN",
     Dt => "/DT",
     DtAms => "/DT/AMS",
+    DtBrick => "/DT/BRICK",
     DtBrickCst => "/DT/BRICK/CST",
     DtBrickStop => "/DT/BRICK/STOP",
     DtCstAms => "/DT/CST_AMS",
@@ -424,6 +426,8 @@ impl CardKind {
     /// and `/TH/TITLE` plus `/MAT/LAW2` are writer-emitted,
     /// starter-accepted cards no miniqa deck uses (gate amendment:
     /// our engine decks request `/TH/TITLE` for full channel names).
+    /// Bare `/DT/BRICK` is the engine dt-scale card our foam decks
+    /// carry; no miniqa deck uses it, so it stays an extra.
     #[must_use]
     pub const fn is_extra(self) -> bool {
         matches!(
@@ -435,6 +439,7 @@ impl CardKind {
                 | Self::InivelTG
                 | Self::ThTitle
                 | Self::MatLaw2
+                | Self::DtBrick
         )
     }
 
@@ -675,8 +680,8 @@ mod tests {
             assert!(kinds.insert(kind), "duplicate variant for {line}");
             assert!(!kind.is_extra(), "inventory header marked extra: {line}");
         }
-        assert_eq!(CardKind::ALL.len(), INVENTORY_COUNT + 7);
-        assert_eq!(CardKind::ALL.iter().filter(|k| k.is_extra()).count(), 7);
+        assert_eq!(CardKind::ALL.len(), INVENTORY_COUNT + 8);
+        assert_eq!(CardKind::ALL.iter().filter(|k| k.is_extra()).count(), 8);
     }
 
     #[test]
@@ -731,6 +736,7 @@ mod tests {
             ("/SPHCEL/1", CardKind::Sphcel, Some(1)),
             ("//SUBMODEL/1", CardKind::Submodel, Some(1)),
             ("//ENDSUB  ", CardKind::Endsub, None),
+            ("/DT/BRICK", CardKind::DtBrick, None),
             ("/DT/BRICK/CST/0", CardKind::DtBrickCst, Some(0)),
             ("/DT/NODA/CST/0", CardKind::DtNodaCst, Some(0)),
         ];

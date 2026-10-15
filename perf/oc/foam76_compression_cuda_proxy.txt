@@ -1,0 +1,33 @@
+deck: foam76_compression
+proxy: sonium/perf/oc/foam76_compression_cuda_proxy.cu
+nvcc: Build cuda_13.3.r13.3/compiler.38244171_0
+gpu: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+steps: 30720
+note: console captured via the perf_oc_gpu.sh flow mirrored by hand (the
+checked-in script reads the proxy from its own repo tree; the parent reruns
+it verbatim post-merge). Machine profile re-measured same-day on this box.
+=== machine_profile ===
+device: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+compute capability: 12.0
+SMs: 188, max threads/SM: 1536, shared/SM: 100 KB
+L2 cache: 128.0 MB
+global mem: 95.0 GB, bus width: 512 bit
+(clocks via nvidia-smi; legacy clockRate fields removed in CUDA 13)
+empty-launch: 6.847 us/launch (2000 launches, device time)
+launch+sync roundtrip: 8.274 us/step (host-driven floor)
+4KB H2D+D2H roundtrip: 14.798 us (pinned)
+H2D pinned BW: 22.0 GB/s (256 MB)
+D2H pinned BW: 28.0 GB/s (256 MB)
+STREAM triad: 2160 GB/s (achieved DRAM ceiling)
+FP64 MAD: 479.9 GFLOP/s (achieved compute ceiling)
+done
+=== proxy N=1 ===
+nstep=1 wall=0.002 s (2457.216 us/step) work=2.670289e-11 sxx=-1.367188e+02 ep=0.000000e+00 yielding=0 tsum=-1.367188e+02 dj=0.000000e+00
+=== proxy N=30720 ===
+nstep=30720 wall=18.786 s (611.533 us/step) work=1.028509e-03 sxx=3.121125e+05 ep=8.917500e-04 yielding=3666 tsum=5.752146e+12 dj=0.000000e+00
+nstep=30720 wall=14.236 s (463.426 us/step) work=1.028509e-03 sxx=3.121125e+05 ep=8.917500e-04 yielding=3666 tsum=5.752146e+12 dj=0.000000e+00
+nstep=30720 wall=8.532 s (277.728 us/step) work=1.028509e-03 sxx=3.121125e+05 ep=8.917500e-04 yielding=3666 tsum=5.752146e+12 dj=0.000000e+00
+nstep=30720 wall=8.532 s (277.740 us/step) work=1.028509e-03 sxx=3.121125e+05 ep=8.917500e-04 yielding=3666 tsum=5.752146e+12 dj=0.000000e+00
+=== proxy EMPTY N=30720 ===
+nstep=30720 wall=0.144 s (4.699 us/step) work=0.000000e+00 sxx=0.000000e+00 ep=0.000000e+00 yielding=0 tsum=0.000000e+00 dj=0.000000e+00
+nstep=30720 wall=0.144 s (4.699 us/step) work=0.000000e+00 sxx=0.000000e+00 ep=0.000000e+00 yielding=0 tsum=0.000000e+00 dj=0.000000e+00

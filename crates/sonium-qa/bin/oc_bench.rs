@@ -36,8 +36,9 @@ use sonium_fem::physics::solid::fracture::ductile::{ErosionCriterion, ErosionSet
 use sonium_fem::physics::solid::nonlinear_solid::{
     HexExplicitError, HexExplicitGeom, HexExplicitParams, HexExplicitState, HexGaussPlasticGeom,
     HexGaussPlasticState, HexMesh, HexPlasticOut, NeoHookean, ObjectivePlasticMaterial,
-    hex_gauss_plastic_forces, hex_jacobian, hex_plastic_forces, hex_plastic_forces_objective,
-    hex_quadrature, hex_shape_derivatives, physical_gradients, q1_element_residual,
+    eas_linear_stiffness, hex_gauss_plastic_forces, hex_jacobian, hex_plastic_forces,
+    hex_plastic_forces_objective, hex_quadrature, hex_shape_derivatives, physical_gradients,
+    q1_element_residual,
 };
 use sonium_fem::physics::solid::plasticity::law_metals::{
     Law2, Law2Flow, Law2State, Law36, Law36State, MaxRateEffect, RateCurve,
@@ -49,10 +50,20 @@ use sonium_qa::rad::oc_golden::{
 use sonium_qa::rad::{TimeHistory, assert_probe_close, engine_exe, resolve_engine_pair};
 use sonium_qa::rad_parse::{CardKind, DeckCard, ElemType, LoadCard, RadDeck, TypedCard};
 use sonium_solvers::time_integration::{AdaptiveDtConfig, ExplicitStepDriver};
+// UNIT 4 (shells/beams): native shell arm lives in a new module;
+// the bench keeps only the marked dispatch arm below.
+#[path = "support/oc_bench_unit4.rs"]
+mod oc_bench_unit4;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+// UNIT 3 (plasticity/foam, oc-opt-20261015): prescribed-motion foam-cube
+// arm. The generic explicit path cannot parse LAW76/FOAM_PLAS fixtures,
+// so foam decks route to this module from `run_sonium_arm` below.
+#[path = "support/foam_c3.rs"]
+mod foam_c3;
 
 /// Default deck: the smallest C3 explicit case, suited for CI.
 const DEFAULT_DECK: &str = "taylor_bar";
@@ -948,6 +959,61 @@ fn wall_plateau_mean(history: &TimeHistory, channel: &str) -> Result<f64, String
     second_half_mean(values).ok_or_else(|| format!("channel {channel} has no samples"))
 }
 
+/// Samples one engine-leg probe channel at the final TH stamp.
+///
+/// UNIT 4 (beam_warping): `DZ/a-DZ/b` section-difference probes
+/// subtract the two legs' final values in channel order; every other
+/// channel reads its own final value. Splitting on the hyphen is
+/// safe: no engine channel name carries one (deck ids are positive).
+fn unit4_engine_probe_sample(history: &TimeHistory, channel: &str) -> Result<f64, String> {
+    if let Some((first, second)) = channel.split_once('-') {
+        let minuend = history
+            .final_value(first)
+            .map_err(|error| error.to_string())?;
+        let subtrahend = history
+            .final_value(second)
+            .map_err(|error| error.to_string())?;
+        return Ok(minuend - subtrahend);
+    }
+    history
+        .final_value(channel)
+        .map_err(|error| error.to_string())
+}
+
+/// Averages one engine-leg probe channel over a hold window.
+///
+/// UNIT 4 (shell_twisted_beam): the legs' window means subtract for
+/// difference channels; plain channels average directly. Samples at
+/// or after `start` enter the mean; an empty window fails closed.
+fn unit4_engine_hold_mean(history: &TimeHistory, channel: &str, start: f64) -> Result<f64, String> {
+    fn window_mean(history: &TimeHistory, channel: &str, start: f64) -> Result<f64, String> {
+        let values = history
+            .channel(channel)
+            .map_err(|error| error.to_string())?;
+        if history.times.len() != values.len() {
+            return Err(format!("channel {channel} is ragged against its time grid"));
+        }
+        let mut sum = 0.0;
+        let mut count = 0usize;
+        for (time, value) in history.times.iter().zip(values.iter()) {
+            if *time >= start {
+                sum += value;
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Err(format!(
+                "channel {channel} has no samples at or after {start}"
+            ));
+        }
+        Ok(sum / count as f64)
+    }
+    if let Some((first, second)) = channel.split_once('-') {
+        return Ok(window_mean(history, first, start)? - window_mean(history, second, start)?);
+    }
+    window_mean(history, channel, start)
+}
+
 /// Checks C3 probes against TH channel values (engine-leg rule).
 ///
 /// Each `probes.json` expectation is anchored to the estimand that
@@ -985,10 +1051,16 @@ fn check_c3_probes(deck: &str, history: &TimeHistory, probes: &[Probe]) -> Vec<S
             transient
         } else if plateau {
             wall_plateau_mean(history, &probe.channel)
+        } else if deck == "shell_twisted_beam" {
+            // UNIT 4: the tip rings about +-10% past the ramp (20 ms
+            // ramp near 1.4 bending periods, lightly damped), so the
+            // final sample is phase noise; the probes.json expectation
+            // is the settled hold mean (QA gate precedent), averaged
+            // over the same [0.032, 0.06] window as the native arm.
+            unit4_engine_hold_mean(history, &probe.channel, 0.032)
         } else {
-            history
-                .final_value(&probe.channel)
-                .map_err(|error| error.to_string())
+            // UNIT 4 dispatch: difference channels subtract legs.
+            unit4_engine_probe_sample(history, &probe.channel)
         };
         match sampled {
             Ok(value) => {
@@ -2148,10 +2220,29 @@ fn min_edge_length(mesh: &HexMesh, elem: usize) -> f64 {
 /// brick element value (centroid stress component / plastic strain).
 #[derive(Clone, Copy)]
 enum ProbeTarget {
-    Displacement { axis: usize, node: usize },
-    WallForce { axis: usize, wall: usize },
-    ElemStress { comp: usize, elem: usize },
-    ElemPlas { elem: usize },
+    Displacement {
+        axis: usize,
+        node: usize,
+    },
+    // UNIT 4 (beam_warping): same-axis difference of two nodal
+    // displacements; the warping probes measure twist/warping as
+    // section DZ differences, not absolute motion.
+    DisplacementDiff {
+        axis: usize,
+        node_a: usize,
+        node_b: usize,
+    },
+    WallForce {
+        axis: usize,
+        wall: usize,
+    },
+    ElemStress {
+        comp: usize,
+        elem: usize,
+    },
+    ElemPlas {
+        elem: usize,
+    },
 }
 
 /// Linearly interpolates a recorded probe history at a time.
@@ -2242,6 +2333,43 @@ fn thick_cylinder_sample_times() -> (f64, f64) {
 
 /// Resolves a C3 probe channel to a native target.
 fn resolve_probe_channel(channel: &str, model: &NativeModel) -> Result<ProbeTarget, String> {
+    // UNIT 4 (beam_warping): `DZ/a-DZ/b` section-difference probes.
+    // Checked first: the plain displacement arm below would
+    // otherwise claim the shared `DZ/` prefix and fail the parse.
+    // Both legs must share one axis; the sample subtracts the final
+    // displacements in channel order (leg a minus leg b). Deck node
+    // ids are positive, so no plain channel carries a hyphen.
+    if let Some((first, second)) = channel.split_once('-') {
+        let leg = |leg: &str| -> Result<(usize, usize), String> {
+            let (axis, id) = leg
+                .strip_prefix("DX/")
+                .map(|id| (0, id))
+                .or_else(|| leg.strip_prefix("DY/").map(|id| (1, id)))
+                .or_else(|| leg.strip_prefix("DZ/").map(|id| (2, id)))
+                .ok_or_else(|| {
+                    format!("probe channel {channel} is not a same-axis displacement difference")
+                })?;
+            let id: i64 = id
+                .parse()
+                .ok()
+                .ok_or_else(|| format!("probe channel {channel} names no node"))?;
+            let node =
+                model.index_of.get(&id).copied().ok_or_else(|| {
+                    format!("probe channel {channel} names a non-structural node")
+                })?;
+            Ok((axis, node))
+        };
+        let (axis_a, node_a) = leg(first)?;
+        let (axis_b, node_b) = leg(second)?;
+        if axis_a != axis_b {
+            return Err(format!("probe channel {channel} mixes displacement axes"));
+        }
+        return Ok(ProbeTarget::DisplacementDiff {
+            axis: axis_a,
+            node_a,
+            node_b,
+        });
+    }
     if let Some(rest) = channel
         .strip_prefix("DX/")
         .map(|id| (0, id))
@@ -2568,7 +2696,19 @@ fn sonium_repeat_observed(
     // Linearized bulk only where strains stay infinitesimal: hertz
     // contact (~0.1%) matches the finite-strain kernel to probe
     // tolerance, while taylor_bar impact (~10%) misses DZ by 5.5%.
-    let linear_bulk = deck == "hertz_sphere";
+    // UNIT1: the small-strain bending decks (tip/center deflection
+    // ~1e-4 over ~1 m spans) join the linear path with the EAS
+    // locking-free stiffness: full-integration Q1 captures only
+    // ~39% of the cantilever tip deflection (shear locking), while
+    // the condensed EAS stiffness lands at 98% of beam theory in
+    // the fem static replica (eas.rs linear_cure_unlocks test).
+    let unit1_eas = matches!(deck, "cantilever" | "beam_3d_cantilever" | "bending_3pt");
+    // UNIT 4 (beam_torsion, beam_warping): twist/warping strains stay
+    // ~0.1% (verified by probe agreement with the finite-strain
+    // kernel on the same decks), so these decks join the
+    // precomputed-stiffness path; beam_curved_arch stays
+    // finite-strain (locking-limited, not kernel-limited).
+    let linear_bulk = matches!(deck, "hertz_sphere" | "beam_torsion" | "beam_warping") || unit1_eas;
     // Linearized bulk for the small-strain LAW1 decks: one element
     // stiffness precomputed per element replaces the finite-strain
     // kernel (Jacobians, determinants, logarithms at 8 Gauss points
@@ -2576,7 +2716,13 @@ fn sonium_repeat_observed(
     let elem_stiffness: Vec<[f64; 576]> = if linear_bulk {
         (0..num_elems)
             .map(|elem| {
-                linear_hex_stiffness(material.lambda, material.mu, &mesh.element_coords(elem))
+                // UNIT1 dispatch: EAS-linear on bending decks, locked
+                // Q1-linear stays hertz-only (contact needs no cure).
+                if unit1_eas {
+                    eas_linear_stiffness(material.lambda, material.mu, &mesh.element_coords(elem))
+                } else {
+                    linear_hex_stiffness(material.lambda, material.mu, &mesh.element_coords(elem))
+                }
             })
             .collect()
     } else {
@@ -2893,6 +3039,15 @@ fn sonium_repeat_observed(
         let actual = match target {
             ProbeTarget::Displacement { axis, node } => {
                 state.positions[3 * node + axis] - reference[3 * node + axis]
+            }
+            // UNIT 4 (beam_warping): section-difference probe.
+            ProbeTarget::DisplacementDiff {
+                axis,
+                node_a,
+                node_b,
+            } => {
+                (state.positions[3 * node_a + axis] - reference[3 * node_a + axis])
+                    - (state.positions[3 * node_b + axis] - reference[3 * node_b + axis])
             }
             ProbeTarget::WallForce { axis, wall } => {
                 let history = &sampled[wall];
@@ -4847,6 +5002,15 @@ where
             ProbeTarget::Displacement { axis, node } => {
                 state.positions[3 * node + axis] - reference[3 * node + axis]
             }
+            // UNIT 4 (beam_warping): section-difference probe.
+            ProbeTarget::DisplacementDiff {
+                axis,
+                node_a,
+                node_b,
+            } => {
+                (state.positions[3 * node_a + axis] - reference[3 * node_a + axis])
+                    - (state.positions[3 * node_b + axis] - reference[3 * node_b + axis])
+            }
             ProbeTarget::WallForce { axis, wall } => {
                 let history = &sampled[wall];
                 if history.is_empty() {
@@ -5202,7 +5366,25 @@ fn run_sonium_arm(args: &Args, deck: &str, repeats: u32, warmup: u32) -> Result<
     unsafe {
         std::env::set_var("RAYON_NUM_THREADS", args.threads.max(1).to_string());
     }
+    // UNIT 3 (plasticity/foam, oc-opt-20261015): exact-id dispatch to the
+    // foam replay arm (no prefix match: foam_guided_rods belongs to Unit 2).
+    if foam_c3::FOAM_DECKS.contains(&deck) {
+        return foam_c3::run_arm(deck, args.threads.max(1), repeats, warmup);
+    }
     let decks = resolve_c3_decks(deck)?;
+    // UNIT 4 dispatch: shell-deck starters route to the native shell
+    // arm; everything else keeps the brick path below unchanged.
+    if oc_bench_unit4::starter_has_shells(&decks.starter)? {
+        return oc_bench_unit4::run_shell_arm(
+            args.threads,
+            deck,
+            &decks.starter,
+            &decks.engine,
+            &decks.probes,
+            repeats,
+            warmup,
+        );
+    }
     let probes = read_probe_file(&decks.probes)?;
     let model = parse_native_model(&decks)?;
     for warmup_index in 0..warmup {
@@ -5988,5 +6170,89 @@ mod tests {
         let (t_elastic, t_outer) = thick_cylinder_sample_times();
         assert!((t_elastic - 3.918_266e-4).abs() < 1.0e-10);
         assert!((t_outer - t_elastic - 8.5e-6).abs() < 0.1e-6);
+    }
+
+    // UNIT 4 (beam_warping): difference-probe coverage.
+    #[test]
+    fn unit4_engine_difference_sample_subtracts_legs() {
+        let history = TimeHistory {
+            times: vec![0.0, 1.0],
+            channels: BTreeMap::from([
+                ("DZ/1392".to_string(), vec![0.0, 3.0]),
+                ("DZ/1311".to_string(), vec![0.0, 1.0]),
+            ]),
+        };
+        assert_eq!(
+            unit4_engine_probe_sample(&history, "DZ/1392-DZ/1311").unwrap(),
+            2.0
+        );
+        assert_eq!(unit4_engine_probe_sample(&history, "DZ/1392").unwrap(), 3.0);
+        assert!(unit4_engine_probe_sample(&history, "DZ/1392-DZ/9").is_err());
+    }
+
+    #[test]
+    fn unit4_beam_deck_probes_resolve_on_parsed_models() {
+        // Parse-level gate: every Unit 4 brick-deck probe channel must
+        // resolve against its parsed native model (no timing).
+        for deck in ["beam_torsion", "beam_curved_arch", "beam_warping"] {
+            let c3 = resolve_c3_decks(deck).unwrap_or_else(|error| panic!("{deck}: {error}"));
+            let model = parse_native_model(&c3).unwrap_or_else(|error| panic!("{deck}: {error}"));
+            let probes = read_probe_file(&c3.probes).unwrap();
+            assert!(!probes.is_empty(), "{deck}: no probes");
+            for probe in &probes {
+                resolve_probe_channel(&probe.channel, &model)
+                    .unwrap_or_else(|error| panic!("{deck}: {error}"));
+            }
+        }
+    }
+
+    #[test]
+    fn unit4_engine_hold_mean_averages_window_and_differences() {
+        let history = TimeHistory {
+            times: vec![0.0, 0.03, 0.04, 0.05, 0.06],
+            channels: BTreeMap::from([
+                ("DZ/228".to_string(), vec![0.0, 1.0, 2.0, 3.0, 4.0]),
+                ("DZ/1".to_string(), vec![0.0, 0.0, 1.0, 1.0, 1.0]),
+            ]),
+        };
+        assert_eq!(
+            unit4_engine_hold_mean(&history, "DZ/228", 0.032).unwrap(),
+            3.0
+        );
+        assert_eq!(
+            unit4_engine_hold_mean(&history, "DZ/228-DZ/1", 0.032).unwrap(),
+            2.0
+        );
+        assert!(unit4_engine_hold_mean(&history, "DZ/228", 9.0).is_err());
+    }
+
+    #[test]
+    fn unit4_native_difference_channel_resolves_same_axis() {
+        let model = NativeModel {
+            coords: vec![[0.0; 3]; 2],
+            bricks: Vec::new(),
+            index_of: BTreeMap::from([(1392, 0), (1311, 1)]),
+            elem_index_of: BTreeMap::new(),
+            youngs: 200.0e9,
+            poisson: 0.3,
+            density: 7800.0,
+            material: NativeMaterial::Law1,
+            walls: Vec::new(),
+            cloads: Vec::new(),
+            pinned: vec![[false; 3]; 2],
+            functs: BTreeMap::new(),
+            stop: 1.0,
+        };
+        let target = resolve_probe_channel("DZ/1392-DZ/1311", &model).unwrap();
+        assert!(matches!(
+            target,
+            ProbeTarget::DisplacementDiff {
+                axis: 2,
+                node_a: 0,
+                node_b: 1
+            }
+        ));
+        assert!(resolve_probe_channel("DZ/1392-DY/1311", &model).is_err());
+        assert!(resolve_probe_channel("DZ/1392-DZ/9", &model).is_err());
     }
 }

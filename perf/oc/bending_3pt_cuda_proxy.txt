@@ -1,0 +1,20 @@
+deck: bending_3pt
+proxy: sonium/perf/oc/bending_3pt_cuda_proxy.cu
+nvcc: Build cuda_13.3.r13.3/compiler.38244171_0
+gpu: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+note: console captured manually (perf_oc_gpu.sh flow: build + N=1 + N=20000 + EMPTY + full-N fidelity); GPU idle (0%, no compute procs) at each run; CPU load high during device-timed runs (device timing unaffected)
+=== proxy N=1 ===
+ke_check: sum=-1.192093e-06 max=1.826732e+09 null=2.146e-06 ke0=1.042621e+09 ke100=1.826732e+09 ke575=1.826732e+09
+nstep=1 wall=0.001 s (671.808 us/step) tip_dz=1.310939e-15 max|f|=0.000e+00
+=== proxy N=20000 ===
+ke_check: sum=-1.192093e-06 max=1.826732e+09 null=2.146e-06 ke0=1.042621e+09 ke100=1.826732e+09 ke575=1.826732e+09
+nstep=20000 wall=11.345 s (567.230 us/step) tip_dz=1.227233e-06 max|f|=1.347e+00
+=== proxy EMPTY N=20000 ===
+ke_check: sum=-1.192093e-06 max=1.826732e+09 null=2.146e-06 ke0=1.042621e+09 ke100=1.826732e+09 ke575=1.826732e+09
+nstep=20000 wall=0.134 s (6.719 us/step) tip_dz=1.748180e-03 max|f|=0.000e+00
+=== proxy full-N (t=1.0 s) ===
+ke_check: sum=-1.192093e-06 max=1.826732e+09 null=2.146e-06 ke0=1.042621e+09 ke100=1.826732e+09 ke575=1.826732e+09
+nstep=326371 wall=185.070 s (567.054 us/step) tip_dz=2.005924e-05 max|f|=2.206e+01
+=== fidelity anchors ===
+cpu sonium final center dz = 2.006208e-5 (probe gate passed, 10% tol)
+engine serial center dz     = 1.984338e-5 (probe gate passed, 10% tol)

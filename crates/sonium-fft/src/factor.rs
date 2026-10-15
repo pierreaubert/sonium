@@ -38,6 +38,12 @@ impl std::fmt::Display for PlanLengthError {
 
 impl std::error::Error for PlanLengthError {}
 
+// Radix-8 stages exist on x86_64 (scalar codelet plus AVX2/FMA AoS
+// kernels), but the default factorisation stays radix-4-first on every
+// backend: A/B measurements showed radix-8-first loses more at
+// 1024/4096/2M (fused radix-4 audio paths, cache-set conflicts) than it
+// gains at 512/2048. Radix-8 remains reachable through explicit stage
+// construction.
 const SUPPORTED_RADICES: &[usize] = &[5, 4, 3, 2];
 
 /// Pick a factorisation of `n` for the Stockham driver. Returns
@@ -111,9 +117,9 @@ mod tests {
 
     #[test]
     fn powers_of_two_use_radix_4_first() {
-        // 1024 = 4^5 = five radix-4 stages.
         match plan_length(1024) {
             Strategy::MixedRadix(f) => {
+                // 1024 = 4^5 = five radix-4 stages.
                 assert!(f.iter().all(|&r| r == 4), "got {f:?}");
                 assert_eq!(f.len(), 5);
             }
@@ -123,11 +129,12 @@ mod tests {
 
     #[test]
     fn radix_2_picks_up_residual_factor() {
-        // 32 = 4 * 4 * 2
-        match plan_length(32) {
+        // 128 = 4^3 * 2: the residual 2 must be picked up after the
+        // larger radices are exhausted.
+        match plan_length(128) {
             Strategy::MixedRadix(f) => {
                 let prod: usize = f.iter().product();
-                assert_eq!(prod, 32);
+                assert_eq!(prod, 128);
                 assert!(f.contains(&2));
             }
             other => panic!("{other:?}"),

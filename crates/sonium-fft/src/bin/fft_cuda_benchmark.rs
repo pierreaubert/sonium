@@ -5,6 +5,7 @@
 //! context into a CPU timing.  Run it with `SONIUM_REQUIRE_CUDA=1` in CI when
 //! a real cuFFT result is required.
 
+use libloading::{Library, Symbol};
 use num_complex::{Complex, Complex64};
 use sonium_compute::{
     Backend, BufferElement, CudaBackend, CudaBuffer, CudaRuntimeStatsSnapshot, OomError,
@@ -15,8 +16,9 @@ use sonium_fft::{
     RealFftPlan, dct2, dct2_adjoint, dct3, dct3_adjoint, dst2, dst2_adjoint, dst3, dst3_adjoint,
 };
 use std::any::TypeId;
+use std::ffi::c_void;
 use std::fmt::Write as _;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const SCHEMA_VERSION: u32 = 1;
@@ -61,6 +63,22 @@ struct Row {
     cold_ns: Option<u128>,
     samples_ns: Vec<u128>,
     stats: Option<CudaRuntimeStatsSnapshot>,
+    /// Raw-cuFFT reference measurement for complex cases (see
+    /// `cufft_reference`); `None` where no cuFFT equivalent exists
+    /// (real/DCT/DST rows) or the reference was not measured.
+    cufft: Option<CufftRef>,
+    cufft_error: Option<String>,
+}
+
+/// Raw-cuFFT reference timings for one complex case, measured with the
+/// same H2D-outside / exec+synchronize discipline as the sonium samples.
+/// `overhead_ratio` (sonium median / this median) is derived at emission.
+#[derive(Clone)]
+struct CufftRef {
+    plan_ns: u128,
+    cold_ns: u128,
+    samples_ns: Vec<u128>,
+    max_abs_error: f64,
 }
 
 fn required_cuda() -> bool {
@@ -252,6 +270,288 @@ where
     }
 }
 
+// ---------------------------------------------------------------------------
+// Raw cuFFT reference, loaded dynamically (mirroring the FFTW reference
+// test), so the artifact can attribute sonium's device time between the
+// vendor kernel and our wrapper (plan cache, workspace, dispatch). The
+// reference intentionally uses cuFFT defaults (auto-allocation on, no
+// explicit work area): that is what a typical raw-cuFFT caller pays, and
+// the asymmetry is what the comparison should expose — sonium's explicit
+// workspace management shows up in its own `stats` block instead.
+// Timing discipline mirrors the sonium samples exactly (H2D outside the
+// timed region, exec + stream synchronize inside), so medians compare
+// like for like via `overhead_ratio` at emission.
+// ---------------------------------------------------------------------------
+
+type CufftHandle = i32;
+type CufftResult = i32;
+type CufftComplex = [f32; 2];
+type CufftDoubleComplex = [f64; 2];
+type CufftPlanMany = unsafe extern "C" fn(
+    plan: *mut CufftHandle,
+    rank: i32,
+    n: *const i32,
+    inembed: *const i32,
+    istride: i32,
+    idist: i32,
+    onembed: *const i32,
+    ostride: i32,
+    odist: i32,
+    fft_type: i32,
+    batch: i32,
+) -> CufftResult;
+type CufftSetStream = unsafe extern "C" fn(plan: CufftHandle, stream: *mut c_void) -> CufftResult;
+type CufftExecC2C = unsafe extern "C" fn(
+    plan: CufftHandle,
+    input: *mut CufftComplex,
+    output: *mut CufftComplex,
+    direction: i32,
+) -> CufftResult;
+type CufftExecZ2Z = unsafe extern "C" fn(
+    plan: CufftHandle,
+    input: *mut CufftDoubleComplex,
+    output: *mut CufftDoubleComplex,
+    direction: i32,
+) -> CufftResult;
+type CufftDestroy = unsafe extern "C" fn(plan: CufftHandle) -> CufftResult;
+
+const CUFFT_SUCCESS: CufftResult = 0;
+const CUFFT_C2C: i32 = 0x29;
+const CUFFT_Z2Z: i32 = 0x69;
+const CUFFT_FORWARD: i32 = -1;
+
+struct CufftApi {
+    _library: Library,
+    plan_many: CufftPlanMany,
+    set_stream: CufftSetStream,
+    exec_c2c: CufftExecC2C,
+    exec_z2z: CufftExecZ2Z,
+    destroy: CufftDestroy,
+}
+
+impl CufftApi {
+    fn load() -> Result<Self, String> {
+        #[cfg(target_os = "windows")]
+        const LIBRARIES: &[&str] = &["cufft64_12.dll", "cufft64_11.dll", "cufft64_10.dll"];
+        #[cfg(target_os = "macos")]
+        const LIBRARIES: &[&str] = &["libcufft.dylib"];
+        #[cfg(all(unix, not(target_os = "macos")))]
+        const LIBRARIES: &[&str] = &["libcufft.so.12", "libcufft.so.11", "libcufft.so"];
+
+        let mut last_error = String::from("no cuFFT shared library found");
+        for name in LIBRARIES {
+            // SAFETY: loading a named optional shared library is the intended
+            // dynamic-loading boundary; symbols are copied into function
+            // pointers while the Library is retained in `Self`.
+            let Ok(library) = (unsafe { Library::new(*name) }) else {
+                continue;
+            };
+            // SAFETY: cuFFT exports these symbols with the declared C ABI.
+            let symbols = unsafe {
+                (
+                    load_symbol::<CufftPlanMany>(&library, b"cufftPlanMany\0"),
+                    load_symbol::<CufftSetStream>(&library, b"cufftSetStream\0"),
+                    load_symbol::<CufftExecC2C>(&library, b"cufftExecC2C\0"),
+                    load_symbol::<CufftExecZ2Z>(&library, b"cufftExecZ2Z\0"),
+                    load_symbol::<CufftDestroy>(&library, b"cufftDestroy\0"),
+                )
+            };
+            match symbols {
+                (Ok(plan_many), Ok(set_stream), Ok(exec_c2c), Ok(exec_z2z), Ok(destroy)) => {
+                    return Ok(Self {
+                        _library: library,
+                        plan_many,
+                        set_stream,
+                        exec_c2c,
+                        exec_z2z,
+                        destroy,
+                    });
+                }
+                _ => last_error = format!("cuFFT library {name} is missing required symbols"),
+            }
+        }
+        Err(last_error)
+    }
+}
+
+unsafe fn load_symbol<T: Copy>(library: &Library, name: &[u8]) -> Result<T, String> {
+    // SAFETY: the caller verifies the symbol's ABI through the requested type
+    // and retains `library` for the lifetime of the copied function pointer.
+    unsafe {
+        library
+            .get::<T>(name)
+            .map(|symbol: Symbol<'_, T>| *symbol)
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn cufft_api() -> Result<&'static Arc<CufftApi>, String> {
+    static API: OnceLock<Result<Arc<CufftApi>, String>> = OnceLock::new();
+    API.get_or_init(|| CufftApi::load().map(Arc::new))
+        .as_ref()
+        .map_err(|error| error.clone())
+}
+
+/// Destroys the reference plan on scope exit, including error paths.
+struct CufftPlanGuard<'a> {
+    api: &'a CufftApi,
+    handle: CufftHandle,
+}
+
+impl Drop for CufftPlanGuard<'_> {
+    fn drop(&mut self) {
+        if self.handle != 0 {
+            // SAFETY: the handle came from `cufftPlanMany` on this API and
+            // is destroyed exactly once here.
+            unsafe {
+                (self.api.destroy)(self.handle);
+            }
+        }
+    }
+}
+
+/// Measure raw cuFFT on the same device buffer, layout, and stream as the
+/// sonium plan under test (in-place, `embed = [n]`, `dist = stride`).
+/// Runs after the sonium runtime-stats snapshot, so it cannot perturb
+/// the cache-reuse gates. Errors are reported, never fail the row: the
+/// reference is evidence, not a gate.
+fn cufft_reference<T: FftScalar>(
+    backend: &Arc<CudaBackend>,
+    case: Case,
+    device: &mut <CudaBackend as Backend>::Buffer<Complex<T>>,
+    input: &[Complex<T>],
+    expected: &[Complex<T>],
+) -> Result<CufftRef, String>
+where
+    Complex<T>: BufferElement,
+{
+    use cudarc::driver::DevicePtrMut as _;
+
+    let api = cufft_api()?.as_ref();
+    let n_i32 = i32::try_from(case.n).map_err(|_| "case length exceeds cuFFT range".to_owned())?;
+    let batch_i32 =
+        i32::try_from(case.batch).map_err(|_| "case batch exceeds cuFFT range".to_owned())?;
+    let dist_i32 =
+        i32::try_from(case.stride).map_err(|_| "case stride exceeds cuFFT range".to_owned())?;
+    let embed = [n_i32];
+    let is_f32 = TypeId::of::<T>() == TypeId::of::<f32>();
+    let fft_type = if is_f32 { CUFFT_C2C } else { CUFFT_Z2Z };
+
+    // The SyncOnDrop guard is scoped out before the timed loops: the
+    // owning `CudaBuffer` cannot be freed or reallocated while
+    // `cufft_reference` holds `&mut device`, and every launch is drained
+    // by `try_synchronize` before return, so the raw pointer stays valid
+    // for exactly the executions below (same contract compute's wrapper
+    // relies on within one call).
+    let ptr = {
+        let (ptr, _guard) = device
+            .raw_mut()
+            .ok_or_else(|| "empty device buffer".to_owned())?
+            .device_ptr_mut(backend.stream());
+        ptr
+    } as *mut c_void;
+
+    let mut handle: CufftHandle = 0;
+    let plan_start = Instant::now();
+    // SAFETY: `handle` outlives the call; embed arrays are valid for the
+    // duration of the call; the plan is destroyed by the guard below.
+    let status = unsafe {
+        (api.plan_many)(
+            &mut handle,
+            1,
+            embed.as_ptr(),
+            embed.as_ptr(),
+            1,
+            dist_i32,
+            embed.as_ptr(),
+            1,
+            dist_i32,
+            fft_type,
+            batch_i32,
+        )
+    };
+    if status != CUFFT_SUCCESS {
+        return Err(format!("cufftPlanMany status {status}"));
+    }
+    let plan_ns = plan_start.elapsed().as_nanos();
+    let _plan = CufftPlanGuard { api, handle };
+    // SAFETY: the handle was just created; the backend stream outlives it.
+    let status = unsafe { (api.set_stream)(handle, backend.stream().cu_stream() as *mut c_void) };
+    if status != CUFFT_SUCCESS {
+        return Err(format!("cufftSetStream status {status}"));
+    }
+
+    let exec = |api: &CufftApi| -> Result<(), String> {
+        // SAFETY: the plan is bound to the backend stream, the buffer is
+        // the live device allocation behind `ptr` (pointer guard held by
+        // the caller until after the final synchronize), and element
+        // layout matches the `Complex<T>` (re, im) pair layout cuFFT
+        // expects for the selected type.
+        let status = if is_f32 {
+            unsafe {
+                (api.exec_c2c)(
+                    handle,
+                    ptr as *mut CufftComplex,
+                    ptr as *mut CufftComplex,
+                    CUFFT_FORWARD,
+                )
+            }
+        } else {
+            unsafe {
+                (api.exec_z2z)(
+                    handle,
+                    ptr as *mut CufftDoubleComplex,
+                    ptr as *mut CufftDoubleComplex,
+                    CUFFT_FORWARD,
+                )
+            }
+        };
+        if status != CUFFT_SUCCESS {
+            return Err(format!("cufftExec status {status}"));
+        }
+        Ok(())
+    };
+
+    backend
+        .try_copy_h2d(input, device)
+        .map_err(|error| error.to_string())?;
+    backend
+        .try_synchronize()
+        .map_err(|error| error.to_string())?;
+    let cold_start = Instant::now();
+    exec(api)?;
+    backend
+        .try_synchronize()
+        .map_err(|error| error.to_string())?;
+    let cold_ns = cold_start.elapsed().as_nanos();
+
+    let mut samples_ns = Vec::with_capacity(SAMPLES);
+    for _ in 0..SAMPLES {
+        backend
+            .try_copy_h2d(input, device)
+            .map_err(|error| error.to_string())?;
+        backend
+            .try_synchronize()
+            .map_err(|error| error.to_string())?;
+        let start = Instant::now();
+        exec(api)?;
+        backend
+            .try_synchronize()
+            .map_err(|error| error.to_string())?;
+        samples_ns.push(start.elapsed().as_nanos());
+    }
+    let mut actual = vec![Complex::<T>::default(); expected.len()];
+    backend
+        .try_copy_d2h(device, &mut actual)
+        .map_err(|error| error.to_string())?;
+    Ok(CufftRef {
+        plan_ns,
+        cold_ns,
+        samples_ns,
+        max_abs_error: max_error(&actual, expected),
+    })
+}
+
 fn benchmark_input_case<T: FftScalar>(
     backend: &Arc<CudaBackend>,
     case: Case,
@@ -279,6 +579,8 @@ where
             cold_ns: None,
             samples_ns: Vec::new(),
             stats: None,
+            cufft: None,
+            cufft_error: None,
         };
     }
 
@@ -293,7 +595,17 @@ where
         Err(error) => return allocation_error(case, plan_ns, error),
     };
 
-    let result = (|| -> Result<(u128, Vec<u128>, CudaRuntimeStatsSnapshot, f64, bool), String> {
+    // (cold_ns, samples, stats, max_err, cache_reuse, cufft, cufft_error)
+    type SteadyMeasurement = (
+        u128,
+        Vec<u128>,
+        CudaRuntimeStatsSnapshot,
+        f64,
+        bool,
+        Option<CufftRef>,
+        Option<String>,
+    );
+    let result = (|| -> Result<SteadyMeasurement, String> {
         backend
             .try_copy_h2d(&input, &mut device)
             .map_err(|error| error.to_string())?;
@@ -338,11 +650,26 @@ where
             && stats.library_operations == SAMPLES + 1
             && stats.allocation_high_water_bytes == planned_high_water
             && stats.synchronization_calls > 2 * SAMPLES;
-        Ok((cold_ns, samples, stats, error, cache_reuse))
+        // Reference runs last: its own allocations and library calls must
+        // not perturb the stats snapshot or cache-reuse gates above.
+        let (cufft, cufft_error) =
+            match cufft_reference(backend, case, &mut device, &input, &expected) {
+                Ok(reference) => (Some(reference), None),
+                Err(error) => (None, Some(error)),
+            };
+        Ok((
+            cold_ns,
+            samples,
+            stats,
+            error,
+            cache_reuse,
+            cufft,
+            cufft_error,
+        ))
     })();
 
     match result {
-        Ok((cold_ns, samples, stats, error, cache_reuse)) => Row {
+        Ok((cold_ns, samples, stats, error, cache_reuse, cufft, cufft_error)) => Row {
             case,
             status: if error <= tolerance
                 && !samples.is_empty()
@@ -365,6 +692,8 @@ where
             cold_ns: Some(cold_ns),
             samples_ns: samples,
             stats: Some(stats),
+            cufft,
+            cufft_error,
         },
         Err(error) => Row {
             case,
@@ -379,6 +708,8 @@ where
             cold_ns: None,
             samples_ns: Vec::new(),
             stats: Some(backend.runtime_stats()),
+            cufft: None,
+            cufft_error: None,
         },
     }
 }
@@ -430,6 +761,8 @@ where
             cold_ns: None,
             samples_ns: Vec::new(),
             stats: None,
+            cufft: None,
+            cufft_error: None,
         };
     }
 
@@ -511,6 +844,8 @@ where
                 cold_ns: Some(cold_ns),
                 samples_ns: samples,
                 stats: Some(stats),
+                cufft: None,
+                cufft_error: None,
             }
         }
         Err(error) => Row {
@@ -526,6 +861,8 @@ where
             cold_ns: None,
             samples_ns: Vec::new(),
             stats: Some(backend.runtime_stats()),
+            cufft: None,
+            cufft_error: None,
         },
     }
 }
@@ -723,6 +1060,8 @@ fn benchmark_cuda_convolution(backend: &Arc<CudaBackend>) -> Row {
             cold_ns: None,
             samples_ns: Vec::new(),
             stats: None,
+            cufft: None,
+            cufft_error: None,
         };
     }
     if backend.capabilities().batched_local_contract.c64 != sonium_compute::CapabilityState::Native
@@ -740,6 +1079,8 @@ fn benchmark_cuda_convolution(backend: &Arc<CudaBackend>) -> Row {
             cold_ns: None,
             samples_ns: Vec::new(),
             stats: None,
+            cufft: None,
+            cufft_error: None,
         };
     }
 
@@ -857,6 +1198,8 @@ fn benchmark_cuda_convolution(backend: &Arc<CudaBackend>) -> Row {
                 cold_ns: Some(cold_ns),
                 samples_ns: samples,
                 stats: Some(stats),
+                cufft: None,
+                cufft_error: None,
             }
         }
         Err(error) => Row {
@@ -872,6 +1215,8 @@ fn benchmark_cuda_convolution(backend: &Arc<CudaBackend>) -> Row {
             cold_ns: None,
             samples_ns: Vec::new(),
             stats: Some(backend.runtime_stats()),
+            cufft: None,
+            cufft_error: None,
         },
     }
 }
@@ -1137,6 +1482,8 @@ fn allocation_error(case: Case, plan_ns: u128, error: OomError) -> Row {
         cold_ns: None,
         samples_ns: Vec::new(),
         stats: None,
+        cufft: None,
+        cufft_error: None,
     }
 }
 
@@ -1206,6 +1553,40 @@ fn stats_json(stats: Option<CudaRuntimeStatsSnapshot>) -> String {
     )
 }
 
+/// `cufft_reference` value for one row: measured object, unavailable
+/// object (load/exec error), or `null` where no cuFFT equivalent exists.
+fn cufft_reference_json(row: &Row) -> String {
+    match (&row.cufft, &row.cufft_error) {
+        (Some(reference), _) => {
+            let cufft_median = median(&reference.samples_ns) as f64;
+            let sonium_median = median(&row.samples_ns) as f64;
+            // Ratio > 1 means sonium's wrapper is slower than raw cuFFT.
+            let ratio = if cufft_median > 0.0 && sonium_median > 0.0 {
+                format!(
+                    "{}",
+                    (sonium_median / cufft_median * 1000.0).round() / 1000.0
+                )
+            } else {
+                "null".to_owned()
+            };
+            format!(
+                "{{\"status\":\"measured\",\"allocation\":\"auto\",\"plan_ns\":{},\"cold_ns\":{},\"median_ns\":{},\"p95_ns\":{},\"max_abs_error\":{},\"overhead_ratio\":{}}}",
+                reference.plan_ns,
+                reference.cold_ns,
+                median(&reference.samples_ns),
+                percentile(&reference.samples_ns, 95, 100),
+                reference.max_abs_error,
+                ratio,
+            )
+        }
+        (None, Some(error)) => format!(
+            "{{\"status\":\"unavailable\",\"error\":{}}}",
+            json_string(error)
+        ),
+        (None, None) => "null".to_owned(),
+    }
+}
+
 fn row_json(row: &Row) -> String {
     let stride = (row.case.stride != row.case.n).then_some(row.case.stride);
     let samples = row
@@ -1249,7 +1630,7 @@ fn row_json(row: &Row) -> String {
         )
     };
     format!(
-        "{{\"case\":{},\"dtype\":{},\"n\":{},\"batch\":{},\"stride\":{},\"status\":{},\"execution\":{},\"correctness_passed\":{},\"throughput_gate_passed\":{},\"cache_reuse_gate_passed\":{},\"max_abs_error\":{},\"error\":{},\"plan_ns\":{},\"cold_ns\":{},\"samples_ns\":[{}],\"median_ns\":{},\"p95_ns\":{},\"p99_ns\":{},\"ci95_low_ns\":{},\"ci95_high_ns\":{},\"ci95_method\":\"empirical_order_stat_95\",\"bytes_per_second\":{},\"transforms_per_second\":{},\"stats\":{}}}",
+        "{{\"case\":{},\"dtype\":{},\"n\":{},\"batch\":{},\"stride\":{},\"status\":{},\"execution\":{},\"correctness_passed\":{},\"throughput_gate_passed\":{},\"cache_reuse_gate_passed\":{},\"max_abs_error\":{},\"error\":{},\"plan_ns\":{},\"cold_ns\":{},\"samples_ns\":[{}],\"median_ns\":{},\"p95_ns\":{},\"p99_ns\":{},\"ci95_low_ns\":{},\"ci95_high_ns\":{},\"ci95_method\":\"empirical_order_stat_95\",\"bytes_per_second\":{},\"transforms_per_second\":{},\"cufft_reference\":{},\"stats\":{}}}",
         json_string(row.case.name),
         json_string(row.case.dtype),
         row.case.n,
@@ -1275,6 +1656,7 @@ fn row_json(row: &Row) -> String {
         ci_high_ns,
         bytes_per_second,
         transforms_per_second,
+        cufft_reference_json(row),
         stats_json(row.stats),
     )
 }
@@ -1293,6 +1675,8 @@ fn unavailable_row(case: Case, error: &str) -> Row {
         cold_ns: None,
         samples_ns: Vec::new(),
         stats: None,
+        cufft: None,
+        cufft_error: None,
     }
 }
 
@@ -1368,9 +1752,13 @@ fn main() {
     let (device, driver, sm_clock, memory_clock) = cuda_hardware();
     let mut rows = Vec::new();
     let mut status = "passed";
+    // True only if every complex input case (the ones with a cuFFT
+    // equivalent) produced a raw-cuFFT reference measurement.
+    let mut cufft_available = false;
     let (unavailable_error, cancellation) = match CudaBackend::new_default() {
         Ok(backend) => {
             let backend = Arc::new(backend);
+            cufft_available = true;
             for case in cases() {
                 let row = if case.dtype == "Complex32" {
                     benchmark_case::<f32>(&backend, case, 5.0e-3)
@@ -1380,6 +1768,7 @@ fn main() {
                 if row.status == "failed" || (required_cuda() && row.status != "passed") {
                     status = "failed";
                 }
+                cufft_available &= row.cufft.is_some();
                 rows.push(row);
             }
             let real_fft32 = Case {
@@ -1462,6 +1851,7 @@ fn main() {
             if consumer.status == "failed" || (required_cuda() && consumer.status != "passed") {
                 status = "failed";
             }
+            cufft_available &= consumer.cufft.is_some();
             rows.push(consumer);
             let convolution = benchmark_cuda_convolution(&backend);
             if convolution.status == "failed" || (required_cuda() && convolution.status != "passed")
@@ -1502,7 +1892,7 @@ fn main() {
         .map_or(0, |duration| duration.as_secs());
     let _ = write!(
         output,
-        "{{\"schema_version\":{},\"artifact\":\"sonium-fft-cuda-benchmark\",\"captured_at_unix_s\":{},\"status\":{},\"compiler\":{},\"cuda_toolkit\":{},\"hardware\":{{\"device\":{},\"driver\":{},\"sm_clock_mhz\":{},\"memory_clock_mhz\":{}}},\"target\":{{\"os\":{},\"arch\":{}}},\"energy_joules\":null,\"energy_source\":null,\"matrix\":{},\"cancellation\":{},\"unsupported_cells\":[{}],\"rows\":[{}]}}",
+        "{{\"schema_version\":{},\"artifact\":\"sonium-fft-cuda-benchmark\",\"captured_at_unix_s\":{},\"status\":{},\"compiler\":{},\"cuda_toolkit\":{},\"hardware\":{{\"device\":{},\"driver\":{},\"sm_clock_mhz\":{},\"memory_clock_mhz\":{}}},\"target\":{{\"os\":{},\"arch\":{}}},\"energy_joules\":null,\"energy_source\":null,\"matrix\":{},\"cancellation\":{},\"cufft_reference_status\":{},\"unsupported_cells\":[{}],\"rows\":[{}]}}",
         SCHEMA_VERSION,
         captured_at,
         json_string(status),
@@ -1516,6 +1906,11 @@ fn main() {
         json_string(std::env::consts::ARCH),
         matrix_json(&rows),
         cancellation,
+        json_string(if cufft_available {
+            "available"
+        } else {
+            "unavailable"
+        }),
         unsupported_cells()
             .iter()
             .map(|cell| json_string(cell))

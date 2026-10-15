@@ -1,0 +1,40 @@
+# shell_twisted_beam G0 console (Unit 4, 2026-10-15)
+# Direct equivalent of perf_oc_gpu.sh sections (script resolves paths
+# into the parent tree; Unit 4 ran the same nvcc + ./proxy commands).
+# GPU idle (nvidia-smi 0%, no compute procs) before every run.
+# Build: nvcc -O2 -arch=native -o proxy shell_twisted_beam_cuda_proxy.cu
+#        nvcc -O2 -arch=native -DEMPTY_FORCE -o proxy_empty shell_twisted_beam_cuda_proxy.cu
+# (One benign warning on the EMPTY build: tri_force_one unreferenced
+# under -DEMPTY_FORCE, as designed.)
+
+=== proxy N=1 ===
+twisted proxy: nstep=1 dt=2.000e-07 colors=7
+wall_ms=0.753 us_per_step=753.3760
+tip_final=0.000000e+00 tip_holdmean=n/a (short run) (t>=32ms, 0 samples)
+max_abs_f=0.000000e+00
+
+=== proxy N=2000 ===
+twisted proxy: nstep=2000 dt=2.000e-07 colors=7
+wall_ms=968.562 us_per_step=484.2810
+tip_final=2.889472e-08 tip_holdmean=n/a (short run) (t>=32ms, 0 samples)
+max_abs_f=8.793365e-02
+
+=== proxy EMPTY N=2000 ===
+twisted proxy: nstep=2000 dt=2.000e-07 colors=7
+wall_ms=115.069 us_per_step=57.5345
+tip_final=1.685890e-06 tip_holdmean=n/a (short run) (t>=32ms, 0 samples)
+max_abs_f=0.000000e+00
+
+=== proxy N=300000 (full-N validation; extra section, not in script) ===
+twisted proxy: nstep=300000 dt=2.000e-07 colors=7
+wall_ms=145538.703 us_per_step=485.1290
+tip_final=1.231108e-04 tip_holdmean= (t>=32ms, 140001 samples)
+tip_holdmean=1.364595e-04 native=1.350630e-04 reldiff=1.034e-02
+max_abs_f=1.511164e+01
+
+=== proxy EMPTY N=300000 (extra section, not in script) ===
+twisted proxy: nstep=300000 dt=2.000e-07 colors=7
+wall_ms=17147.236 us_per_step=57.1575
+tip_final=4.006978e+00 tip_holdmean= (t>=32ms, 140001 samples)
+tip_holdmean=2.205945e+00 native=1.350630e-04 reldiff=1.633e+04
+max_abs_f=0.000000e+00

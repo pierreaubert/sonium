@@ -30,7 +30,7 @@ use num_complex::Complex;
 use std::cell::RefCell;
 
 use crate::CpuFftDispatch;
-use crate::codelets::scalar::{radix2, radix3, radix4, radix5};
+use crate::codelets::scalar::{radix2, radix3, radix4, radix5, radix8};
 use crate::scalar::FftScalar;
 use crate::twiddles::StageTwiddles;
 
@@ -314,6 +314,10 @@ pub(crate) fn run_batched_with_dispatch<T: FftScalar>(
         return;
     }
 
+    if try_run_batched_f32_audio(stages, dir_sign, n, buffer, scratch, dispatch) {
+        return;
+    }
+
     for chunk in buffer.chunks_exact_mut(n) {
         run_single_grouped(stages, dir_sign, chunk, scratch, sections, dispatch);
     }
@@ -329,7 +333,7 @@ fn try_run_batched_f64_audio<T: FftScalar>(
     dispatch: CpuFftDispatch,
 ) -> bool {
     if !dispatch.allows_simd()
-        || !matches!(n, 64 | 128 | 256 | 512 | 1024 | 2048 | 4096 | 16384)
+        || !matches!(n, 64 | 128 | 256 | 512 | 1024 | 16384)
         || std::any::TypeId::of::<T>() != std::any::TypeId::of::<f64>()
         || !stages.iter().all(|s| matches!(s.radix, 2 | 4))
     {
@@ -358,14 +362,128 @@ fn try_run_batched_f64_audio<T: FftScalar>(
                 256 => run_single_f64_256(stages_f64, dir_sign_f64, chunk, scratch_f64),
                 512 => run_single_f64_512(stages_f64, dir_sign_f64, chunk, scratch_f64),
                 1024 => run_single_f64_1024(stages_f64, dir_sign_f64, chunk, scratch_f64),
-                2048 => run_single_f64_2048(stages_f64, dir_sign_f64, chunk, scratch_f64),
-                4096 => run_single_f64_4096(stages_f64, dir_sign_f64, chunk, scratch_f64),
                 16384 => run_single_f64_16384(stages_f64, dir_sign_f64, chunk, scratch_f64),
                 _ => run_single_f64_audio(stages_f64, dir_sign_f64, chunk, scratch_f64),
             }
         }
     }
     true
+}
+
+/// Fused single-transform fast path for f32 audio sizes on x86 AVX2:
+/// fused first pair + generic middle stage(s) + fused final pair. Pure
+/// radix-2/4 lengths only; everything else keeps the generic driver.
+#[inline(always)]
+fn try_run_batched_f32_audio<T: FftScalar>(
+    stages: &[StageTwiddles<T>],
+    dir_sign: T,
+    n: usize,
+    buffer: &mut [Complex<T>],
+    scratch: &mut [Complex<T>],
+    dispatch: CpuFftDispatch,
+) -> bool {
+    if !dispatch.allows_simd()
+        || !cfg!(target_arch = "x86_64")
+        || !matches!(n, 512 | 1024)
+        || std::any::TypeId::of::<T>() != std::any::TypeId::of::<f32>()
+        || !stages.iter().all(|s| matches!(s.radix, 2 | 4))
+    {
+        return false;
+    }
+
+    assert_transmute_layout::<T, f32>();
+    // SAFETY: TypeId equality proves T = f32; the layout asserts above pin
+    // the transmute targets.
+    unsafe {
+        let stages_f32: &[StageTwiddles<f32>] =
+            std::mem::transmute::<&[StageTwiddles<T>], &[StageTwiddles<f32>]>(stages);
+        let buffer_f32: &mut [Complex<f32>] =
+            std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f32>]>(buffer);
+        let scratch_f32: &mut [Complex<f32>] =
+            std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f32>]>(scratch);
+        let dir_sign_f32 = *(&dir_sign as *const T as *const f32);
+        for chunk in buffer_f32.chunks_exact_mut(n) {
+            match n {
+                512 => run_single_f32_512(stages_f32, dir_sign_f32, chunk, scratch_f32, dispatch),
+                _ => run_single_f32_1024(stages_f32, dir_sign_f32, chunk, scratch_f32, dispatch),
+            }
+        }
+    }
+    true
+}
+
+#[inline(always)]
+fn run_single_f32_512(
+    stages: &[StageTwiddles<f32>],
+    dir_sign: f32,
+    buffer: &mut [Complex<f32>],
+    scratch: &mut [Complex<f32>],
+    dispatch: CpuFftDispatch,
+) {
+    debug_assert_eq!(buffer.len(), 512);
+    debug_assert_eq!(stages.len(), 5);
+    // Three-pass AVX2 sequence: fused first pair, one generic stage,
+    // fused final pair. Falls back to copy + three stages without AVX2.
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+        // SAFETY: runtime detection proves the target features required
+        // by the AVX2/FMA kernels.
+        unsafe {
+            crate::wide_avx2::fused_first2_f32(buffer, scratch, &stages[0], &stages[1], dir_sign);
+        }
+        stage(512, scratch, buffer, &stages[2], dir_sign, dispatch);
+        // SAFETY: same detection as above.
+        unsafe {
+            crate::wide_avx2::fused_final_pair_f32(buffer, &stages[3], &stages[4], dir_sign);
+        }
+        return;
+    }
+    // Odd stage count: start in scratch so the fused final pair lands in
+    // `buffer` (same parity convention as the generic driver).
+    scratch.copy_from_slice(buffer);
+    stage(512, scratch, buffer, &stages[0], dir_sign, dispatch);
+    stage(512, buffer, scratch, &stages[1], dir_sign, dispatch);
+    stage(512, scratch, buffer, &stages[2], dir_sign, dispatch);
+    // SAFETY: the caller gated on AVX2 + FMA detection.
+    unsafe {
+        crate::wide_avx2::fused_final_pair_f32(buffer, &stages[3], &stages[4], dir_sign);
+    }
+}
+
+#[inline(always)]
+fn run_single_f32_1024(
+    stages: &[StageTwiddles<f32>],
+    dir_sign: f32,
+    buffer: &mut [Complex<f32>],
+    scratch: &mut [Complex<f32>],
+    dispatch: CpuFftDispatch,
+) {
+    debug_assert_eq!(buffer.len(), 1024);
+    debug_assert_eq!(stages.len(), 5);
+    // Three-pass AVX2 sequence: fused first pair, one generic stage,
+    // fused final pair. Falls back to copy + three stages without AVX2.
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+        // SAFETY: runtime detection proves the target features required
+        // by the AVX2/FMA kernels.
+        unsafe {
+            crate::wide_avx2::fused_first2_f32(buffer, scratch, &stages[0], &stages[1], dir_sign);
+        }
+        stage(1024, scratch, buffer, &stages[2], dir_sign, dispatch);
+        // SAFETY: same detection as above.
+        unsafe {
+            crate::wide_avx2::fused_final_pair_f32(buffer, &stages[3], &stages[4], dir_sign);
+        }
+        return;
+    }
+    scratch.copy_from_slice(buffer);
+    stage(1024, scratch, buffer, &stages[0], dir_sign, dispatch);
+    stage(1024, buffer, scratch, &stages[1], dir_sign, dispatch);
+    stage(1024, scratch, buffer, &stages[2], dir_sign, dispatch);
+    // SAFETY: the caller gated on AVX2 + FMA detection.
+    unsafe {
+        crate::wide_avx2::fused_final_pair_f32(buffer, &stages[3], &stages[4], dir_sign);
+    }
 }
 
 #[inline(always)]
@@ -1116,6 +1234,10 @@ fn stage_radix4_then_radix2_f64_512(
     debug_assert_eq!(radix2_stage.m, 256);
     debug_assert_eq!(radix2_stage.s, 1);
 
+    if fused_final_pair_f64_x86(buffer, radix4_stage, radix2_stage, dir_sign) {
+        return;
+    }
+
     let tw = radix2_stage.k_slice(1);
     for l in 0..64 {
         let (a0, a1, a2, a3) = stage_radix4_point_f64(buffer, 0, l, 128, radix4_stage, dir_sign);
@@ -1169,6 +1291,10 @@ fn stage_radix4_then_radix4_f64_1024(
     debug_assert_eq!(final_stage.m, 256);
     debug_assert_eq!(final_stage.s, 1);
 
+    if fused_final_pair_f64_x86(buffer, radix4_stage, final_stage, dir_sign) {
+        return;
+    }
+
     let tw1 = final_stage.k_slice(1);
     let tw2 = final_stage.k_slice(2);
     let tw3 = final_stage.k_slice(3);
@@ -1217,25 +1343,6 @@ fn stage_radix4_then_radix4_f64_1024(
         buffer[704 + l] = y2;
         buffer[960 + l] = y3;
     }
-}
-
-#[inline(always)]
-fn run_single_f64_2048(
-    stages: &[StageTwiddles<f64>],
-    dir_sign: f64,
-    buffer: &mut [Complex<f64>],
-    scratch: &mut [Complex<f64>],
-) {
-    debug_assert_eq!(buffer.len(), 2048);
-    debug_assert_eq!(scratch.len(), 2048);
-    debug_assert_eq!(stages.len(), 6);
-    debug_assert_eq!(stages.iter().map(|s| s.radix).product::<usize>(), 2048);
-
-    stage_radix4_f64_direct(512, buffer, scratch, &stages[0], dir_sign);
-    stage_radix4_f64_direct(512, scratch, buffer, &stages[1], dir_sign);
-    stage_radix4_f64_direct(512, buffer, scratch, &stages[2], dir_sign);
-    stage_radix4_f64_direct(512, scratch, buffer, &stages[3], dir_sign);
-    stage_radix4_then_radix2_f64_final(buffer, &stages[4], &stages[5], dir_sign);
 }
 
 #[inline(always)]
@@ -1372,6 +1479,51 @@ fn stage_f64_audio(
     }
 }
 
+/// x86 AVX2/FMA entry for the fused final pair; returns `true` when the
+/// pair was executed by the vector kernel.
+#[inline(always)]
+fn fused_final_pair_f64_x86(
+    buffer: &mut [Complex<f64>],
+    stage_a: &StageTwiddles<f64>,
+    stage_b: &StageTwiddles<f64>,
+    dir_sign: f64,
+) -> bool {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+        // SAFETY: runtime detection proves the target features required
+        // by the AVX2/FMA kernel.
+        unsafe {
+            crate::wide_avx2::fused_final_pair_f64(buffer, stage_a, stage_b, dir_sign);
+        }
+        return true;
+    }
+    let _ = (buffer, stage_a, stage_b, dir_sign);
+    false
+}
+
+/// x86 AVX2/FMA entry for the fused first pair; returns `true` when the
+/// pair was executed by the vector kernel.
+#[inline(always)]
+fn fused_first2_f64_x86(
+    src: &[Complex<f64>],
+    dst: &mut [Complex<f64>],
+    stage0: &StageTwiddles<f64>,
+    stage1: &StageTwiddles<f64>,
+    dir_sign: f64,
+) -> bool {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+        // SAFETY: runtime detection proves the target features required
+        // by the AVX2/FMA kernel.
+        unsafe {
+            crate::wide_avx2::fused_first2_f64(src, dst, stage0, stage1, dir_sign);
+        }
+        return true;
+    }
+    let _ = (src, dst, stage0, stage1, dir_sign);
+    false
+}
+
 #[inline(always)]
 fn stage_radix4x4_f64_first2(
     stride: usize,
@@ -1387,6 +1539,10 @@ fn stage_radix4x4_f64_first2(
     debug_assert_eq!(stage1.m, 4);
     debug_assert_eq!(stage0.s, stage1.s * 4);
     debug_assert_eq!(stride, stage0.s);
+
+    if fused_first2_f64_x86(src, dst, stage0, stage1, dir_sign) {
+        return;
+    }
 
     let groups = stage1.s;
     let tw1 = stage1.k_slice(1);
@@ -1471,34 +1627,6 @@ fn stage_radix4x4_store_l(
     dst[base + 12 + l] = y3;
 }
 
-#[inline(always)]
-fn stage_radix4_then_radix2_f64_final(
-    buffer: &mut [Complex<f64>],
-    radix4_stage: &StageTwiddles<f64>,
-    radix2_stage: &StageTwiddles<f64>,
-    dir_sign: f64,
-) {
-    debug_assert_eq!(buffer.len(), 2048);
-    debug_assert_eq!(radix4_stage.radix, 4);
-    debug_assert_eq!(radix4_stage.m, 256);
-    debug_assert_eq!(radix4_stage.s, 2);
-    debug_assert_eq!(radix2_stage.radix, 2);
-    debug_assert_eq!(radix2_stage.m, 1024);
-    debug_assert_eq!(radix2_stage.s, 1);
-
-    let tw = radix2_stage.k_slice(1);
-    for l in 0..256 {
-        let (a0, a1, a2, a3) = stage_radix4_point_f64(buffer, 0, l, 512, radix4_stage, dir_sign);
-        let (b0, b1, b2, b3) = stage_radix4_point_f64(buffer, 256, l, 512, radix4_stage, dir_sign);
-
-        stage_radix4_radix2_store(buffer, l, a0, b0, tw[l]);
-        stage_radix4_radix2_store(buffer, 256 + l, a1, b1, tw[256 + l]);
-        stage_radix4_radix2_store(buffer, 512 + l, a2, b2, tw[512 + l]);
-        stage_radix4_radix2_store(buffer, 768 + l, a3, b3, tw[768 + l]);
-    }
-}
-
-#[inline(always)]
 fn stage_radix4_then_radix4_f64_final(
     buffer: &mut [Complex<f64>],
     radix4_stage: &StageTwiddles<f64>,
@@ -1512,6 +1640,10 @@ fn stage_radix4_then_radix4_f64_final(
     debug_assert_eq!(final_stage.radix, 4);
     debug_assert_eq!(final_stage.m, 1024);
     debug_assert_eq!(final_stage.s, 1);
+
+    if fused_final_pair_f64_x86(buffer, radix4_stage, final_stage, dir_sign) {
+        return;
+    }
 
     #[cfg(target_arch = "aarch64")]
     unsafe {
@@ -1649,6 +1781,10 @@ fn stage_radix4_then_radix2_f64_final_128(
     debug_assert_eq!(radix2_stage.m, 64);
     debug_assert_eq!(radix2_stage.s, 1);
 
+    if fused_final_pair_f64_x86(buffer, radix4_stage, radix2_stage, dir_sign) {
+        return;
+    }
+
     let tw = radix2_stage.k_slice(1);
     for l in 0..16 {
         let (a0, a1, a2, a3) = stage_radix4_point_f64(buffer, 0, l, 32, radix4_stage, dir_sign);
@@ -1675,6 +1811,10 @@ fn stage_radix4_then_radix4_f64_final_256(
     debug_assert_eq!(final_stage.radix, 4);
     debug_assert_eq!(final_stage.m, 64);
     debug_assert_eq!(final_stage.s, 1);
+
+    if fused_final_pair_f64_x86(buffer, radix4_stage, final_stage, dir_sign) {
+        return;
+    }
 
     let tw1 = final_stage.k_slice(1);
     let tw2 = final_stage.k_slice(2);
@@ -1739,6 +1879,10 @@ fn stage_radix4_then_radix4_f64_final_1024(
     debug_assert_eq!(final_stage.radix, 4);
     debug_assert_eq!(final_stage.m, 256);
     debug_assert_eq!(final_stage.s, 1);
+
+    if fused_final_pair_f64_x86(buffer, radix4_stage, final_stage, dir_sign) {
+        return;
+    }
 
     let tw1 = final_stage.k_slice(1);
     let tw2 = final_stage.k_slice(2);
@@ -1838,6 +1982,10 @@ fn stage_radix4_then_radix2_f64_final_512(
     debug_assert_eq!(radix2_stage.m, 256);
     debug_assert_eq!(radix2_stage.s, 1);
 
+    if fused_final_pair_f64_x86(buffer, radix4_stage, radix2_stage, dir_sign) {
+        return;
+    }
+
     let tw = radix2_stage.k_slice(1);
     for l in 0..64 {
         let (a0, a1, a2, a3) = stage_radix4_point_f64(buffer, 0, l, 128, radix4_stage, dir_sign);
@@ -1892,6 +2040,15 @@ fn stage_radix2_f64_direct(
     stage_tw: &StageTwiddles<f64>,
 ) {
     if stage_tw.s == 1 {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+            // SAFETY: runtime detection proves the target features
+            // required by the AVX2/FMA stage.
+            unsafe {
+                crate::wide_avx2::stage_radix2_f64_aos(stride, src, dst, stage_tw);
+            }
+            return;
+        }
         stage_radix2_f64_s1(src, dst, stage_tw);
         return;
     }
@@ -1906,7 +2063,7 @@ fn stage_radix2_f64_direct(
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
             unsafe {
-                crate::wide_avx2::stage_radix2_f64(stride, src, dst, stage_tw);
+                crate::wide_avx2::stage_radix2_f64_aos(stride, src, dst, stage_tw);
             }
             return;
         }
@@ -1924,6 +2081,15 @@ fn stage_radix4_f64_direct(
     dir_sign: f64,
 ) {
     if stage_tw.m == 1 {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+            // SAFETY: runtime detection proves the target features
+            // required by the AVX2/FMA stage.
+            unsafe {
+                crate::wide_avx2::stage_radix4_f64_m1(src, dst, stage_tw, dir_sign);
+            }
+            return;
+        }
         stage_radix4_f64_m1(stride, src, dst, stage_tw.s, dir_sign);
         return;
     }
@@ -1938,7 +2104,7 @@ fn stage_radix4_f64_direct(
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
             unsafe {
-                crate::wide_avx2::stage_radix4_f64(stride, src, dst, stage_tw, dir_sign);
+                crate::wide_avx2::stage_radix4_f64_aos(stride, src, dst, stage_tw, dir_sign);
             }
             return;
         }
@@ -1966,7 +2132,7 @@ fn stage_radix4_f64_s1_direct(
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
             unsafe {
-                crate::wide_avx2::stage_radix4_f64_s1(src, dst, stage_tw, dir_sign);
+                crate::wide_avx2::stage_radix4_f64_s1_aos(src, dst, stage_tw, dir_sign);
             }
             return;
         }
@@ -2106,7 +2272,8 @@ fn stage<T: FftScalar>(
         3 => stage_radix3(stride, src, dst, stage_tw, dir_sign),
         4 => stage_radix4(stride, src, dst, stage_tw, dir_sign, dispatch),
         5 => stage_radix5(stride, src, dst, stage_tw, dir_sign),
-        r => panic!("unsupported radix {r}; supported: 2, 3, 4, 5"),
+        8 => stage_radix8(stride, src, dst, stage_tw, dir_sign, dispatch),
+        r => panic!("unsupported radix {r}; supported: 2, 3, 4, 5, 8"),
     }
 }
 
@@ -2171,7 +2338,28 @@ fn stage_radix2<T: FftScalar>(
             let tw_f64: &StageTwiddles<f64> =
                 std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f64>>(stage_tw);
             assert_transmute_layout::<T, f64>();
-            crate::wide_avx2::stage_radix2_f64(stride, src_f64, dst_f64, tw_f64);
+            crate::wide_avx2::stage_radix2_f64_aos(stride, src_f64, dst_f64, tw_f64);
+        }
+        return;
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    if dispatch.allows_simd()
+        && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>()
+        && std::is_x86_feature_detected!("avx2")
+        && std::is_x86_feature_detected!("fma")
+    {
+        // SAFETY: TypeId equality proves T = f32; runtime detection proves
+        // the target features required by the AVX2/FMA stage.
+        unsafe {
+            let src_f32: &[Complex<f32>] =
+                std::mem::transmute::<&[Complex<T>], &[Complex<f32>]>(src);
+            let dst_f32: &mut [Complex<f32>] =
+                std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f32>]>(dst);
+            let tw_f32: &StageTwiddles<f32> =
+                std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f32>>(stage_tw);
+            assert_transmute_layout::<T, f32>();
+            crate::wide_avx2::stage_radix2_f32_aos(stride, src_f32, dst_f32, tw_f32);
         }
         return;
     }
@@ -2299,6 +2487,7 @@ fn stage_radix4<T: FftScalar>(
 
     #[cfg(target_arch = "x86_64")]
     if dispatch.allows_simd()
+        && stage_tw.m == 1
         && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f64>()
         && std::is_x86_feature_detected!("avx2")
         && std::is_x86_feature_detected!("fma")
@@ -2314,7 +2503,74 @@ fn stage_radix4<T: FftScalar>(
                 std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f64>>(stage_tw);
             let dir_f64: f64 = *(&dir_sign as *const T as *const f64);
             assert_transmute_layout::<T, f64>();
-            crate::wide_avx2::stage_radix4_f64(stride, src_f64, dst_f64, tw_f64, dir_f64);
+            crate::wide_avx2::stage_radix4_f64_m1(src_f64, dst_f64, tw_f64, dir_f64);
+        }
+        return;
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    if dispatch.allows_simd()
+        && stage_tw.m == 1
+        && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>()
+        && std::is_x86_feature_detected!("avx2")
+        && std::is_x86_feature_detected!("fma")
+    {
+        // SAFETY: TypeId match proves T = f32; runtime detection proves the
+        // target features required by the AVX2/FMA stage.
+        unsafe {
+            let src_f32: &[Complex<f32>] =
+                std::mem::transmute::<&[Complex<T>], &[Complex<f32>]>(src);
+            let dst_f32: &mut [Complex<f32>] =
+                std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f32>]>(dst);
+            let tw_f32: &StageTwiddles<f32> =
+                std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f32>>(stage_tw);
+            let dir_f32 = *(&dir_sign as *const T as *const f32);
+            assert_transmute_layout::<T, f32>();
+            crate::wide_avx2::stage_radix4_f32_m1(src_f32, dst_f32, tw_f32, dir_f32);
+        }
+        return;
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    if dispatch.allows_simd()
+        && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f64>()
+        && std::is_x86_feature_detected!("avx2")
+        && std::is_x86_feature_detected!("fma")
+    {
+        // SAFETY: TypeId match proves T = f64; runtime detection proves the
+        // target features required by the AVX2/FMA stage.
+        unsafe {
+            let src_f64: &[Complex<f64>] =
+                std::mem::transmute::<&[Complex<T>], &[Complex<f64>]>(src);
+            let dst_f64: &mut [Complex<f64>] =
+                std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f64>]>(dst);
+            let tw_f64: &StageTwiddles<f64> =
+                std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f64>>(stage_tw);
+            let dir_f64: f64 = *(&dir_sign as *const T as *const f64);
+            assert_transmute_layout::<T, f64>();
+            crate::wide_avx2::stage_radix4_f64_aos(stride, src_f64, dst_f64, tw_f64, dir_f64);
+        }
+        return;
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    if dispatch.allows_simd()
+        && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>()
+        && std::is_x86_feature_detected!("avx2")
+        && std::is_x86_feature_detected!("fma")
+    {
+        // SAFETY: TypeId match proves T = f32; runtime detection proves the
+        // target features required by the AVX2/FMA stage.
+        unsafe {
+            let src_f32: &[Complex<f32>] =
+                std::mem::transmute::<&[Complex<T>], &[Complex<f32>]>(src);
+            let dst_f32: &mut [Complex<f32>] =
+                std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f32>]>(dst);
+            let tw_f32: &StageTwiddles<f32> =
+                std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f32>>(stage_tw);
+            let dir_f32 = *(&dir_sign as *const T as *const f32);
+            assert_transmute_layout::<T, f32>();
+            crate::wide_avx2::stage_radix4_f32_aos(stride, src_f32, dst_f32, tw_f32, dir_f32);
         }
         return;
     }
@@ -2346,6 +2602,109 @@ fn stage_radix4<T: FftScalar>(
             dst[base_out + m + l] = y1;
             dst[base_out + 2 * m + l] = y2;
             dst[base_out + 3 * m + l] = y3;
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stage_radix8<T: FftScalar>(
+    stride: usize,
+    src: &[Complex<T>],
+    dst: &mut [Complex<T>],
+    stage_tw: &StageTwiddles<T>,
+    dir_sign: T,
+    dispatch: CpuFftDispatch,
+) {
+    let m = stage_tw.m;
+    let s = stage_tw.s;
+
+    #[cfg(target_arch = "x86_64")]
+    if dispatch.allows_simd()
+        && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f64>()
+        && std::is_x86_feature_detected!("avx2")
+        && std::is_x86_feature_detected!("fma")
+    {
+        // SAFETY: TypeId match proves T = f64; runtime detection proves the
+        // target features required by the AVX2/FMA stage.
+        unsafe {
+            let src_f64: &[Complex<f64>] =
+                std::mem::transmute::<&[Complex<T>], &[Complex<f64>]>(src);
+            let dst_f64: &mut [Complex<f64>] =
+                std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f64>]>(dst);
+            let tw_f64: &StageTwiddles<f64> =
+                std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f64>>(stage_tw);
+            let dir_f64: f64 = *(&dir_sign as *const T as *const f64);
+            assert_transmute_layout::<T, f64>();
+            if stage_tw.m == 1 {
+                crate::wide_avx2::stage_radix8_f64_m1(src_f64, dst_f64, tw_f64, dir_f64);
+            } else {
+                crate::wide_avx2::stage_radix8_f64_aos(stride, src_f64, dst_f64, tw_f64, dir_f64);
+            }
+        }
+        return;
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    if dispatch.allows_simd()
+        && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>()
+        && std::is_x86_feature_detected!("avx2")
+        && std::is_x86_feature_detected!("fma")
+    {
+        // SAFETY: TypeId match proves T = f32; runtime detection proves the
+        // target features required by the AVX2/FMA stage.
+        unsafe {
+            let src_f32: &[Complex<f32>] =
+                std::mem::transmute::<&[Complex<T>], &[Complex<f32>]>(src);
+            let dst_f32: &mut [Complex<f32>] =
+                std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f32>]>(dst);
+            let tw_f32: &StageTwiddles<f32> =
+                std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f32>>(stage_tw);
+            let dir_f32 = *(&dir_sign as *const T as *const f32);
+            assert_transmute_layout::<T, f32>();
+            if stage_tw.m == 1 {
+                crate::wide_avx2::stage_radix8_f32_m1(src_f32, dst_f32, tw_f32, dir_f32);
+            } else {
+                crate::wide_avx2::stage_radix8_f32_aos(stride, src_f32, dst_f32, tw_f32, dir_f32);
+            }
+        }
+        return;
+    }
+
+    let m_new = m * 8;
+    let tw = [
+        stage_tw.k_slice(1),
+        stage_tw.k_slice(2),
+        stage_tw.k_slice(3),
+        stage_tw.k_slice(4),
+        stage_tw.k_slice(5),
+        stage_tw.k_slice(6),
+        stage_tw.k_slice(7),
+    ];
+    for g in 0..s {
+        let base_in = g * m;
+        let base_out = g * m_new;
+        for l in 0..m {
+            let x0 = src[base_in + l];
+            let mut x = [x0; 8];
+            if l == 0 {
+                for k in 1..8 {
+                    x[k] = src[base_in + l + k * stride];
+                }
+            } else {
+                for k in 1..8 {
+                    x[k] = src[base_in + l + k * stride] * tw[k - 1][l];
+                }
+            }
+            let (y0, y1, y2, y3, y4, y5, y6, y7) =
+                radix8(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], dir_sign);
+            dst[base_out + l] = y0;
+            dst[base_out + m + l] = y1;
+            dst[base_out + 2 * m + l] = y2;
+            dst[base_out + 3 * m + l] = y3;
+            dst[base_out + 4 * m + l] = y4;
+            dst[base_out + 5 * m + l] = y5;
+            dst[base_out + 6 * m + l] = y6;
+            dst[base_out + 7 * m + l] = y7;
         }
     }
 }
@@ -2432,6 +2791,103 @@ mod tests {
             assert_relative_eq!(g.re, w.re, max_relative = tol, epsilon = tol);
             assert_relative_eq!(g.im, w.im, max_relative = tol, epsilon = tol);
         }
+    }
+
+    /// Explicit radix-8-first factorisation for tests that target the
+    /// radix-8 stages specifically, independent of the planner default.
+    fn radix8_radices(n: usize) -> Vec<usize> {
+        let mut v = Vec::new();
+        let mut rem = n;
+        while rem.is_multiple_of(8) {
+            v.push(8);
+            rem /= 8;
+        }
+        while rem.is_multiple_of(4) {
+            v.push(4);
+            rem /= 4;
+        }
+        if rem == 2 {
+            v.push(2);
+        }
+        assert_eq!(v.iter().product::<usize>(), n, "n={n} is not 8-smooth");
+        v
+    }
+
+    #[test]
+    fn radix8_stages_match_naive_and_scalar() {
+        for &n in &[64usize, 512, 1024, 4096] {
+            let radices = radix8_radices(n);
+            for &dir_sign in &[-1.0f64, 1.0] {
+                let direction = if dir_sign < 0.0 {
+                    FftDirection::Forward
+                } else {
+                    FftDirection::Inverse
+                };
+                let stages =
+                    crate::twiddles::build_stage_twiddles::<f64>(n, &radices, direction);
+                let input = random(0x8BAD_0000 + n as u64, n);
+
+                let mut expected = input.clone();
+                let mut scratch = vec![Complex64::new(0.0, 0.0); n];
+                run_single_scalar_f64(&stages, dir_sign, &mut expected, &mut scratch);
+                if n == 64 {
+                    assert_close(
+                        &expected,
+                        &naive_dft(&input, dir_sign),
+                        (n as f64 * 1e-13).max(1e-12),
+                    );
+                }
+
+                let mut actual = input.clone();
+                let mut scratch = vec![Complex64::new(0.0, 0.0); n];
+                run_single(&stages, dir_sign, &mut actual, &mut scratch);
+                assert_close(&actual, &expected, (n as f64 * 1e-12).max(1e-12));
+
+                // f32: AVX dispatch must agree with forced scalar dispatch.
+                let stages32 =
+                    crate::twiddles::build_stage_twiddles::<f32>(n, &radices, direction);
+                let input32: Vec<Complex32> = input
+                    .iter()
+                    .map(|v| Complex32::new(v.re as f32, v.im as f32))
+                    .collect();
+                let mut scalar32 = input32.clone();
+                let mut scratch32 = vec![Complex32::new(0.0, 0.0); n];
+                run_single_with_dispatch(
+                    &stages32,
+                    dir_sign as f32,
+                    &mut scalar32,
+                    &mut scratch32,
+                    CpuFftDispatch::Scalar,
+                );
+                let mut auto32 = input32;
+                let mut scratch32 = vec![Complex32::new(0.0, 0.0); n];
+                run_single_with_dispatch(
+                    &stages32,
+                    dir_sign as f32,
+                    &mut auto32,
+                    &mut scratch32,
+                    CpuFftDispatch::Auto,
+                );
+                assert_close32(&auto32, &scalar32, (n as f32 * 5.0e-6).max(2.0e-5));
+            }
+        }
+    }
+
+    /// Explicit radix-4-first factorisation (plus a residual radix-2) for
+    /// tests that target the radix-2/4 batched-pair kernels specifically,
+    /// independent of the planner's arch-dependent default factorisation.
+    fn radix4_radices(n: usize) -> Vec<usize> {
+        let mut v = Vec::new();
+        let mut rem = n;
+        while rem.is_multiple_of(4) {
+            v.push(4);
+            rem /= 4;
+        }
+        if rem == 2 {
+            v.push(2);
+        }
+        assert_eq!(v.iter().product::<usize>(), n, "n={n} is not 4-smooth");
+        v
     }
 
     fn random(seed: u64, n: usize) -> Vec<Complex64> {
@@ -2615,11 +3071,7 @@ mod tests {
             (8192, 2),
             (16384, 3),
         ] {
-            let radices = match factor::plan_length(n) {
-                factor::Strategy::MixedRadix(v) => v,
-                factor::Strategy::Bluestein { .. } => continue,
-            };
-            assert!(radices.iter().all(|&radix| matches!(radix, 2 | 4)));
+            let radices = radix4_radices(n);
             for direction in [FftDirection::Forward, FftDirection::Inverse] {
                 let stages = crate::twiddles::build_stage_twiddles::<f64>(n, &radices, direction);
                 let dir_sign = match direction {
@@ -2707,6 +3159,27 @@ mod tests {
                             dst[base_out + m + l] = y1;
                             dst[base_out + 2 * m + l] = y2;
                             dst[base_out + 3 * m + l] = y3;
+                        }
+                        8 => {
+                            let mut x = [x0; 8];
+                            for k in 1..8 {
+                                let twk = stage_tw.k_slice(k);
+                                x[k] = if l == 0 {
+                                    src[base_in + l + k * stride]
+                                } else {
+                                    src[base_in + l + k * stride] * twk[l]
+                                };
+                            }
+                            let ys =
+                                radix8(x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], dir_sign);
+                            dst[base_out + l] = ys.0;
+                            dst[base_out + m + l] = ys.1;
+                            dst[base_out + 2 * m + l] = ys.2;
+                            dst[base_out + 3 * m + l] = ys.3;
+                            dst[base_out + 4 * m + l] = ys.4;
+                            dst[base_out + 5 * m + l] = ys.5;
+                            dst[base_out + 6 * m + l] = ys.6;
+                            dst[base_out + 7 * m + l] = ys.7;
                         }
                         radix => panic!("scalar AVX2 oracle does not support radix {radix}"),
                     }
@@ -2800,11 +3273,7 @@ mod tests {
             return;
         }
         for &(n, batch) in &[(4usize, 2usize), (8, 3), (16, 2), (32, 3), (8192, 2)] {
-            let radices = match factor::plan_length(n) {
-                factor::Strategy::MixedRadix(v) => v,
-                factor::Strategy::Bluestein { .. } => continue,
-            };
-            assert!(radices.iter().all(|&radix| matches!(radix, 2 | 4)));
+            let radices = radix4_radices(n);
             for direction in [FftDirection::Forward, FftDirection::Inverse] {
                 let stages = crate::twiddles::build_stage_twiddles::<f32>(n, &radices, direction);
                 let dir_sign = match direction {

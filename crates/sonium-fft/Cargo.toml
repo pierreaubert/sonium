@@ -14,6 +14,8 @@ name = "sonium_fft"
 path = "src/lib.rs"
 
 [dependencies]
+cudarc = { workspace = true, optional = true }
+libloading = { workspace = true, optional = true }
 sonium-compute = { workspace = true }
 sonium-topology = { workspace = true }
 sonium-fastmath = { workspace = true }
@@ -39,7 +41,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 default = ["cpu"]
 cpu = []
 metal = ["sonium-compute/metal"]
-cuda = ["sonium-compute/cuda"]
+cuda = ["sonium-compute/cuda", "dep:cudarc", "dep:libloading"]
 
 [[bench]]
 name = "fft_vs_rustfft"

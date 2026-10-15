@@ -307,7 +307,7 @@ fn build_cavity_model(
     if bc_dofs.is_empty() {
         return Err("cavity boundary location found no DOFs".to_string());
     }
-    let config = NavierStokesConfig {
+    let mut config = NavierStokesConfig {
         mu: 1.0 / CAVITY_RE,
         rho: 1.0,
         max_picard_iterations: 50,
@@ -316,6 +316,10 @@ fn build_cavity_model(
         use_direct_solver: false,
         linear_solver_max_iterations: 3000,
         linear_solver_tolerance: LINEAR_SOLVER_TOLERANCE,
+        // UNIT5 (oc-opt Phase M): a forcing-term schedule was tried here
+        // and REVERTED: loose early linear tolerances stall the
+        // warm-started Picard (50 iterations without converging), so the
+        // production 1e-8 every-iteration solve stands.
         linear_solver_cpu_preconditioner: LinearSolverCpuPreconditionerKind::Ilu,
         linear_solver_backend: backend,
         linear_solver_backend_preconditioner: gpu_precond_kinds(gpu_precond).0,
@@ -327,6 +331,13 @@ fn build_cavity_model(
         },
         ..Default::default()
     };
+    // UNIT5 (oc-opt G0): optional Picard cap for Stokes-reference runs.
+    // Env-gated diagnostic; unset leaves the production iteration budget.
+    if let Ok(text) = std::env::var("SONIUM_UNIT5_MAX_PICARD") {
+        if let Ok(cap) = text.parse::<usize>() {
+            config.max_picard_iterations = cap.min(config.max_picard_iterations);
+        }
+    }
     Ok(CavityModel {
         mesh,
         v_space,
@@ -367,6 +378,17 @@ fn cavity_ghia_error(model: &CavityModel, result: &NavierStokesResult) -> Result
     }
     if !max_err.is_finite() {
         return Err("cavity Ghia error is non-finite".to_string());
+    }
+    // UNIT5 (oc-opt G0): env-gated centerline dump for proxy validation.
+    // Prints node-order (ascending y) rows; unset prints nothing.
+    if std::env::var("SONIUM_UNIT5_CENTERLINE").as_deref() == Ok("1") {
+        for (ni, node) in model.mesh.nodes.iter().enumerate() {
+            if (node.x - 0.5).abs() < center_tol {
+                let u = result.velocity.get(2 * ni).copied().unwrap_or(f64::NAN);
+                let p = result.pressure.get(ni).copied().unwrap_or(f64::NAN);
+                eprintln!("UNIT5_CENTERLINE y={:.6} u={:.12e} p={:.12e}", node.y, u, p);
+            }
+        }
     }
     Ok(max_err)
 }

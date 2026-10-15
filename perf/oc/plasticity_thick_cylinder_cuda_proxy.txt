@@ -1,0 +1,36 @@
+deck: plasticity_thick_cylinder
+proxy: sonium/perf/oc/plasticity_thick_cylinder_cuda_proxy.cu
+nvcc: Build cuda_13.3.r13.3/compiler.38244171_0
+gpu: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+steps: 2000
+note: console captured via the perf_oc_gpu.sh flow mirrored by hand (the
+checked-in script reads the proxy from its own repo tree; the parent reruns
+it verbatim post-merge). Machine profile re-measured same-day on this box.
+The proxy runs fixed dt at 0.8x the native mean (5880 steps to the stop).
+=== machine_profile ===
+device: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+compute capability: 12.0
+SMs: 188, max threads/SM: 1536, shared/SM: 100 KB
+L2 cache: 128.0 MB
+global mem: 95.0 GB, bus width: 512 bit
+(clocks via nvidia-smi; legacy clockRate fields removed in CUDA 13)
+empty-launch: 6.847 us/launch (2000 launches, device time)
+launch+sync roundtrip: 8.274 us/step (host-driven floor)
+4KB H2D+D2H roundtrip: 14.798 us (pinned)
+H2D pinned BW: 22.0 GB/s (256 MB)
+D2H pinned BW: 28.0 GB/s (256 MB)
+STREAM triad: 2160 GB/s (achieved DRAM ceiling)
+FP64 MAD: 479.9 GFLOP/s (achieved compute ceiling)
+done
+=== proxy N=1 ===
+nstep=1 wall=0.001 s (698.880 us/step) dxbore=0.000000e+00 dxouter=0.000000e+00 sybore=0.000000e+00 syouter=0.000000e+00 eroded=0 maxep=0.000000e+00
+=== proxy N=5880 (deck) ===
+nstep=5880 wall=3.581 s (609.031 us/step) dxbore=2.414070e-05 dxouter=1.594107e-05 sybore=-8.566989e+07 syouter=1.182575e+07 eroded=0 maxep=6.572361e-04
+nstep=5880 wall=3.583 s (609.330 us/step) dxbore=2.414070e-05 dxouter=1.594107e-05 sybore=-8.566989e+07 syouter=1.182575e+07 eroded=0 maxep=6.572361e-04
+=== proxy N=2000 ===
+nstep=2000 wall=1.414 s (706.893 us/step) dxbore=2.414070e-05 dxouter=1.594107e-05 sybore=1.417664e+08 syouter=1.118738e+08 eroded=0 maxep=6.559860e-04
+=== proxy EMPTY N=2000 ===
+nstep=2000 wall=0.032 s (15.961 us/step) dxbore=4.192820e-02 dxouter=0.000000e+00 sybore=0.000000e+00 syouter=0.000000e+00 eroded=0 maxep=0.000000e+00
+nstep=2000 wall=0.032 s (15.937 us/step) dxbore=4.192820e-02 dxouter=0.000000e+00 sybore=0.000000e+00 syouter=0.000000e+00 eroded=0 maxep=0.000000e+00
+=== proxy EMPTY N=5880 (deck) ===
+nstep=5880 wall=0.107 s (18.178 us/step) dxbore=4.192820e-02 dxouter=0.000000e+00 sybore=0.000000e+00 syouter=0.000000e+00 eroded=0 maxep=0.000000e+00

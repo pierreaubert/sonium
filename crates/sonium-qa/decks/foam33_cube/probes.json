@@ -1,0 +1,36 @@
+{
+  "case": "foam33_cube",
+  "engine": "OpenCourant linux64_gf CommitID 33e68517",
+  "units": "SI",
+  "note": "Final-anchored TH expectations from the archived history.csv hold plateau (last two stamps identical). Brick/node channels are verbatim th_to_csv headers (converter pads titles; same binary/same deck reproduces them byte-identically). Tolerances: native replay validates at 0.2-0.5% on stress/work/ep; 1-2% bands hold 2-5x margin plus engine rerun jitter (verified by rerun cell).",
+  "probes": [
+    {
+      "label": "internal energy",
+      "channel": "INTERNAL ENERGY",
+      "expected": 0.0535182,
+      "abs_tol": 1e-09,
+      "rel_tol": 0.01
+    },
+    {
+      "label": "external work",
+      "channel": "EXTERNAL WORK",
+      "expected": 0.05351817,
+      "abs_tol": 1e-09,
+      "rel_tol": 0.01
+    },
+    {
+      "label": "cube SXX",
+      "channel": "cube                                     1 cube                                     var 25",
+      "expected": 500000.0,
+      "abs_tol": 1000.0,
+      "rel_tol": 0.02
+    },
+    {
+      "label": "moving face DX",
+      "channel": "face                                     2 moving_node                              var 35",
+      "expected": 0.0,
+      "abs_tol": 1e-09,
+      "rel_tol": 0.0
+    }
+  ]
+}

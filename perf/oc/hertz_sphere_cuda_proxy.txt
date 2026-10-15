@@ -1,0 +1,38 @@
+deck: hertz_sphere
+proxy: /home/pierre/src/all_of_sonium/sonium/perf/oc/hertz_sphere_cuda_proxy.cu
+nvcc: Build cuda_13.3.r13.3/compiler.38244171_0
+gpu: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+steps: 2000
+=== machine_profile ===
+device: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+compute capability: 12.0
+SMs: 188, max threads/SM: 1536, shared/SM: 100 KB
+L2 cache: 128.0 MB
+global mem: 95.0 GB, bus width: 512 bit
+(clocks via nvidia-smi; legacy clockRate fields removed in CUDA 13)
+empty-launch: 2.564 us/launch (2000 launches, device time)
+launch+sync roundtrip: 6.815 us/step (host-driven floor)
+4KB H2D+D2H roundtrip: 11.809 us (pinned)
+H2D pinned BW: 26.9 GB/s (256 MB)
+D2H pinned BW: 28.6 GB/s (256 MB)
+STREAM triad: 2158 GB/s (achieved DRAM ceiling)
+FP64 MAD: 541.2 GFLOP/s (achieved compute ceiling)
+done
+=== proxy N=1 ===
+deck: nodes=486 elems=304 E=2.000e+11 nu=0.300 rho=7800.0 slaves lo=277 hi=208
+colors=12 masses: m[0]=1.004e-03
+nstep=1 wall=0.001 s (1162.144 us/step) DZ247=0.000000e+00 max|f|=0.000e+00
+=== proxy N=2000 ===
+deck: nodes=486 elems=304 E=2.000e+11 nu=0.300 rho=7800.0 slaves lo=277 hi=208
+colors=12 masses: m[0]=1.004e-03
+nstep=2000 wall=2.222 s (1111.152 us/step) DZ247=-1.902795e-07 max|f|=1.670e+02
+=== proxy EMPTY N=2000 ===
+deck: nodes=486 elems=304 E=2.000e+11 nu=0.300 rho=7800.0 slaves lo=277 hi=208
+colors=12 masses: m[0]=1.004e-03
+nstep=2000 wall=0.018 s (8.752 us/step) DZ247=-1.902795e-07 max|f|=0.000e+00
+=== proxy N=105056 FULL (direct invocation, GPU idle) ===
+command: ./hertz_proxy 105056   (nvcc -O2 -arch=native, same source as above)
+deck: nodes=486 elems=304 E=2.000e+11 nu=0.300 rho=7800.0 slaves lo=277 hi=208
+colors=12 masses: m[0]=1.004e-03
+nstep=105056 wall=116.242 s (1106.477 us/step) DZ247=-9.999905e-06 max|f|=8.651e+03
+note: full native cycle count, no projection. DZ/247 expected -1.000e-5 (probe tol 10%): error 0.001%.

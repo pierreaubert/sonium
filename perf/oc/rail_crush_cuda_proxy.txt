@@ -1,0 +1,57 @@
+deck: rail_crush
+proxy: sonium/perf/oc/rail_crush_cuda_proxy.cu
+nvcc: Build cuda_13.3.r13.3/compiler.38244171_0
+gpu: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+steps: 8160
+note: perf_oc_gpu.sh is absent from this isolated base (Unit 0 file under
+scripts/, a forbidden dir for physics units); the sections below are its
+manual equivalent with the same nvcc invocations and run sequence
+(build + EMPTY_FORCE build, machine profile, N=1, N=steps, EMPTY N=steps).
+GPU idle gate held for every run (util 0%, no foreign compute procs).
+All proxy walls are device-timed (cudaEvent), hence immune to CPU load.
+
+=== machine_profile ===
+device: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+compute capability: 12.0
+SMs: 188, max threads/SM: 1536, shared/SM: 100 KB
+L2 cache: 128.0 MB
+global mem: 95.0 GB, bus width: 512 bit
+(clocks via nvidia-smi; legacy clockRate fields removed in CUDA 13)
+empty-launch: 4.698 us/launch (2000 launches, device time)
+launch+sync roundtrip: 7.966 us/step (host-driven floor)
+4KB H2D+D2H roundtrip: 15.073 us (pinned)
+H2D pinned BW: 26.5 GB/s (256 MB)
+D2H pinned BW: 28.6 GB/s (256 MB)
+STREAM triad: 2160 GB/s (achieved DRAM ceiling)
+FP64 MAD: 543.9 GFLOP/s (achieved compute ceiling)
+done
+
+=== proxy N=1 ===
+nstep=1 wall=0.003 s (2800.160 us/step) tip_dx=0.000000e+00
+fnx_crush_final=0.000000e+00 fnx_crush_mean2nd=0.000000e+00 fnx_anvil_final=0.000000e+00
+engaged=0+9 max|fi|=0.000e+00
+
+=== proxy N=2000 (run 1 of 2) ===
+nstep=2000 wall=5.050 s (2524.988 us/step) tip_dx=-4.899510e-04
+fnx_crush_final=1.221677e+06 fnx_crush_mean2nd=9.195017e+05 fnx_anvil_final=-1.226736e+06
+engaged=9+9 max|fi|=3.067e+05
+
+=== proxy N=2000 (run 2 of 2, bit-identical) ===
+nstep=2000 wall=5.049 s (2524.517 us/step) tip_dx=-4.899510e-04
+fnx_crush_final=1.221677e+06 fnx_crush_mean2nd=9.195017e+05 fnx_anvil_final=-1.226736e+06
+engaged=9+9 max|fi|=3.067e+05
+
+=== proxy N=8160 (stop time) ===
+nstep=8160 wall=20.595 s (2523.851 us/step) tip_dx=-1.999755e-03
+fnx_crush_final=5.016403e+06 fnx_crush_mean2nd=3.760644e+06 fnx_anvil_final=-5.024773e+06
+engaged=9+9 max|fi|=1.256e+06
+
+=== proxy EMPTY N=2000 ===
+nstep=2000 wall=0.110 s (54.960 us/step) tip_dx=-4.899510e-04
+fnx_crush_final=0.000000e+00 fnx_crush_mean2nd=0.000000e+00 fnx_anvil_final=0.000000e+00
+engaged=0+0 max|fi|=0.000e+00
+
+=== proxy EMPTY N=8160 ===
+nstep=8160 wall=0.448 s (54.867 us/step) tip_dx=-1.999755e-03
+fnx_crush_final=0.000000e+00 fnx_crush_mean2nd=0.000000e+00 fnx_anvil_final=0.000000e+00
+engaged=0+0 max|fi|=0.000e+00

@@ -115,3 +115,25 @@ fn writer_extra_damping_reparses() {
     let again = deck.round_trip().expect("extra round-trips");
     assert_eq!(again.cards.len(), deck.cards.len());
 }
+
+/// Bare `/DT/BRICK` dt-scale cards parse (foam engine legs carry one).
+#[test]
+fn bare_dt_brick_card_parses() {
+    // Byte-faithful to decks/foam76_compression/foam76_compression_0001.rad.
+    let text = "#RADIOSS ENGINE\n/RUN/foam76_compression/1\n  3.000000000000E-03\n/TFILE\n  2.500000000000E-05\n/DT/BRICK\n  5.000000000000E-02  0.000000000000E+00\n/PRINT/-1000\n";
+    let deck = RadDeck::parse_str(text).expect("foam engine text parses");
+    let card = deck
+        .cards
+        .iter()
+        .find(|card| card.kind == CardKind::DtBrick)
+        .expect("DT/BRICK card present");
+    assert_eq!(
+        card.fields,
+        vec![vec![
+            "5.000000000000E-02".to_string(),
+            "0.000000000000E+00".to_string()
+        ]]
+    );
+    let again = deck.round_trip().expect("engine round-trips");
+    assert_eq!(again.cards.len(), deck.cards.len());
+}
