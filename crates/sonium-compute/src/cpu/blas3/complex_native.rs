@@ -997,6 +997,11 @@ unsafe fn micro_tile_6x4_scalar(
                 let slot = tile.add(r * ldc + jj);
                 *slot = if overwrite {
                     acc
+                } else if beta == Complex64::new(0.0, 0.0) {
+                    // beta == 0 must not read C (poisoned C would
+                    // propagate NaN through `0 * *slot`); the AVX2
+                    // kernel has the same dedicated arm.
+                    alpha * acc
                 } else {
                     alpha * acc + beta * *slot
                 };

@@ -4,7 +4,9 @@ One committed markdown file per (platform, workload cell):
 
 | | dense BLAS | dense LAPACK | sparse matrix | dense solvers | sparse solvers + precond |
 |---|---|---|---|---|---|
-| Apple Silicon | `m4-blas.md` | `m4-lapack.md` | `m4-sparse-matrix.md` | `m4-dense-solvers.md` | `m4-sparse-solvers.md` |
+| Apple M1 | `m1-blas.md` | `m1-lapack.md` | `m1-sparse-matrix.md` | `m1-dense-solvers.md` | `m1-sparse-solvers.md` |
+| Apple M2 | `m2-blas.md` | `m2-lapack.md` | `m2-sparse-matrix.md` | `m2-dense-solvers.md` | `m2-sparse-solvers.md` |
+| Apple M4 | `m4-blas.md` | `m4-lapack.md` | `m4-sparse-matrix.md` | `m4-dense-solvers.md` | `m4-sparse-solvers.md` |
 | Linux x86-64 | `x86-blas.md` | `x86-lapack.md` | `x86-sparse-matrix.md` | `x86-dense-solvers.md` | `x86-sparse-solvers.md` |
 | NVIDIA CUDA | `cuda-blas.md` | `cuda-lapack.md` | `cuda-sparse-matrix.md` | `cuda-dense-solvers.md` | `cuda-sparse-solvers.md` |
 
@@ -48,11 +50,16 @@ formatted per-platform performance tables for the website.
 Each platform owner regenerates and commits their five files:
 
 ```bash
-just perf-m4     # on the Apple Silicon Mac
+just perf-m1     # on the Apple M1 Mac (perf-m2 / perf-m4 likewise, per chip)
 just perf-x86    # on the Linux x86-64 box
 just perf-cuda   # on the Linux + NVIDIA GPU box
 just perf-cell x86 blas   # a single cell
 ```
+
+Adding a new Apple chip (e.g. M6): add its id to `APPLE_PLATFORMS` in
+`scripts/perf_cells.py`, a `just perf-m6` recipe, and a row above.
+Auto-detection parses any `Apple M<N>` brand string, so the generator
+titles the files correctly even before the id is listed.
 
 `PERF_QUICK=1` selects a bounded run; quick mode is recorded in each file
 header and is not comparable to full runs. `PERF_KEEP_WORK=1` retains raw

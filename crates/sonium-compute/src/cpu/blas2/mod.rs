@@ -152,6 +152,14 @@ pub fn gemv_f32(
 ) {
     // Fast path: NoTrans → SME2 sgemv (which now honours arbitrary beta).
     if matches!(op, Transpose::NoTrans) {
+        // Without SME2 the SME2 entry is a single-accumulator scalar
+        // loop (~9 GB/s on M1); Accelerate runs ~13x faster there.
+        #[cfg(target_os = "macos")]
+        if !crate::cpu::blas3::sme2_available()
+            && crate::cpu::blas3::accelerate::sgemv_n(m, n, alpha, a, lda, x, beta, y)
+        {
+            return;
+        }
         sme2::gemv::sgemv(m, n, alpha, a, lda, x, beta, y);
         return;
     }
@@ -172,6 +180,13 @@ pub fn gemv_f64(
     y: &mut [f64],
 ) {
     if matches!(op, Transpose::NoTrans) {
+        // See `gemv_f32`: without SME2, route through Accelerate.
+        #[cfg(target_os = "macos")]
+        if !crate::cpu::blas3::sme2_available()
+            && crate::cpu::blas3::accelerate::dgemv_n(m, n, alpha, a, lda, x, beta, y)
+        {
+            return;
+        }
         sme2::gemv::dgemv(m, n, alpha, a, lda, x, beta, y);
         return;
     }

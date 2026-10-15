@@ -314,12 +314,17 @@ pub fn runtime() -> &'static SolverRuntime {
 /// the default 2 MB Rayon stack has overflowed there in debug builds.
 pub const RAYON_WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
 
-/// When `bandwidth_threads == compute_threads` (homogeneous architecture),
-/// this runs `f` directly on the global pool (no overhead).
+/// When the calling pool is already no wider than the bandwidth width,
+/// this runs `f` directly on it (no overhead).
 pub fn with_bandwidth_pool<R: Send>(f: impl FnOnce() -> R + Send) -> R {
     let rt = runtime();
-    if rt.bandwidth_threads >= rt.compute_threads {
-        // Homogeneous architecture — no need for a separate pool.
+    if rt.bandwidth_threads >= rayon::current_num_threads() {
+        // Caller is already narrow enough — no need for a separate
+        // pool. Comparing against the caller's width (not
+        // `compute_threads`) matters on small heterogeneous machines:
+        // on a 4-P-core M1 `bandwidth_threads == compute_threads`, yet
+        // the default rayon pool has 8 threads (P+E), and running
+        // inline there forfeits the narrowing entirely.
         return f();
     }
     let pool = bandwidth_pool();

@@ -6288,6 +6288,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
     fn band_c32_avx2_matches_generic() {
         // `Complex32` twin of `band_c64_avx2_matches_generic` (1e-4).
         for (trans, lower) in [(false, true), (true, false)] {

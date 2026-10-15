@@ -4,7 +4,7 @@
 Generates `perf/<platform>-<cell>.md` from the committed benchmark
 harnesses. Run on each platform, then commit the results:
 
-    just perf-m4     # Apple Silicon Mac
+    just perf-m1     # Apple M1 Mac (perf-m2, perf-m4, ... likewise)
     just perf-x86    # Linux x86-64
     just perf-cuda   # Linux x86-64 with NVIDIA GPU
 
@@ -46,11 +46,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PERF_DIR = REPO_ROOT / "perf"
 TARGET_DIR = REPO_ROOT / "target"
 
-PLATFORMS = ("m4", "x86", "cuda")
+# Apple Silicon chips with committed records. Adding a new chip is a
+# one-line change here plus a `just perf-m<N>` recipe (and a row in
+# perf/README.md); auto-detection parses any `Apple M<N>` brand string,
+# so an unlisted future chip still generates correctly titled files.
+APPLE_PLATFORMS = ("m1", "m2", "m3", "m4", "m5")
+PLATFORMS = APPLE_PLATFORMS + ("x86", "cuda")
 CELLS = ("blas", "lapack", "sparse-matrix", "dense-solvers", "sparse-solvers")
 
 PLATFORM_TITLE = {
-    "m4": "Apple M4 (macOS, aarch64)",
+    **{chip: f"Apple {chip.upper()} (macOS, aarch64)"
+       for chip in APPLE_PLATFORMS},
     "x86": "x86-64 (Linux)",
     "cuda": "CUDA (NVIDIA GPU, Linux)",
 }
@@ -62,7 +68,8 @@ CELL_TITLE = {
     "sparse-solvers": "Sparse solvers + preconditioners",
 }
 # Preferred vendor arm id per platform for the criterion blas benches.
-VENDOR_ARM = {"m4": "accelerate", "x86": "openblas", "cuda": "cublas"}
+VENDOR_ARM = {**{chip: "accelerate" for chip in APPLE_PLATFORMS},
+              "x86": "openblas", "cuda": "cublas"}
 
 
 def sh(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -94,6 +101,10 @@ def host_line() -> str:
         mem = f"{kb / 1024 / 1024:.0f} GB"
     except Exception:
         pass
+    if mem == "unknown" and py_platform.system() == "Darwin":
+        r = sh(["/usr/sbin/sysctl", "-n", "hw.memsize"])
+        if r.returncode == 0 and r.stdout.strip().isdigit():
+            mem = f"{int(r.stdout.strip()) / 1024**3:.0f} GB"
     return (f"{uname.system} {uname.release} {uname.machine} · "
             f"{os.cpu_count()} logical CPUs · mem {mem}")
 
@@ -110,8 +121,33 @@ def gpu_line() -> str:
 def detect_platform() -> str:
     uname = py_platform.uname()
     if uname.system == "Darwin" and uname.machine == "arm64":
-        return "m4"
+        return apple_chip_id() or "m4"
     return "x86"
+
+
+def apple_chip_id() -> str | None:
+    """Platform id for this Mac's chip (`Apple M4 Pro` -> `m4`).
+
+    Parses any `Apple M<N>` brand string, so future chips work before
+    they are added to `APPLE_PLATFORMS`; returns None off Apple Silicon.
+    """
+    r = sh(["/usr/sbin/sysctl", "-n", "machdep.cpu.brand_string"])
+    if r.returncode != 0:
+        return None
+    brand = r.stdout.strip().lower()
+    if not brand.startswith("apple m"):
+        return None
+    digits = ""
+    for ch in brand[len("apple m"):]:
+        if not ch.isdigit():
+            break
+        digits += ch
+    return f"m{digits}" if digits else None
+
+
+def platform_title(platform: str) -> str:
+    return PLATFORM_TITLE.get(
+        platform, f"Apple {platform.upper()} (macOS, aarch64)")
 
 
 def header(platform: str, cell: str, commands: list[str], quick: bool,
@@ -119,7 +155,7 @@ def header(platform: str, cell: str, commands: list[str], quick: bool,
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(
         timespec="seconds")
     lines = [
-        f"# {PLATFORM_TITLE[platform]} — {CELL_TITLE[cell]}",
+        f"# {platform_title(platform)} — {CELL_TITLE[cell]}",
         "",
         f"_Generated {now} from commit `{git_sha()}`._",
         "",
@@ -572,8 +608,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Generate perf/<platform>-<cell>.md records.")
     parser.add_argument("platform", nargs="?", choices=PLATFORMS,
-                        help="default: auto-detect (m4 on Apple Silicon, "
-                             "else x86)")
+                        help="default: auto-detect (chip id such as m1 "
+                             "on Apple Silicon, else x86)")
     parser.add_argument("--cells", default=",".join(CELLS),
                         help="comma-separated subset of cells")
     parser.add_argument("--out-dir", default=str(PERF_DIR))

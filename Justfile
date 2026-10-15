@@ -119,11 +119,19 @@ simulation-galleries dir:
 # --- Per-platform performance records (perf/*.md) ---
 #
 # Each platform owner runs its recipe and commits the results:
-#   Mac (Apple Silicon)   just perf-m4
+#   Mac (Apple Silicon)   just perf-m1 / perf-m2 / perf-m4 (per chip)
 #   Linux x86-64           just perf-x86
 #   Linux + NVIDIA GPU     just perf-cuda
 # See perf/README.md for the cell/harness mapping. PERF_QUICK=1 selects a
 # bounded run (recorded in each file header; not comparable to full runs).
+
+[group('perf')]
+perf-m1:
+    SONIUM_CARGO="{{cargo}}" python3 scripts/perf_cells.py m1
+
+[group('perf')]
+perf-m2:
+    SONIUM_CARGO="{{cargo}}" python3 scripts/perf_cells.py m2
 
 [group('perf')]
 perf-m4:

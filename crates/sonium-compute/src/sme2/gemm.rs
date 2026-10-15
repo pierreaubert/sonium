@@ -1262,9 +1262,10 @@ where
 // ---- Scalar reference implementations (used on non-SME2 hosts) ----
 
 // Non-SME2 fallback dispatch: the AVX2/FMA register-blocked kernel in
-// `cpu::blas3::avx2` on x86_64 hosts that support it, the scalar triple
-// loop everywhere else (including aarch64 hosts without SME2). Numerical
-// behaviour is identical up to FMA contraction/reassociation.
+// `cpu::blas3::avx2` on x86_64 hosts that support it, the NEON
+// register-blocked kernel in `cpu::blas3::neon` on aarch64, the scalar
+// triple loop everywhere else. Numerical behaviour is identical up to
+// FMA contraction/reassociation.
 #[allow(clippy::too_many_arguments)]
 fn sgemm_fallback(
     m: usize,
@@ -1286,6 +1287,16 @@ fn sgemm_fallback(
         // by the public entry points before dispatching here.
         return unsafe {
             crate::cpu::blas3::avx2::sgemm(
+                m, n, k, alpha, a, lda, b, ldb, beta, c, ldc, trans_a, false,
+            )
+        };
+    }
+    #[cfg(target_arch = "aarch64")]
+    if crate::cpu::blas3::neon::is_available() {
+        // SAFETY: NEON is baseline on aarch64; bounds pre-checked by
+        // the public entry points before dispatching here.
+        return unsafe {
+            crate::cpu::blas3::neon::sgemm(
                 m, n, k, alpha, a, lda, b, ldb, beta, c, ldc, trans_a, false,
             )
         };
@@ -1313,6 +1324,15 @@ fn dgemm_fallback(
         // SAFETY: AVX2+FMA detected above; bounds pre-checked by the caller.
         return unsafe {
             crate::cpu::blas3::avx2::dgemm(
+                m, n, k, alpha, a, lda, b, ldb, beta, c, ldc, trans_a, false,
+            )
+        };
+    }
+    #[cfg(target_arch = "aarch64")]
+    if crate::cpu::blas3::neon::is_available() {
+        // SAFETY: as in `sgemm_fallback`.
+        return unsafe {
+            crate::cpu::blas3::neon::dgemm(
                 m, n, k, alpha, a, lda, b, ldb, beta, c, ldc, trans_a, false,
             )
         };

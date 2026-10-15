@@ -979,6 +979,9 @@ unsafe fn micro_tile_6x8_scalar(
                 let slot = tile.add(r * ldc + jj);
                 *slot = if overwrite {
                     acc
+                } else if beta == Complex32::new(0.0, 0.0) {
+                    // beta == 0 must not read C; see the c64 twin.
+                    alpha * acc
                 } else {
                     alpha * acc + beta * *slot
                 };

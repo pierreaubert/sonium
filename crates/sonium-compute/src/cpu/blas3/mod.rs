@@ -28,18 +28,35 @@ pub mod trsm;
 #[cfg(target_arch = "x86_64")]
 pub mod avx2;
 
+#[cfg(target_arch = "aarch64")]
+pub mod neon;
+
 use crate::backend::Transpose;
 use crate::sme2;
 use num_complex::{Complex32, Complex64};
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU8, Ordering};
 
+/// Whether the SME2 GEMM micro-kernels are usable on this host.
+/// On Apple Silicon without SME2 (M1/M2/M3) the in-house real GEMM
+/// fallback is a scalar triple loop (~2 GF/s measured on M1 vs
+/// ~200 GF/s for Accelerate), so macOS dispatch routes around it
+/// through Accelerate instead (see `accelerate::*_t`). On SME2 hosts
+/// (M4+) this returns true and every historical routing is unchanged.
+#[allow(dead_code)]
+pub(crate) fn sme2_available() -> bool {
+    crate::sme2::detect::Sme2Caps::detect().has_sme2
+}
+
 #[cfg(target_os = "macos")]
-mod accelerate {
+pub(crate) mod accelerate {
+    use crate::backend::Transpose;
     use num_complex::{Complex32, Complex64};
 
     const CBLAS_ROW_MAJOR: i32 = 101;
     const CBLAS_NO_TRANS: i32 = 111;
+    const CBLAS_TRANS: i32 = 112;
+    const CBLAS_CONJ_TRANS: i32 = 113;
 
     #[link(name = "Accelerate", kind = "framework")]
     unsafe extern "C" {
@@ -109,6 +126,34 @@ mod accelerate {
             beta: *const f64,
             c: *mut f64,
             ldc: i32,
+        );
+        fn cblas_sgemv(
+            order: i32,
+            trans: i32,
+            m: i32,
+            n: i32,
+            alpha: f32,
+            a: *const f32,
+            lda: i32,
+            x: *const f32,
+            incx: i32,
+            beta: f32,
+            y: *mut f32,
+            incy: i32,
+        );
+        fn cblas_dgemv(
+            order: i32,
+            trans: i32,
+            m: i32,
+            n: i32,
+            alpha: f64,
+            a: *const f64,
+            lda: i32,
+            x: *const f64,
+            incx: i32,
+            beta: f64,
+            y: *mut f64,
+            incy: i32,
         );
     }
 
@@ -307,6 +352,298 @@ mod accelerate {
                 &beta as *const Complex64 as *const f64,
                 c.as_mut_ptr() as *mut f64,
                 ldc as i32,
+            );
+        }
+        true
+    }
+
+    // ---- Trans-aware variants for hosts without SME2 -----------------
+    //
+    // Only called when `sme2_available()` is false (M1/M2/M3): there the
+    // in-house fallback behind every transposed or skewed shape is the
+    // scalar triple loop (~1.5-2 GF/s on M1), while cblas trans flags
+    // run at full AMX rate (130-160x faster at 512^3, 99x on the skewed
+    // 2048x128x2048 BEM shape; measured 2026-10-15). The work floor is
+    // far below the NN wrappers' 32^3: even a 64^3 transposed GEMM pays
+    // ~130us scalar vs ~10us through cblas.
+
+    fn cblas_trans(op: Transpose, complex: bool) -> i32 {
+        match op {
+            Transpose::NoTrans => CBLAS_NO_TRANS,
+            Transpose::Trans => CBLAS_TRANS,
+            Transpose::ConjTrans => {
+                if complex {
+                    CBLAS_CONJ_TRANS
+                } else {
+                    CBLAS_TRANS
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn stored_fits(
+        transa: Transpose,
+        transb: Transpose,
+        m: usize,
+        n: usize,
+        k: usize,
+        a_len: usize,
+        lda: usize,
+        b_len: usize,
+        ldb: usize,
+        c_len: usize,
+        ldc: usize,
+    ) -> bool {
+        if m == 0 || n == 0 {
+            return false;
+        }
+        let (a_rows, a_cols) = match transa {
+            Transpose::NoTrans => (m, k),
+            _ => (k, m),
+        };
+        let (b_rows, b_cols) = match transb {
+            Transpose::NoTrans => (k, n),
+            _ => (n, k),
+        };
+        (m | n | k | lda | ldb | ldc) <= i32::MAX as usize
+            && matrix_fits(a_len, a_rows, a_cols, lda)
+            && matrix_fits(b_len, b_rows, b_cols, ldb)
+            && matrix_fits(c_len, m, n, ldc)
+            && m.saturating_mul(n).saturating_mul(k) >= 8192
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn sgemm_t(
+        transa: Transpose,
+        transb: Transpose,
+        m: usize,
+        n: usize,
+        k: usize,
+        alpha: f32,
+        a: &[f32],
+        lda: usize,
+        b: &[f32],
+        ldb: usize,
+        beta: f32,
+        c: &mut [f32],
+        ldc: usize,
+    ) -> bool {
+        if !stored_fits(transa, transb, m, n, k, a.len(), lda, b.len(), ldb, c.len(), ldc) {
+            return false;
+        }
+        unsafe {
+            cblas_sgemm(
+                CBLAS_ROW_MAJOR,
+                cblas_trans(transa, false),
+                cblas_trans(transb, false),
+                m as i32,
+                n as i32,
+                k as i32,
+                alpha,
+                a.as_ptr(),
+                lda as i32,
+                b.as_ptr(),
+                ldb as i32,
+                beta,
+                c.as_mut_ptr(),
+                ldc as i32,
+            );
+        }
+        true
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn dgemm_t(
+        transa: Transpose,
+        transb: Transpose,
+        m: usize,
+        n: usize,
+        k: usize,
+        alpha: f64,
+        a: &[f64],
+        lda: usize,
+        b: &[f64],
+        ldb: usize,
+        beta: f64,
+        c: &mut [f64],
+        ldc: usize,
+    ) -> bool {
+        if !stored_fits(transa, transb, m, n, k, a.len(), lda, b.len(), ldb, c.len(), ldc) {
+            return false;
+        }
+        unsafe {
+            cblas_dgemm(
+                CBLAS_ROW_MAJOR,
+                cblas_trans(transa, false),
+                cblas_trans(transb, false),
+                m as i32,
+                n as i32,
+                k as i32,
+                alpha,
+                a.as_ptr(),
+                lda as i32,
+                b.as_ptr(),
+                ldb as i32,
+                beta,
+                c.as_mut_ptr(),
+                ldc as i32,
+            );
+        }
+        true
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn cgemm_t(
+        transa: Transpose,
+        transb: Transpose,
+        m: usize,
+        n: usize,
+        k: usize,
+        alpha: Complex32,
+        a: &[Complex32],
+        lda: usize,
+        b: &[Complex32],
+        ldb: usize,
+        beta: Complex32,
+        c: &mut [Complex32],
+        ldc: usize,
+    ) -> bool {
+        if !stored_fits(transa, transb, m, n, k, a.len(), lda, b.len(), ldb, c.len(), ldc) {
+            return false;
+        }
+        unsafe {
+            cblas_cgemm(
+                CBLAS_ROW_MAJOR,
+                cblas_trans(transa, true),
+                cblas_trans(transb, true),
+                m as i32,
+                n as i32,
+                k as i32,
+                &alpha as *const Complex32 as *const f32,
+                a.as_ptr() as *const f32,
+                lda as i32,
+                b.as_ptr() as *const f32,
+                ldb as i32,
+                &beta as *const Complex32 as *const f32,
+                c.as_mut_ptr() as *mut f32,
+                ldc as i32,
+            );
+        }
+        true
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn zgemm_t(
+        transa: Transpose,
+        transb: Transpose,
+        m: usize,
+        n: usize,
+        k: usize,
+        alpha: Complex64,
+        a: &[Complex64],
+        lda: usize,
+        b: &[Complex64],
+        ldb: usize,
+        beta: Complex64,
+        c: &mut [Complex64],
+        ldc: usize,
+    ) -> bool {
+        if !stored_fits(transa, transb, m, n, k, a.len(), lda, b.len(), ldb, c.len(), ldc) {
+            return false;
+        }
+        unsafe {
+            cblas_zgemm(
+                CBLAS_ROW_MAJOR,
+                cblas_trans(transa, true),
+                cblas_trans(transb, true),
+                m as i32,
+                n as i32,
+                k as i32,
+                &alpha as *const Complex64 as *const f64,
+                a.as_ptr() as *const f64,
+                lda as i32,
+                b.as_ptr() as *const f64,
+                ldb as i32,
+                &beta as *const Complex64 as *const f64,
+                c.as_mut_ptr() as *mut f64,
+                ldc as i32,
+            );
+        }
+        true
+    }
+
+    /// NoTrans GEMV for hosts without SME2 (see `blas2`): the SME2
+    /// scalar fallback runs at ~9 GB/s on M1 vs ~116 GB/s for cblas at
+    /// 1024x1024. Contiguous vectors only (incx = incy = 1).
+    #[allow(clippy::too_many_arguments)]
+    pub fn sgemv_n(
+        m: usize,
+        n: usize,
+        alpha: f32,
+        a: &[f32],
+        lda: usize,
+        x: &[f32],
+        beta: f32,
+        y: &mut [f32],
+    ) -> bool {
+        if m == 0 || n == 0 || (m | n | lda) > i32::MAX as usize {
+            return false;
+        }
+        if !matrix_fits(a.len(), m, n, lda) || x.len() < n || y.len() < m {
+            return false;
+        }
+        unsafe {
+            cblas_sgemv(
+                CBLAS_ROW_MAJOR,
+                CBLAS_NO_TRANS,
+                m as i32,
+                n as i32,
+                alpha,
+                a.as_ptr(),
+                lda as i32,
+                x.as_ptr(),
+                1,
+                beta,
+                y.as_mut_ptr(),
+                1,
+            );
+        }
+        true
+    }
+
+    /// f64 twin of [`sgemv_n`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn dgemv_n(
+        m: usize,
+        n: usize,
+        alpha: f64,
+        a: &[f64],
+        lda: usize,
+        x: &[f64],
+        beta: f64,
+        y: &mut [f64],
+    ) -> bool {
+        if m == 0 || n == 0 || (m | n | lda) > i32::MAX as usize {
+            return false;
+        }
+        if !matrix_fits(a.len(), m, n, lda) || x.len() < n || y.len() < m {
+            return false;
+        }
+        unsafe {
+            cblas_dgemv(
+                CBLAS_ROW_MAJOR,
+                CBLAS_NO_TRANS,
+                m as i32,
+                n as i32,
+                alpha,
+                a.as_ptr(),
+                lda as i32,
+                x.as_ptr(),
+                1,
+                beta,
+                y.as_mut_ptr(),
+                1,
             );
         }
         true
@@ -1622,6 +1959,19 @@ pub fn gemm_f32(
         }
         return;
     }
+    // Without SME2, skewed NoTrans shapes the NN wrapper below would
+    // reject degrade to the scalar triple loop; Accelerate takes them.
+    // Transposed shapes stay in-house: the NEON fallback accumulates
+    // each element in sequential k order, and grouped TRSM/SYRK
+    // comparisons rely on that shape independence.
+    #[cfg(target_os = "macos")]
+    if !sme2_available()
+        && matches!(transa, Transpose::NoTrans)
+        && matches!(transb, Transpose::NoTrans)
+        && accelerate::sgemm_t(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+    {
+        return;
+    }
     if matches!(transb, Transpose::NoTrans) {
         #[cfg(target_os = "macos")]
         if matches!(transa, Transpose::NoTrans)
@@ -1720,6 +2070,17 @@ pub fn gemm_f64(
         }
         return;
     }
+    // Without SME2, skewed NoTrans shapes the NN wrapper's skew guard
+    // rejects degrade to the scalar triple loop; Accelerate takes
+    // them. Transposed shapes stay in-house (see `gemm_f32`).
+    #[cfg(target_os = "macos")]
+    if !sme2_available()
+        && matches!(transa, Transpose::NoTrans)
+        && matches!(transb, Transpose::NoTrans)
+        && accelerate::dgemm_t(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+    {
+        return;
+    }
     if matches!(transb, Transpose::NoTrans) {
         #[cfg(target_os = "macos")]
         if matches!(transa, Transpose::NoTrans)
@@ -1791,6 +2152,19 @@ pub fn gemm_c32(
     c: &mut [Complex32],
     ldc: usize,
 ) {
+    // Without SME2, skewed NoTrans shapes fall to the AVX2-tuned
+    // native sweep running scalar on aarch64 (~4x slower than cblas at
+    // the skewed BEM shape); Accelerate takes them. Transposed shapes
+    // stay on the native sweep, whose per-element k order is
+    // shape-independent.
+    #[cfg(target_os = "macos")]
+    if !sme2_available()
+        && matches!(transa, Transpose::NoTrans)
+        && matches!(transb, Transpose::NoTrans)
+        && accelerate::cgemm_t(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+    {
+        return;
+    }
     if matches!(transa, Transpose::NoTrans) && matches!(transb, Transpose::NoTrans) {
         #[cfg(target_os = "macos")]
         if accelerate::cgemm(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc) {
@@ -1842,6 +2216,16 @@ pub fn gemm_c64(
     c: &mut [Complex64],
     ldc: usize,
 ) {
+    // See `gemm_c32`: without SME2, skewed NoTrans shapes route
+    // through Accelerate; transposed shapes stay on the native sweep.
+    #[cfg(target_os = "macos")]
+    if !sme2_available()
+        && matches!(transa, Transpose::NoTrans)
+        && matches!(transb, Transpose::NoTrans)
+        && accelerate::zgemm_t(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)
+    {
+        return;
+    }
     if matches!(transa, Transpose::NoTrans) && matches!(transb, Transpose::NoTrans) {
         #[cfg(target_os = "macos")]
         if accelerate::zgemm(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc) {
