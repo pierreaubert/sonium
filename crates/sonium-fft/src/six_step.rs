@@ -17,6 +17,162 @@ use crate::cpu::planner::CpuFftPlanner;
 use crate::scalar::FftScalar;
 use sonium_compute::transpose_2d;
 
+/// Transpose a `rows × cols` complex matrix, using AVX2 tile kernels on
+/// x86_64 when the scalar type and dimensions allow, and the generic
+/// blocked scalar transpose otherwise. `src` and `dst` must be disjoint
+/// slices of at least `rows * cols` elements.
+fn transpose_stage<T: FftScalar>(
+    src: &[Complex<T>],
+    dst: &mut [Complex<T>],
+    rows: usize,
+    cols: usize,
+) {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>()
+            && rows.is_multiple_of(4)
+            && cols.is_multiple_of(4)
+        {
+            assert_eq!(std::mem::size_of::<Complex<T>>(), std::mem::size_of::<Complex<f32>>());
+            assert_eq!(std::mem::align_of::<Complex<T>>(), std::mem::align_of::<Complex<f32>>());
+            // SAFETY: TypeId equality proves T = f32 and the layout
+            // asserts above pin the transmute targets; AVX2+FMA were just
+            // detected at runtime.
+            unsafe {
+                let src32: &[Complex<f32>] =
+                    std::mem::transmute::<&[Complex<T>], &[Complex<f32>]>(src);
+                let dst32: &mut [Complex<f32>] =
+                    std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f32>]>(dst);
+                transpose_f32_avx(src32, dst32, rows, cols);
+            }
+            return;
+        }
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f64>()
+            && rows.is_multiple_of(2)
+            && cols.is_multiple_of(2)
+        {
+            assert_eq!(std::mem::size_of::<Complex<T>>(), std::mem::size_of::<Complex<f64>>());
+            assert_eq!(std::mem::align_of::<Complex<T>>(), std::mem::align_of::<Complex<f64>>());
+            // SAFETY: TypeId equality proves T = f64 and the layout
+            // asserts above pin the transmute targets; AVX2+FMA were just
+            // detected at runtime.
+            unsafe {
+                let src64: &[Complex<f64>] =
+                    std::mem::transmute::<&[Complex<T>], &[Complex<f64>]>(src);
+                let dst64: &mut [Complex<f64>] =
+                    std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f64>]>(dst);
+                transpose_f64_avx(src64, dst64, rows, cols);
+            }
+            return;
+        }
+    }
+    transpose_2d(src, dst, rows, cols)
+        .expect("six-step scratch dimensions are validated at construction");
+}
+
+/// AVX2 transpose for `Complex<f32>`: 4×4 tiles transposed through 64-bit
+/// lane shuffles, with 32-row outer blocking for cache locality.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime; `rows` and `cols`
+/// must be multiples of four and both slices must hold `rows * cols`
+/// disjoint elements.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn transpose_f32_avx(
+    src: &[Complex<f32>],
+    dst: &mut [Complex<f32>],
+    rows: usize,
+    cols: usize,
+) {
+    use std::arch::x86_64::*;
+    debug_assert!(rows.is_multiple_of(4) && cols.is_multiple_of(4));
+    unsafe {
+        let mut rb = 0usize;
+        while rb < rows {
+            let rend = (rb + 32).min(rows);
+            let mut c = 0usize;
+            while c < cols {
+                let mut r = rb;
+                while r < rend {
+                    let load = |row: usize| {
+                        _mm256_loadu_ps(src.as_ptr().add(row * cols + c) as *const f32)
+                    };
+                    let v0 = load(r);
+                    let v1 = load(r + 1);
+                    let v2 = load(r + 2);
+                    let v3 = load(r + 3);
+                    let t0 = _mm256_unpacklo_pd(_mm256_castps_pd(v0), _mm256_castps_pd(v1));
+                    let t1 = _mm256_unpackhi_pd(_mm256_castps_pd(v0), _mm256_castps_pd(v1));
+                    let s0 = _mm256_unpacklo_pd(_mm256_castps_pd(v2), _mm256_castps_pd(v3));
+                    let s1 = _mm256_unpackhi_pd(_mm256_castps_pd(v2), _mm256_castps_pd(v3));
+                    let outs = [
+                        _mm256_permute2f128_pd(t0, s0, 0x20),
+                        _mm256_permute2f128_pd(t1, s1, 0x20),
+                        _mm256_permute2f128_pd(t0, s0, 0x31),
+                        _mm256_permute2f128_pd(t1, s1, 0x31),
+                    ];
+                    for (j, o) in outs.iter().enumerate() {
+                        _mm256_storeu_ps(
+                            dst.as_mut_ptr().add((c + j) * rows + r) as *mut f32,
+                            _mm256_castpd_ps(*o),
+                        );
+                    }
+                    r += 4;
+                }
+                c += 4;
+            }
+            rb = rend;
+        }
+    }
+}
+
+/// AVX2 transpose for `Complex<f64>`: each register already holds two
+/// complex values, so a 2×2 tile is one cross-lane permute per column.
+///
+/// # Safety
+///
+/// The caller must provide AVX2 and FMA at runtime; `rows` and `cols`
+/// must be even and both slices must hold `rows * cols` disjoint
+/// elements.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+unsafe fn transpose_f64_avx(
+    src: &[Complex<f64>],
+    dst: &mut [Complex<f64>],
+    rows: usize,
+    cols: usize,
+) {
+    use std::arch::x86_64::*;
+    debug_assert!(rows.is_multiple_of(2) && cols.is_multiple_of(2));
+    unsafe {
+        let mut rb = 0usize;
+        while rb < rows {
+            let rend = (rb + 32).min(rows);
+            let mut c = 0usize;
+            while c < cols {
+                let mut r = rb;
+                while r < rend {
+                    let v0 = _mm256_loadu_pd(src.as_ptr().add(r * cols + c) as *const f64);
+                    let v1 = _mm256_loadu_pd(src.as_ptr().add((r + 1) * cols + c) as *const f64);
+                    _mm256_storeu_pd(
+                        dst.as_mut_ptr().add(c * rows + r) as *mut f64,
+                        _mm256_permute2f128_pd(v0, v1, 0x20),
+                    );
+                    _mm256_storeu_pd(
+                        dst.as_mut_ptr().add((c + 1) * rows + r) as *mut f64,
+                        _mm256_permute2f128_pd(v0, v1, 0x31),
+                    );
+                    r += 2;
+                }
+                c += 2;
+            }
+            rb = rend;
+        }
+    }
+}
+
 /// Six-step plan for a single transform length, with contiguous batching.
 pub struct SixStepFftPlan<T: FftScalar> {
     n: usize,
@@ -76,49 +232,38 @@ impl<T: FftScalar> SixStepFftPlan<T> {
 
     fn process_one(&self, buffer: &mut [Complex<T>], scratch: &mut [Complex<T>]) {
         let (work, axis) = scratch.split_at_mut(self.n);
-        transpose_2d(buffer, work, self.n2, self.n1)
-            .expect("six-step scratch dimensions are validated at construction");
+        transpose_stage(buffer, work, self.n2, self.n1);
         // The axis plans can themselves be Bluestein plans. Keep their
         // transform buffer and scratch in one caller-owned region so the
         // six-step wrapper preserves its allocation-free contract for every
         // factorisation, not only smooth axes.
 
-        // First axis: N2-point transforms for each n1 coordinate, followed by
-        // the Cooley–Tukey twiddle W_N^(n1*k2) from the plan-time table.
-        let (phase_scratch, axis_fft_scratch) = axis.split_at_mut(self.n2);
-        for n1_index in 0..self.n1 {
-            phase_scratch[..self.n2]
-                .copy_from_slice(&work[n1_index * self.n2..(n1_index + 1) * self.n2]);
-            self.axis_n2.process_with_scratch(
-                &mut phase_scratch[..self.n2],
-                &mut axis_fft_scratch[..self.axis_n2.scratch_len()],
-            );
-            let twiddle_row = &self.twiddles[n1_index * self.n2..(n1_index + 1) * self.n2];
-            for (slot, (value, twiddle)) in work[n1_index * self.n2..(n1_index + 1) * self.n2]
-                .iter_mut()
-                .zip(phase_scratch.iter().zip(twiddle_row.iter()))
-            {
-                *slot = *value * *twiddle;
-            }
+        // First axis: N2-point transforms for each n1 coordinate, followed
+        // by the Cooley–Tukey twiddle W_N^(n1*k2) from the plan-time table.
+        // Rows are transformed in place one at a time (batch-1 calls keep
+        // the fast single-transform runners; a batched call would route
+        // to the narrower paired-transform kernels).
+        let axis_n2_scratch = self.axis_n2.scratch_len();
+        for row in work.chunks_exact_mut(self.n2) {
+            self.axis_n2
+                .process_with_scratch(row, &mut axis[..axis_n2_scratch]);
+        }
+        for (value, twiddle) in work.iter_mut().zip(self.twiddles.iter()) {
+            *value = *value * *twiddle;
         }
 
         // Second axis: transpose so each k2 vector is contiguous, transform
-        // rows, then transpose back into the caller's row-major layout.
-        transpose_2d(work, buffer, self.n1, self.n2)
-            .expect("six-step transpose dimensions are validated at construction");
-        let (phase_scratch, axis_fft_scratch) = axis.split_at_mut(self.n1);
-        for k2 in 0..self.n2 {
-            phase_scratch[..self.n1].copy_from_slice(&buffer[k2 * self.n1..(k2 + 1) * self.n1]);
-            self.axis_n1.process_with_scratch(
-                &mut phase_scratch[..self.n1],
-                &mut axis_fft_scratch[..self.axis_n1.scratch_len()],
-            );
-            for k1 in 0..self.n1 {
-                work[k2 * self.n1 + k1] = phase_scratch[k1];
-            }
+        // rows in place, then transpose back into the caller's row-major
+        // layout. The final transpose lands in `work`, so one closing copy
+        // returns the result to `buffer`.
+        transpose_stage(work, buffer, self.n1, self.n2);
+        let axis_n1_scratch = self.axis_n1.scratch_len();
+        for row in buffer.chunks_exact_mut(self.n1) {
+            self.axis_n1
+                .process_with_scratch(row, &mut axis[..axis_n1_scratch]);
         }
-        transpose_2d(work, buffer, self.n2, self.n1)
-            .expect("six-step transpose dimensions are validated at construction");
+        transpose_stage(buffer, work, self.n2, self.n1);
+        buffer.copy_from_slice(&work[..]);
     }
 }
 

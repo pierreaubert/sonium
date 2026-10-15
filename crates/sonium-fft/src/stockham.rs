@@ -233,8 +233,12 @@ fn run_single_grouped<T: FftScalar>(
     };
 
     if sections.is_empty() {
-        for stage_tw in stages {
-            stage(n, src, dst, stage_tw, dir_sign, dispatch);
+        for (index, stage_tw) in stages.iter().enumerate() {
+            if index + 1 == stages.len() {
+                stage_final(n, src, dst, stage_tw, dir_sign, dispatch);
+            } else {
+                stage(n, src, dst, stage_tw, dir_sign, dispatch);
+            }
             std::mem::swap(&mut src, &mut dst);
         }
     } else {
@@ -242,8 +246,15 @@ fn run_single_grouped<T: FftScalar>(
         debug_assert_eq!(sections.last().map(|s| s.end_stage), Some(stages.len()));
         for section in sections {
             debug_assert!(section.first_stage < section.end_stage);
-            for stage_tw in &stages[section.first_stage..section.end_stage] {
-                stage(n, src, dst, stage_tw, dir_sign, dispatch);
+            for (offset, stage_tw) in stages[section.first_stage..section.end_stage]
+                .iter()
+                .enumerate()
+            {
+                if section.first_stage + offset + 1 == stages.len() {
+                    stage_final(n, src, dst, stage_tw, dir_sign, dispatch);
+                } else {
+                    stage(n, src, dst, stage_tw, dir_sign, dispatch);
+                }
                 std::mem::swap(&mut src, &mut dst);
             }
         }
@@ -384,7 +395,7 @@ fn try_run_batched_f32_audio<T: FftScalar>(
 ) -> bool {
     if !dispatch.allows_simd()
         || !cfg!(target_arch = "x86_64")
-        || !matches!(n, 512 | 1024)
+        || !matches!(n, 512 | 1024 | 4096)
         || std::any::TypeId::of::<T>() != std::any::TypeId::of::<f32>()
         || !stages.iter().all(|s| matches!(s.radix, 2 | 4))
     {
@@ -405,7 +416,8 @@ fn try_run_batched_f32_audio<T: FftScalar>(
         for chunk in buffer_f32.chunks_exact_mut(n) {
             match n {
                 512 => run_single_f32_512(stages_f32, dir_sign_f32, chunk, scratch_f32, dispatch),
-                _ => run_single_f32_1024(stages_f32, dir_sign_f32, chunk, scratch_f32, dispatch),
+                1024 => run_single_f32_1024(stages_f32, dir_sign_f32, chunk, scratch_f32, dispatch),
+                _ => run_single_f32_4096(stages_f32, dir_sign_f32, chunk, scratch_f32, dispatch),
             }
         }
     }
@@ -422,8 +434,9 @@ fn run_single_f32_512(
 ) {
     debug_assert_eq!(buffer.len(), 512);
     debug_assert_eq!(stages.len(), 5);
-    // Three-pass AVX2 sequence: fused first pair, one generic stage,
-    // fused final pair. Falls back to copy + three stages without AVX2.
+    // AVX2 sequence: fused first pair, then three direct stages (the
+    // unfused tail measured faster than the fused final pair here).
+    // Falls back to copy + three stages without AVX2.
     #[cfg(target_arch = "x86_64")]
     if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
         // SAFETY: runtime detection proves the target features required
@@ -431,10 +444,11 @@ fn run_single_f32_512(
         unsafe {
             crate::wide_avx2::fused_first2_f32(buffer, scratch, &stages[0], &stages[1], dir_sign);
         }
-        stage(512, scratch, buffer, &stages[2], dir_sign, dispatch);
         // SAFETY: same detection as above.
         unsafe {
-            crate::wide_avx2::fused_final_pair_f32(buffer, &stages[3], &stages[4], dir_sign);
+            crate::wide_avx2::stage_radix4_f32_aos(128, scratch, buffer, &stages[2], dir_sign);
+            crate::wide_avx2::stage_radix4_f32_aos(128, buffer, scratch, &stages[3], dir_sign);
+            crate::wide_avx2::stage_radix2_f32_aos(256, scratch, buffer, &stages[4]);
         }
         return;
     }
@@ -469,9 +483,9 @@ fn run_single_f32_1024(
         unsafe {
             crate::wide_avx2::fused_first2_f32(buffer, scratch, &stages[0], &stages[1], dir_sign);
         }
-        stage(1024, scratch, buffer, &stages[2], dir_sign, dispatch);
         // SAFETY: same detection as above.
         unsafe {
+            crate::wide_avx2::stage_radix4_f32_aos(256, scratch, buffer, &stages[2], dir_sign);
             crate::wide_avx2::fused_final_pair_f32(buffer, &stages[3], &stages[4], dir_sign);
         }
         return;
@@ -484,6 +498,45 @@ fn run_single_f32_1024(
     unsafe {
         crate::wide_avx2::fused_final_pair_f32(buffer, &stages[3], &stages[4], dir_sign);
     }
+}
+
+#[inline(always)]
+fn run_single_f32_4096(
+    stages: &[StageTwiddles<f32>],
+    dir_sign: f32,
+    buffer: &mut [Complex<f32>],
+    scratch: &mut [Complex<f32>],
+    dispatch: CpuFftDispatch,
+) {
+    debug_assert_eq!(buffer.len(), 4096);
+    debug_assert_eq!(stages.len(), 6);
+    // Four-pass AVX2 sequence, same shape as the 2048 runner.
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+        // SAFETY: runtime detection proves the target features required
+        // by the AVX2/FMA kernels.
+        unsafe {
+            crate::wide_avx2::fused_first2_f32(buffer, scratch, &stages[0], &stages[1], dir_sign);
+            crate::wide_avx2::stage_radix4_f32_aos(1024, scratch, buffer, &stages[2], dir_sign);
+            crate::wide_avx2::stage_radix4_f32_aos(1024, buffer, scratch, &stages[3], dir_sign);
+            crate::wide_avx2::fused_final_pair_f32_out_of_place(
+                scratch,
+                buffer,
+                &stages[4],
+                &stages[5],
+                dir_sign,
+            );
+        }
+        return;
+    }
+    scratch.copy_from_slice(buffer);
+    stage(4096, scratch, buffer, &stages[0], dir_sign, dispatch);
+    stage(4096, buffer, scratch, &stages[1], dir_sign, dispatch);
+    stage(4096, scratch, buffer, &stages[2], dir_sign, dispatch);
+    stage(4096, buffer, scratch, &stages[3], dir_sign, dispatch);
+    stage(4096, scratch, buffer, &stages[4], dir_sign, dispatch);
+    stage(4096, buffer, scratch, &stages[5], dir_sign, dispatch);
+    buffer.copy_from_slice(scratch);
 }
 
 #[inline(always)]
@@ -1213,6 +1266,18 @@ fn run_single_f64_512(
 
     stage_radix4x4_f64_first2(128, buffer, scratch, &stages[0], &stages[1], dir_sign);
     stage_radix4_f64_direct(128, scratch, buffer, &stages[2], dir_sign);
+    // Unfused AVX tail (two direct stages) measured faster than the
+    // fused final pair at this size; keep the fused path as fallback.
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
+        // SAFETY: runtime detection proves the target features required
+        // by the AVX2/FMA kernels.
+        unsafe {
+            crate::wide_avx2::stage_radix4_f64_aos(128, buffer, scratch, &stages[3], dir_sign);
+            crate::wide_avx2::stage_radix2_f64_aos(256, scratch, buffer, &stages[4]);
+        }
+        return;
+    }
     stage_radix4_then_radix2_f64_final_512(buffer, &stages[3], &stages[4], dir_sign);
 }
 
@@ -2240,6 +2305,63 @@ fn stage_radix4_f64_m1(
         dst[base_out + 3] = y3;
         g += 1;
     }
+}
+
+/// Final-stage dispatch: identical to [`stage`], except that the last
+/// radix-4 stage of a large transform may write its output with
+/// streaming stores, since no later stage re-reads it. Falls back to
+/// [`stage`] whenever the streaming kernel's alignment/shape conditions
+/// or the size threshold are not met.
+fn stage_final<T: FftScalar>(
+    n: usize,
+    src: &[Complex<T>],
+    dst: &mut [Complex<T>],
+    stage_tw: &StageTwiddles<T>,
+    dir_sign: T,
+    dispatch: CpuFftDispatch,
+) {
+    #[cfg(target_arch = "x86_64")]
+    if stage_tw.radix == 4
+        && dispatch.allows_simd()
+        && n * std::mem::size_of::<Complex<T>>() >= (1 << 21)
+        && (dst.as_ptr() as usize).is_multiple_of(32)
+        && std::is_x86_feature_detected!("avx2")
+        && std::is_x86_feature_detected!("fma")
+    {
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>() && stage_tw.m.is_multiple_of(4) {
+            assert_transmute_layout::<T, f32>();
+            // SAFETY: TypeId equality proves T = f32; runtime detection
+            // proves AVX2/FMA; alignment and shape checked above.
+            unsafe {
+                let src32: &[Complex<f32>] =
+                    std::mem::transmute::<&[Complex<T>], &[Complex<f32>]>(src);
+                let dst32: &mut [Complex<f32>] =
+                    std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f32>]>(dst);
+                let tw32: &StageTwiddles<f32> =
+                    std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f32>>(stage_tw);
+                let dir32 = *(&dir_sign as *const T as *const f32);
+                crate::wide_avx2::stage_radix4_f32_aos_nt(n / 4, src32, dst32, tw32, dir32);
+            }
+            return;
+        }
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<f64>() && stage_tw.m.is_multiple_of(2) {
+            assert_transmute_layout::<T, f64>();
+            // SAFETY: TypeId equality proves T = f64; runtime detection
+            // proves AVX2/FMA; alignment and shape checked above.
+            unsafe {
+                let src64: &[Complex<f64>] =
+                    std::mem::transmute::<&[Complex<T>], &[Complex<f64>]>(src);
+                let dst64: &mut [Complex<f64>] =
+                    std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f64>]>(dst);
+                let tw64: &StageTwiddles<f64> =
+                    std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f64>>(stage_tw);
+                let dir64 = *(&dir_sign as *const T as *const f64);
+                crate::wide_avx2::stage_radix4_f64_aos_nt(n / 4, src64, dst64, tw64, dir64);
+            }
+            return;
+        }
+    }
+    stage(n, src, dst, stage_tw, dir_sign, dispatch);
 }
 
 fn stage<T: FftScalar>(

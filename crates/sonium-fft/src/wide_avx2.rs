@@ -83,6 +83,31 @@ unsafe fn cmul_aos_f32(a: __m256, b: __m256) -> __m256 {
     }
 }
 
+/// Store one vector, streaming (non-temporal) when `NT` is set. Streaming
+/// stores require 32-byte alignment of `ptr`; callers guarantee it.
+#[inline]
+unsafe fn store_ps<const NT: bool>(ptr: *mut f32, v: __m256) {
+    unsafe {
+        if NT {
+            _mm256_stream_ps(ptr, v);
+        } else {
+            _mm256_storeu_ps(ptr, v);
+        }
+    }
+}
+
+/// f64 counterpart of [`store_ps`].
+#[inline]
+unsafe fn store_pd<const NT: bool>(ptr: *mut f64, v: __m256d) {
+    unsafe {
+        if NT {
+            _mm256_stream_pd(ptr, v);
+        } else {
+            _mm256_storeu_pd(ptr, v);
+        }
+    }
+}
+
 /// AVX2/FMA radix-2 stage for one `Complex<f32>` FFT in interleaved (AoS)
 /// layout: raw loads/stores, no deinterleave shuffles.
 ///
@@ -158,6 +183,42 @@ pub unsafe fn stage_radix4_f32_aos(
     stage_tw: &StageTwiddles<f32>,
     dir_sign: f32,
 ) {
+    unsafe { stage_radix4_f32_aos_impl::<false>(stride, src, dst, stage_tw, dir_sign) }
+}
+
+/// Streaming-store variant of [`stage_radix4_f32_aos`] for a transform's
+/// final stage, whose output is not re-read by another stage. Requires
+/// `dst` to be 32-byte aligned and `stage_tw.m % 4 == 0` so every store
+/// is 32-byte aligned; callers must check both.
+///
+/// # Safety
+///
+/// Same contract as [`stage_radix4_f32_aos`], plus the alignment
+/// requirements above.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix4_f32_aos_nt(
+    stride: usize,
+    src: &[Complex<f32>],
+    dst: &mut [Complex<f32>],
+    stage_tw: &StageTwiddles<f32>,
+    dir_sign: f32,
+) {
+    unsafe {
+        debug_assert_eq!(dst.as_ptr() as usize % 32, 0);
+        debug_assert_eq!(stage_tw.m % 4, 0);
+        stage_radix4_f32_aos_impl::<true>(stride, src, dst, stage_tw, dir_sign);
+        _mm_sfence();
+    }
+}
+
+#[target_feature(enable = "avx2,fma")]
+unsafe fn stage_radix4_f32_aos_impl<const NT: bool>(
+    stride: usize,
+    src: &[Complex<f32>],
+    dst: &mut [Complex<f32>],
+    stage_tw: &StageTwiddles<f32>,
+    dir_sign: f32,
+) {
     unsafe {
         stage_tw.debug_assert_stage_shape(4, stride, src.len(), dst.len());
         let m = stage_tw.m;
@@ -191,22 +252,10 @@ pub unsafe fn stage_radix4_f32_aos(
                 let d = _mm256_sub_ps(x1, x3);
                 let id = _mm256_mul_ps(_mm256_shuffle_ps(d, d, 0xB1), id_sign);
 
-                _mm256_storeu_ps(
-                    dst.as_mut_ptr().add(base_out + l) as *mut f32,
-                    _mm256_add_ps(a, c),
-                );
-                _mm256_storeu_ps(
-                    dst.as_mut_ptr().add(base_out + m + l) as *mut f32,
-                    _mm256_add_ps(b, id),
-                );
-                _mm256_storeu_ps(
-                    dst.as_mut_ptr().add(base_out + 2 * m + l) as *mut f32,
-                    _mm256_sub_ps(a, c),
-                );
-                _mm256_storeu_ps(
-                    dst.as_mut_ptr().add(base_out + 3 * m + l) as *mut f32,
-                    _mm256_sub_ps(b, id),
-                );
+                store_ps::<NT>(dst.as_mut_ptr().add(base_out + l) as *mut f32, _mm256_add_ps(a, c));
+                store_ps::<NT>(dst.as_mut_ptr().add(base_out + m + l) as *mut f32, _mm256_add_ps(b, id));
+                store_ps::<NT>(dst.as_mut_ptr().add(base_out + 2 * m + l) as *mut f32, _mm256_sub_ps(a, c));
+                store_ps::<NT>(dst.as_mut_ptr().add(base_out + 3 * m + l) as *mut f32, _mm256_sub_ps(b, id));
                 l += 4;
             }
             while l < m {
@@ -330,6 +379,41 @@ pub unsafe fn stage_radix4_f64_aos(
     stage_tw: &StageTwiddles<f64>,
     dir_sign: f64,
 ) {
+    unsafe { stage_radix4_f64_aos_impl::<false>(stride, src, dst, stage_tw, dir_sign) }
+}
+
+/// Streaming-store variant of [`stage_radix4_f64_aos`]; see
+/// [`stage_radix4_f32_aos_nt`] for the rationale. Requires `dst` to be
+/// 32-byte aligned and `stage_tw.m % 2 == 0`.
+///
+/// # Safety
+///
+/// Same contract as [`stage_radix4_f64_aos`], plus the alignment
+/// requirements above.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn stage_radix4_f64_aos_nt(
+    stride: usize,
+    src: &[Complex<f64>],
+    dst: &mut [Complex<f64>],
+    stage_tw: &StageTwiddles<f64>,
+    dir_sign: f64,
+) {
+    unsafe {
+        debug_assert_eq!(dst.as_ptr() as usize % 32, 0);
+        debug_assert_eq!(stage_tw.m % 2, 0);
+        stage_radix4_f64_aos_impl::<true>(stride, src, dst, stage_tw, dir_sign);
+        _mm_sfence();
+    }
+}
+
+#[target_feature(enable = "avx2,fma")]
+unsafe fn stage_radix4_f64_aos_impl<const NT: bool>(
+    stride: usize,
+    src: &[Complex<f64>],
+    dst: &mut [Complex<f64>],
+    stage_tw: &StageTwiddles<f64>,
+    dir_sign: f64,
+) {
     unsafe {
         stage_tw.debug_assert_stage_shape(4, stride, src.len(), dst.len());
         let m = stage_tw.m;
@@ -360,22 +444,10 @@ pub unsafe fn stage_radix4_f64_aos(
                 let d = _mm256_sub_pd(x1, x3);
                 let id = _mm256_mul_pd(_mm256_shuffle_pd(d, d, 0x05), id_sign);
 
-                _mm256_storeu_pd(
-                    dst.as_mut_ptr().add(base_out + l) as *mut f64,
-                    _mm256_add_pd(a, c),
-                );
-                _mm256_storeu_pd(
-                    dst.as_mut_ptr().add(base_out + m + l) as *mut f64,
-                    _mm256_add_pd(b, id),
-                );
-                _mm256_storeu_pd(
-                    dst.as_mut_ptr().add(base_out + 2 * m + l) as *mut f64,
-                    _mm256_sub_pd(a, c),
-                );
-                _mm256_storeu_pd(
-                    dst.as_mut_ptr().add(base_out + 3 * m + l) as *mut f64,
-                    _mm256_sub_pd(b, id),
-                );
+                store_pd::<NT>(dst.as_mut_ptr().add(base_out + l) as *mut f64, _mm256_add_pd(a, c));
+                store_pd::<NT>(dst.as_mut_ptr().add(base_out + m + l) as *mut f64, _mm256_add_pd(b, id));
+                store_pd::<NT>(dst.as_mut_ptr().add(base_out + 2 * m + l) as *mut f64, _mm256_sub_pd(a, c));
+                store_pd::<NT>(dst.as_mut_ptr().add(base_out + 3 * m + l) as *mut f64, _mm256_sub_pd(b, id));
                 l += 2;
             }
             while l < m {
@@ -674,7 +746,6 @@ pub unsafe fn fused_final_pair_f64(
     }
 }
 
-
 /// AVX2/FMA fused first pair: the `m == 1` radix-4 stage plus its radix-4
 /// successor (`m == 4`), out of place. Mathematically identical to running
 /// the two Stockham stages back to back.
@@ -849,19 +920,39 @@ pub unsafe fn fused_first2_f32(
             // Stage 1: butterfly over k per component l. Each output
             // register holds groups g..g+4 for one (b, l); the four groups
             // land sixteen elements apart in `dst`.
+            // Stage-1 results per output component b, one register per l;
+            // each register holds the four groups' complex values as 64-bit
+            // lanes. A 4x4 lane transpose turns them into per-group
+            // contiguous stores (no scalar scatter through the stack).
+            let mut yb = [[_mm256_setzero_ps(); 4]; 4];
             for l in 0..4 {
                 let x0 = a[0][l];
                 let x1 = cmul_aos_f32(a[1][l], w[0][l]);
                 let x2 = cmul_aos_f32(a[2][l], w[1][l]);
                 let x3 = cmul_aos_f32(a[3][l], w[2][l]);
                 let ys = radix4_aos_f32(x0, x1, x2, x3, id_sign);
-                for (b, y) in [ys.0, ys.1, ys.2, ys.3].iter().enumerate() {
-                    let mut tmp = [0.0f32; 8];
-                    _mm256_storeu_ps(tmp.as_mut_ptr(), *y);
-                    for j in 0..4 {
-                        dst[(g + j) * 16 + b * 4 + l] =
-                            Complex::new(tmp[2 * j], tmp[2 * j + 1]);
-                    }
+                yb[0][l] = ys.0;
+                yb[1][l] = ys.1;
+                yb[2][l] = ys.2;
+                yb[3][l] = ys.3;
+            }
+            for b in 0..4 {
+                let v = yb[b];
+                let u0 = _mm256_unpacklo_pd(_mm256_castps_pd(v[0]), _mm256_castps_pd(v[1]));
+                let u1 = _mm256_unpackhi_pd(_mm256_castps_pd(v[0]), _mm256_castps_pd(v[1]));
+                let u2 = _mm256_unpacklo_pd(_mm256_castps_pd(v[2]), _mm256_castps_pd(v[3]));
+                let u3 = _mm256_unpackhi_pd(_mm256_castps_pd(v[2]), _mm256_castps_pd(v[3]));
+                let outs = [
+                    _mm256_permute2f128_pd(u0, u2, 0x20),
+                    _mm256_permute2f128_pd(u1, u3, 0x20),
+                    _mm256_permute2f128_pd(u0, u2, 0x31),
+                    _mm256_permute2f128_pd(u1, u3, 0x31),
+                ];
+                for (j, o) in outs.iter().enumerate() {
+                    _mm256_storeu_ps(
+                        dst.as_mut_ptr().add((g + j) * 16 + b * 4) as *mut f32,
+                        _mm256_castpd_ps(*o),
+                    );
                 }
             }
             g += 4;
@@ -1085,6 +1176,26 @@ pub unsafe fn fused_final_pair_f32(
             stage_b,
             dir_sign,
         );
+    }
+}
+
+/// Out-of-place variant of [`fused_final_pair_f32`] for ping-pong
+/// sequences whose final pair must land in a different buffer.
+///
+/// # Safety
+///
+/// Same contract as [`fused_final_pair_f32`], plus `src` and `dst` must
+/// be disjoint slices of equal length.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn fused_final_pair_f32_out_of_place(
+    src: &[Complex<f32>],
+    dst: &mut [Complex<f32>],
+    stage_a: &StageTwiddles<f32>,
+    stage_b: &StageTwiddles<f32>,
+    dir_sign: f32,
+) {
+    unsafe {
+        fused_final_pair_f32_core(src.as_ptr(), dst.as_mut_ptr(), stage_a, stage_b, dir_sign);
     }
 }
 
