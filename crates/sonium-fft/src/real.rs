@@ -182,17 +182,23 @@ impl<T: FftScalar> RealFftPlan<T> {
                 work[j] = Complex::new(input[2 * j], input[2 * j + 1]);
             }
             packed.process_with_scratch(work, &mut fft_scratch[..packed.scratch_len()]);
-            let half = self.spectrum_len() - 1;
             let scale = T::from_f64(0.5).unwrap();
-            for k in 0..=half {
-                let mirror = (m - k) % m;
-                let a = work[k % m];
-                let b = Complex::new(work[mirror].re, -work[mirror].im);
+            // Endpoints k = 0 and k = m (Nyquist) both draw on work[0];
+            // the interior uses direct indices. (The previous form paid
+            // two integer modulos per bin in this hot loop.)
+            let recombine = |a: Complex<T>, b_raw: Complex<T>, factor: Complex<T>| {
+                let b = Complex::new(b_raw.re, -b_raw.im);
                 let sum = a + b;
                 let diff = a - b;
                 // -i exp(i theta) = sin(theta) - i cos(theta), precomputed.
-                let factor = self.forward_factors[k];
-                output[k] = (sum + factor * diff) * scale;
+                (sum + factor * diff) * scale
+            };
+            output[0] = recombine(work[0], work[0], self.forward_factors[0]);
+            for k in 1..m {
+                output[k] = recombine(work[k], work[m - k], self.forward_factors[k]);
+            }
+            if m > 0 {
+                output[m] = recombine(work[0], work[0], self.forward_factors[m]);
             }
         } else {
             let (work, fft_scratch) = scratch.split_at_mut(self.n);

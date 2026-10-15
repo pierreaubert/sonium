@@ -2615,60 +2615,15 @@ fn stage_radix8<T: FftScalar>(
     dir_sign: T,
     dispatch: CpuFftDispatch,
 ) {
+    // Scalar-only stage: AVX2 radix-8 streaming kernels were measured
+    // several times slower than this scalar loop on x86_64 (the 23
+    // concurrent data/twiddle/store streams thrash the load/store ports),
+    // so no SIMD dispatch is attempted here. The planner's default
+    // factorisation does not emit radix-8 stages; this path serves
+    // explicit stage construction.
+    let _ = dispatch;
     let m = stage_tw.m;
     let s = stage_tw.s;
-
-    #[cfg(target_arch = "x86_64")]
-    if dispatch.allows_simd()
-        && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f64>()
-        && std::is_x86_feature_detected!("avx2")
-        && std::is_x86_feature_detected!("fma")
-    {
-        // SAFETY: TypeId match proves T = f64; runtime detection proves the
-        // target features required by the AVX2/FMA stage.
-        unsafe {
-            let src_f64: &[Complex<f64>] =
-                std::mem::transmute::<&[Complex<T>], &[Complex<f64>]>(src);
-            let dst_f64: &mut [Complex<f64>] =
-                std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f64>]>(dst);
-            let tw_f64: &StageTwiddles<f64> =
-                std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f64>>(stage_tw);
-            let dir_f64: f64 = *(&dir_sign as *const T as *const f64);
-            assert_transmute_layout::<T, f64>();
-            if stage_tw.m == 1 {
-                crate::wide_avx2::stage_radix8_f64_m1(src_f64, dst_f64, tw_f64, dir_f64);
-            } else {
-                crate::wide_avx2::stage_radix8_f64_aos(stride, src_f64, dst_f64, tw_f64, dir_f64);
-            }
-        }
-        return;
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    if dispatch.allows_simd()
-        && std::any::TypeId::of::<T>() == std::any::TypeId::of::<f32>()
-        && std::is_x86_feature_detected!("avx2")
-        && std::is_x86_feature_detected!("fma")
-    {
-        // SAFETY: TypeId match proves T = f32; runtime detection proves the
-        // target features required by the AVX2/FMA stage.
-        unsafe {
-            let src_f32: &[Complex<f32>] =
-                std::mem::transmute::<&[Complex<T>], &[Complex<f32>]>(src);
-            let dst_f32: &mut [Complex<f32>] =
-                std::mem::transmute::<&mut [Complex<T>], &mut [Complex<f32>]>(dst);
-            let tw_f32: &StageTwiddles<f32> =
-                std::mem::transmute::<&StageTwiddles<T>, &StageTwiddles<f32>>(stage_tw);
-            let dir_f32 = *(&dir_sign as *const T as *const f32);
-            assert_transmute_layout::<T, f32>();
-            if stage_tw.m == 1 {
-                crate::wide_avx2::stage_radix8_f32_m1(src_f32, dst_f32, tw_f32, dir_f32);
-            } else {
-                crate::wide_avx2::stage_radix8_f32_aos(stride, src_f32, dst_f32, tw_f32, dir_f32);
-            }
-        }
-        return;
-    }
 
     let m_new = m * 8;
     let tw = [

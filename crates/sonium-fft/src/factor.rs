@@ -38,11 +38,12 @@ impl std::fmt::Display for PlanLengthError {
 
 impl std::error::Error for PlanLengthError {}
 
-// Radix-8 stages exist on x86_64 (scalar codelet plus AVX2/FMA AoS
-// kernels), but the default factorisation stays radix-4-first on every
-// backend: A/B measurements showed radix-8-first loses more at
-// 1024/4096/2M (fused radix-4 audio paths, cache-set conflicts) than it
-// gains at 512/2048. Radix-8 remains reachable through explicit stage
+// Radix-8 stages exist (scalar codelet; AVX2 streaming kernels were
+// measured far slower than the scalar loop on x86_64 and removed), but
+// the default factorisation stays radix-4-first on every backend:
+// A/B measurements showed radix-8-first loses more at 1024/4096/2M
+// (fused radix-4 audio paths, stream thrashing) than it gains at
+// 512/2048. Radix-8 remains reachable through explicit stage
 // construction.
 const SUPPORTED_RADICES: &[usize] = &[5, 4, 3, 2];
 
