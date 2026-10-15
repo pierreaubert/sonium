@@ -30,9 +30,13 @@ thread_local! {
     static THINK_BI: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Maximum `k` intercepted (`nb = 32` LU panels plus headroom for BEM
-/// tall-skinny shapes; wider `k` belongs to the blocked 4M path).
-pub const THIN_K_MAX: usize = 64;
+/// Maximum `k` intercepted: the `nb = 32` complex LU panel width. Wider
+/// `k` belongs to the panel-pack native path — at `k = 64` (the QR panel
+/// width) the native 6×4 sweep beats this kernel's `n`-strided B pack by
+/// ~1.35x on Schur shapes (2048×2048×64: 14.5 vs 19.5 ms, interleaved
+/// A/B 2026-10-15), while at `k = 32` the thin-k path still wins the LU
+/// Schur updates it was built for.
+pub const THIN_K_MAX: usize = 32;
 
 /// Work floor (complex MACs): the native kernel only engages for large
 /// parallel shapes. The serial micro-kernel is broadcast/load port-bound

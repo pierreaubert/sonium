@@ -1090,6 +1090,11 @@ unsafe fn micro_tile_6x8_avx2(
     // `alpha * acc + beta * C` arm.
     let overwrite = alpha == Complex32::new(1.0, 0.0) && beta == Complex32::new(0.0, 0.0);
     let beta0 = beta == Complex32::new(0.0, 0.0);
+    // Schur arms (LU/QR/Cholesky trailing updates): real `alpha = ±1`,
+    // `beta = 1` folds to one add/subtract per component (see the c64
+    // twin in `complex_native`).
+    let schur_add = alpha == Complex32::new(1.0, 0.0) && beta == Complex32::new(1.0, 0.0);
+    let schur_sub = alpha == Complex32::new(-1.0, 0.0) && beta == Complex32::new(1.0, 0.0);
     let cf = tile as *mut f32;
     // Hoisted scalar broadcasts for the general arm, plus the C-read
     // deinterleave lane fix (same `[0,1,4,5,2,3,6,7]` as the pack).
@@ -1141,6 +1146,27 @@ unsafe fn micro_tile_6x8_avx2(
                         _mm256_storeu_ps(dst, ab0);
                         _mm256_storeu_ps(dst.add(8), ab1);
                     }
+                }
+            } else if schur_add || schur_sub {
+                // Interleaved merge (see the c64 twin): interleave the
+                // accumulator and add/subtract against C as stored,
+                // skipping the C deinterleave.
+                let lo = _mm256_unpacklo_ps($re, $im);
+                let hi = _mm256_unpackhi_ps($re, $im);
+                let ab0 = _mm256_permute2f128_ps(lo, hi, 0x20);
+                let ab1 = _mm256_permute2f128_ps(lo, hi, 0x31);
+                // SAFETY: tile readable (`beta == 1`), rows exclusively
+                // owned, 8 columns in bounds.
+                unsafe {
+                    let c0 = _mm256_loadu_ps(dst);
+                    let c1 = _mm256_loadu_ps(dst.add(8));
+                    let (o0, o1) = if schur_add {
+                        (_mm256_add_ps(c0, ab0), _mm256_add_ps(c1, ab1))
+                    } else {
+                        (_mm256_sub_ps(c0, ab0), _mm256_sub_ps(c1, ab1))
+                    };
+                    _mm256_storeu_ps(dst, o0);
+                    _mm256_storeu_ps(dst.add(8), o1);
                 }
             } else {
                 // SAFETY: tile readable (`beta != 0` or general alpha),

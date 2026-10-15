@@ -1109,6 +1109,12 @@ unsafe fn micro_tile_6x4_avx2(
     // `alpha * acc + beta * C` arm.
     let overwrite = alpha == Complex64::new(1.0, 0.0) && beta == Complex64::new(0.0, 0.0);
     let beta0 = beta == Complex64::new(0.0, 0.0);
+    // Schur arms (the LU/QR/Cholesky trailing-update pair): real
+    // `alpha = ±1`, `beta = 1` folds to one add/subtract per component in
+    // the split domain, skipping the general arm's eight FMAs and their
+    // serial dependency chain per row.
+    let schur_add = alpha == Complex64::new(1.0, 0.0) && beta == Complex64::new(1.0, 0.0);
+    let schur_sub = alpha == Complex64::new(-1.0, 0.0) && beta == Complex64::new(1.0, 0.0);
     let cf = tile as *mut f64;
     // Hoisted scalar broadcasts for the general arm.
     let var = _mm256_set1_pd(alpha.re);
@@ -1156,6 +1162,28 @@ unsafe fn micro_tile_6x4_avx2(
                         _mm256_storeu_pd(dst, ab0);
                         _mm256_storeu_pd(dst.add(4), ab1);
                     }
+                }
+            } else if schur_add || schur_sub {
+                // Interleaved merge: interleave the accumulator (4
+                // shuffles) and add/subtract against C as stored — the
+                // split-domain merge additionally deinterleaved C (4
+                // more shuffles per row) for the same arithmetic.
+                let lo = _mm256_unpacklo_pd($re, $im);
+                let hi = _mm256_unpackhi_pd($re, $im);
+                let ab0 = _mm256_permute2f128_pd(lo, hi, 0x20);
+                let ab1 = _mm256_permute2f128_pd(lo, hi, 0x31);
+                // SAFETY: tile readable (`beta == 1`), rows exclusively
+                // owned, 4 columns in bounds.
+                unsafe {
+                    let c0 = _mm256_loadu_pd(dst);
+                    let c1 = _mm256_loadu_pd(dst.add(4));
+                    let (o0, o1) = if schur_add {
+                        (_mm256_add_pd(c0, ab0), _mm256_add_pd(c1, ab1))
+                    } else {
+                        (_mm256_sub_pd(c0, ab0), _mm256_sub_pd(c1, ab1))
+                    };
+                    _mm256_storeu_pd(dst, o0);
+                    _mm256_storeu_pd(dst.add(4), o1);
                 }
             } else {
                 // SAFETY: tile readable (`beta != 0` or general alpha),
