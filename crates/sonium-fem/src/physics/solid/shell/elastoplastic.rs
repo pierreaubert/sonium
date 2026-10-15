@@ -55,6 +55,10 @@ pub struct ElastoplasticShellForm {
     material: J2Material,
     /// Committed plastic state: `[n_elements][N_THICKNESS]`.
     states: Vec<[PlasticState; N_THICKNESS]>,
+    /// Committed total strain (3D Voigt) per point: `[n_elements][N_THICKNESS]`.
+    ///
+    /// The return mapping takes strain increments, so trials subtract this.
+    committed_strain: Vec<[[f64; 6]; N_THICKNESS]>,
 }
 
 impl ElastoplasticShellForm {
@@ -63,10 +67,12 @@ impl ElastoplasticShellForm {
         let states = (0..n_elems)
             .map(|_| std::array::from_fn(|_| PlasticState::new_3d()))
             .collect();
+        let committed_strain = vec![[[0.0; 6]; N_THICKNESS]; n_elems];
         Self {
             corot: CorotationalShellForm::new(elements, n_dofs),
             material,
             states,
+            committed_strain,
         }
     }
 
@@ -84,16 +90,25 @@ impl ElastoplasticShellForm {
 
             for (ip, &(zeta, _)) in THICKNESS_POINTS.iter().enumerate() {
                 let z = zeta * half_t;
-                let eps_xx = eps_m[0] + z * kappa[0];
-                let eps_yy = eps_m[1] + z * kappa[1];
-                let gam_xy = eps_m[2] + z * kappa[2];
+                let total = [
+                    eps_m[0] + z * kappa[0],
+                    eps_m[1] + z * kappa[1],
+                    eps_m[2] + z * kappa[2],
+                ];
+                // The return mapping takes strain increments.
+                let committed = self.committed_strain[elem_idx][ip];
+                let d_inplane = [
+                    total[0] - committed[0],
+                    total[1] - committed[1],
+                    total[2] - committed[5],
+                ];
 
-                // Iterate on eps_zz to enforce sigma_zz = 0 (plane stress)
-                let mut eps_zz = -nu / (1.0 - nu) * (eps_xx + eps_yy);
+                // Iterate on the out-of-plane increment for sigma_zz = 0.
+                let mut d_zz = -nu / (1.0 - nu) * (d_inplane[0] + d_inplane[1]);
                 for _ in 0..20 {
-                    let strain_3d = [eps_xx, eps_yy, eps_zz, 0.0, 0.0, gam_xy];
+                    let strain_inc = [d_inplane[0], d_inplane[1], d_zz, 0.0, 0.0, d_inplane[2]];
                     let update =
-                        return_mapping_3d(&self.material, &self.states[elem_idx][ip], &strain_3d);
+                        return_mapping_3d(&self.material, &self.states[elem_idx][ip], &strain_inc);
                     let sigma_zz = update.stress[2];
                     if sigma_zz.abs() < 1e-12 {
                         break;
@@ -102,14 +117,16 @@ impl ElastoplasticShellForm {
                     if c_zz.abs() < 1e-30 {
                         break;
                     }
-                    eps_zz -= sigma_zz / c_zz;
+                    d_zz -= sigma_zz / c_zz;
                 }
 
-                // Final 3D return mapping with converged eps_zz
-                let strain_3d = [eps_xx, eps_yy, eps_zz, 0.0, 0.0, gam_xy];
+                // Final 3D return mapping with converged out-of-plane increment.
+                let strain_inc = [d_inplane[0], d_inplane[1], d_zz, 0.0, 0.0, d_inplane[2]];
                 let update =
-                    return_mapping_3d(&self.material, &self.states[elem_idx][ip], &strain_3d);
+                    return_mapping_3d(&self.material, &self.states[elem_idx][ip], &strain_inc);
                 update_plastic_state(&mut self.states[elem_idx][ip], &update, &self.material);
+                self.committed_strain[elem_idx][ip] =
+                    [total[0], total[1], committed[2] + d_zz, 0.0, 0.0, total[2]];
             }
         }
     }
@@ -225,16 +242,20 @@ impl ElastoplasticShellForm {
         for (ip, &(zeta, w)) in THICKNESS_POINTS.iter().enumerate() {
             let z = zeta * half_t;
 
-            // Strain at this thickness point
-            let strain = [
-                eps_m[0] + z * kappa[0],
-                eps_m[1] + z * kappa[1],
-                eps_m[2] + z * kappa[2],
+            // Strain increment at this thickness point (trial from committed).
+            let committed = self.committed_strain[elem_idx][ip];
+            let strain_inc = [
+                eps_m[0] + z * kappa[0] - committed[0],
+                eps_m[1] + z * kappa[1] - committed[1],
+                eps_m[2] + z * kappa[2] - committed[5],
             ];
 
             // Return mapping (trial from committed state)
-            let update =
-                return_mapping_plane_stress(&self.material, &self.states[elem_idx][ip], &strain);
+            let update = return_mapping_plane_stress(
+                &self.material,
+                &self.states[elem_idx][ip],
+                &strain_inc,
+            );
 
             // Integration weight: w * (t/2) for the dz measure
             let wt = w * half_t;
@@ -350,14 +371,10 @@ impl crate::forms::NonlinearElementForm<f64> for ElastoplasticShellForm {
             f_local[dof] += drill * d_local[dof];
         }
 
-        // Transform to global
-        let mut f_global = vec![0.0; 18];
-        for i in 0..18 {
-            for j in 0..18 {
-                f_global[i] += t18[j * 18 + i] * f_local[j];
-            }
-        }
-        f_global
+        // Project to global with the frame variation: a bare transpose
+        // rotation omits (dq/du) terms and yields nonconservative forces.
+        self.corot
+            .project_local_forces(elem_idx, global_solution, &f_local)
     }
 
     fn element_tangent(&self, elem_idx: usize, global_solution: &[f64]) -> Vec<f64> {
@@ -661,6 +678,38 @@ mod tests {
                 "virgin tangent entry {i} not delegated: {a:e} vs corot {b:e}"
             );
         }
+    }
+
+    #[test]
+    fn test_virgin_residual_matches_corotational_tilted() {
+        // Virgin-state residual must match the corotational residual on
+        // tilted elements: the global projection needs the frame
+        // variation, and a bare transpose rotation only agrees on flat
+        // elements (where the variation vanishes).
+        let section = ShellSection::new(200e9, 0.3, 0.002, 7800.0);
+        let angle = 30.0f64.to_radians();
+        let (c, s) = (angle.cos(), angle.sin());
+        let rot = |x: f64, y: f64| Point::new_3d(c * x, y, -s * x);
+        let elements = vec![ShellElement::from_points(
+            [0, 1, 2],
+            &rot(0.0, 0.0),
+            &rot(1.0, 0.0),
+            &rot(0.0, 1.0),
+            section,
+        )];
+        let mat = J2Material::new(200e9, 0.3, 1e20, HardeningLaw::Perfect);
+        let form_ep = ElastoplasticShellForm::new(elements.clone(), 18, mat);
+        let form_el = CorotationalShellForm::new(elements, 18);
+        let mut u = vec![0.0; 18];
+        u[6] = 1e-9 * c;
+        u[8] = 2e-9;
+        u[14] = 3e-9;
+        let r_ep = form_ep.element_residual(0, &u);
+        let r_el = form_el.element_residual(0, &u);
+        let norm = |v: &[f64]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let diff: Vec<f64> = r_ep.iter().zip(r_el.iter()).map(|(a, b)| a - b).collect();
+        let rel = norm(&diff) / norm(&r_el);
+        assert!(rel < 1e-6, "virgin residual mismatch tilted: {rel:e}");
     }
 
     #[test]

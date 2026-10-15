@@ -5,6 +5,7 @@ members = [
     "crates/sonium-wave",
     "crates/sonium-xem",
     "crates/sonium-compute",
+    "crates/sonium-topology",
     "crates/sonium-fft",
     "crates/sonium-audio",
     "crates/sonium-solvers",
@@ -44,6 +45,7 @@ default-members = [
     "crates/sonium-wave",
     "crates/sonium-xem",
     "crates/sonium-compute",
+    "crates/sonium-topology",
     "crates/sonium-fft",
     "crates/sonium-audio",
     "crates/sonium-solvers",
@@ -86,6 +88,7 @@ repository = "https://github.com/pierreaubert/sonium"
 sonium-fastmath = { path = "crates/sonium-fastmath" }
 sonium-xem = { path = "crates/sonium-xem" }
 sonium-compute = { path = "crates/sonium-compute" }
+sonium-topology = { path = "crates/sonium-topology" }
 sonium-fft = { path = "crates/sonium-fft" }
 sonium-audio = { path = "crates/sonium-audio" }
 sonium-solvers = { path = "crates/sonium-solvers" }

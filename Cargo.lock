@@ -2135,6 +2135,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "realfft"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f821338fddb99d089116342c46e9f1fbf3828dba077674613e734e01d6ea8677"
+dependencies = [
+ "rustfft",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2543,6 +2552,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sonium-fastmath",
+ "sonium-topology",
  "tempfile",
  "thiserror 2.0.21",
 ]
@@ -2628,11 +2638,13 @@ dependencies = [
  "num-complex 0.4.6",
  "num-traits",
  "rand",
+ "realfft",
  "rustfft",
  "serde",
  "serde_json",
  "sonium-compute",
  "sonium-fastmath",
+ "sonium-topology",
 ]
 
 [[package]]
@@ -3094,6 +3106,13 @@ dependencies = [
  "sonium-solvers-core",
  "sonium-solvers-sparse",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sonium-topology"
+version = "0.1.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

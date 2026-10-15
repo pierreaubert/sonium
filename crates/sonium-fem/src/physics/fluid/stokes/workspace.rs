@@ -29,6 +29,8 @@ pub enum BdfLinearSolverKind {
     FgmresJacobiSchur,
     /// FGMRES with upper-triangular ILUT velocity/pressure-mass Schur blocks.
     FgmresIlutSchur,
+    /// FGMRES with upper-triangular ILU(0) velocity/ILUT Schur blocks.
+    FgmresIluSchur,
     /// Backend-aware FGMRES path executed through CUDA or Metal.
     BackendFgmres,
 }
@@ -62,6 +64,9 @@ pub(crate) enum BdfCachedLinearSolver {
     JacobiSchur {
         matrix: sonium_solvers::CsrMatrix<f64>,
         preconditioner: sonium_solvers::SaddlePointPreconditioner<f64>,
+        /// Consecutive solves reusing this setup for a changed matrix
+        /// (lagged preconditioner). Zero for an exactly matching setup.
+        lag_steps: usize,
     },
     Ilu {
         matrix: sonium_solvers::CsrMatrix<f64>,
@@ -126,6 +131,29 @@ pub struct BdfWorkspace {
     /// solves (notably the coupled base/probe pair) share it. Keyed on
     /// the fill's value fingerprints plus the per-step scales.
     pub(crate) bdf_schur_cache: RefCell<Option<BdfSchurCacheEntry>>,
+    /// Memoized body-force RHS/Jacobian assemblies for BDF steps. The
+    /// body-force closures only see spatial coordinates, so for
+    /// time-independent forces the quadrature is identical every step;
+    /// caching skips two full velocity-space assemblies per step after
+    /// the first. Populated only when
+    /// `NavierStokesConfig::cache_body_force_assembly` is set; each
+    /// reuse re-evaluates the closures at a few sample DOFs and
+    /// reassembles on any fingerprint mismatch, so a varying force
+    /// only wastes the cache instead of going stale.
+    pub(crate) body_force_cache: RefCell<Option<CachedBodyForceAssembly>>,
+}
+
+/// One memoized body-force assembly: the RHS vector, the Jacobian
+/// triplets, and a fingerprint of the closures evaluated at sample
+/// DOFs, used to detect a changed force before reuse.
+#[derive(Debug, Clone)]
+pub(crate) struct CachedBodyForceAssembly {
+    /// Assembled body-force RHS, length `n_v`.
+    pub(crate) rhs: Vec<f64>,
+    /// Assembled body-force Jacobian triplets over the velocity space.
+    pub(crate) matrix: TripletMatrix<f64>,
+    /// Fingerprint of the force closures at sample DOFs.
+    pub(crate) sample_fingerprint: u64,
 }
 
 /// One memoized Schur product, keyed on the exact assembled values: the
@@ -165,6 +193,8 @@ impl BdfWorkspace {
         v_space: &VSpace,
         p_space: &PSpace,
     ) -> Self {
+        let progress = std::env::var("SONIUM_BDF_SOLVER_PROGRESS").as_deref() == Ok("1");
+        let build_start = std::time::Instant::now();
         let n_v = v_space.num_global_dofs(mesh);
         let n_p = p_space.num_global_dofs(mesh);
 
@@ -234,7 +264,7 @@ impl BdfWorkspace {
 
         let mass_csr = mass_triplet.to_csr();
 
-        Self {
+        let workspace = Self {
             mass_triplet,
             viscous_unit_triplet,
             block_01: system.block_01,
@@ -254,7 +284,15 @@ impl BdfWorkspace {
             mass_csr,
             mono_pattern_cache: RefCell::new(None),
             bdf_schur_cache: RefCell::new(None),
+            body_force_cache: RefCell::new(None),
+        };
+        if progress {
+            eprintln!(
+                "BDF_WORKSPACE_DONE n_v={n_v} n_p={n_p} workspace_ms={:.3}",
+                build_start.elapsed().as_secs_f64() * 1000.0
+            );
         }
+        workspace
     }
 
     /// Set the pressure gauge used by subsequent cached BDF solves.
@@ -625,13 +663,12 @@ impl BdfMonoPatternCache {
         {
             return None;
         }
-        if let Some(triplet) = transported {
-            if triplet_position_fingerprint(&triplet.rows, &triplet.cols)
+        if let Some(triplet) = transported
+            && (triplet_position_fingerprint(&triplet.rows, &triplet.cols)
                 != self.transported_fingerprint
-                || triplet.rows.len() != self.transported_map.len()
-            {
-                return None;
-            }
+                || triplet.rows.len() != self.transported_map.len())
+        {
+            return None;
         }
         let nnz = self.nnz();
         let use_unit_viscous = !use_transported;

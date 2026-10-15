@@ -546,11 +546,12 @@ fn room(p: &Project) -> Result<ResultData, Box<dyn Error>> {
         fem_runner::{FemMeshConfig, run_fem_with_mesh_field_report},
         scenarios::{FrequencyConfig, scenario_by_name_with_config},
     };
-    use sonium_xem::Point3D;
+    use sonium_xem::{FrequencySpacing, Point3D};
     let frequency = FrequencyConfig {
         min_freq: p.number("min_hz")?,
         max_freq: p.number("max_hz")?,
         num_points: p.number("points")? as usize,
+        spacing: FrequencySpacing::default(),
     };
     let scenario = scenario_by_name_with_config(p.text("scenario")?, &frequency)
         .ok_or("Unknown room preset")?;

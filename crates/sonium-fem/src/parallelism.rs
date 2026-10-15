@@ -5,8 +5,9 @@
 //! memory bandwidth. Every parallel gate in this crate therefore resolves
 //! through [`ParallelPolicy`]:
 //!
-//! - default: `work_items >= items_per_thread * threads`, where `threads`
-//!   is the effective rayon pool size. Single-threaded pools always run
+//! - default: `work_items >= items_per_thread * gate_threads`, where
+//!   `gate_threads` is the effective rayon pool size capped at
+//!   [`MAX_PARALLEL_GATE_THREADS`]. Single-threaded pools always run
 //!   serially;
 //! - `SONIUM_FEM_PAR_THRESHOLD=<n>`: absolute work-item override for tuning,
 //!   benches, and forced-path tests (units are the call site's work items —
@@ -78,7 +79,8 @@ impl ParallelPolicy {
         if let Some(threshold) = self.threshold_override {
             return work_items >= threshold;
         }
-        work_items >= items_per_thread.saturating_mul(self.threads).max(1)
+        let gate_threads = self.threads.min(MAX_PARALLEL_GATE_THREADS);
+        work_items >= items_per_thread.saturating_mul(gate_threads).max(1)
     }
 
     /// Worker thread count this policy assumes.
@@ -97,6 +99,19 @@ pub fn use_parallel(work_items: usize, items_per_thread: usize) -> bool {
 /// tabulation plus quadrature is microsecond-scale work, so the grain keeps
 /// pool dispatch amortized; small meshes stay serial.
 pub const ELEMENTS_PER_THREAD: usize = 256;
+
+/// Maximum thread count the [`ParallelPolicy::decide`] gate scales with.
+///
+/// An uncapped `items_per_thread * threads` gate prices mid-size meshes out
+/// of threading on many-core machines: with 128 pool threads the assembly
+/// gate reaches 32768 elements, so a 10374-tet mesh assembles serially even
+/// though the work scales well (measured 22.5s serial vs 1.2s parallel for
+/// one P2 BDF assembly on a 128-thread Threadripper). Sixteen grains of
+/// microsecond-scale work still dwarf pool-dispatch overhead, so the cap
+/// keeps the amortization intent while letting mid-size meshes use the full
+/// pool through work stealing. Pools with 16 or fewer threads behave exactly
+/// as before.
+pub const MAX_PARALLEL_GATE_THREADS: usize = 16;
 
 /// Pointwise values per thread above which dense pointwise combines
 /// (prebaked coefficient application, Helmholtz shift assembly) parallelize.
@@ -215,5 +230,17 @@ mod tests {
         let eight = ParallelPolicy::with_threads(8);
         assert!(eight.decide(8 * MERGE_TRIPLETS_PER_THREAD, MERGE_TRIPLETS_PER_THREAD));
         assert!(!eight.decide(8 * MERGE_TRIPLETS_PER_THREAD - 1, MERGE_TRIPLETS_PER_THREAD));
+    }
+
+    #[test]
+    fn decision_caps_gate_threads_on_many_core_pools() {
+        let wide = ParallelPolicy::with_threads(128);
+        let gate = MAX_PARALLEL_GATE_THREADS * ELEMENTS_PER_THREAD;
+        assert!(wide.decide(gate, ELEMENTS_PER_THREAD));
+        assert!(!wide.decide(gate - 1, ELEMENTS_PER_THREAD));
+        // Narrow pools keep the exact linear gate.
+        let four = ParallelPolicy::with_threads(4);
+        assert!(four.decide(4 * ELEMENTS_PER_THREAD, ELEMENTS_PER_THREAD));
+        assert!(!four.decide(4 * ELEMENTS_PER_THREAD - 1, ELEMENTS_PER_THREAD));
     }
 }

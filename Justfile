@@ -169,7 +169,7 @@ perf-solvers out='perf':
 # Failing cells never block publish (their rows stay unpublished by
 # policy); the recipe still exits nonzero so CI notices.
 
-# Full 6-deck matrix (elastic + plastic), then publish.
+# Full N-deck matrix (every C3-conformant deck dir), then publish.
 [group('perf')]
 perf-oc out='perf/oc':
     #!/usr/bin/env bash
@@ -210,6 +210,22 @@ perf-oc-deck deck out='perf/oc':
     export TMPDIR="${TMPDIR:-$HOME/src/all_of_sonium/tmp}"
     PERF_OC_DECKS='{{deck}}' bash scripts/perf_oc_matrix.sh {{out}}; code=$?
     python3 scripts/perf_oc_publish.py {{out}} perf/oc-explicit.md
+    exit $code
+
+# G0 GPU proxy for one deck (no publish: proxy evidence is not bundle
+# rows). Builds and runs perf/oc/<deck>_cuda_proxy.cu device-timed at
+# short step counts plus an empty-force differential, then archives
+# the console (<deck>_cuda_proxy.txt) and the roofline report
+# (PERF_OC_GPU_REPORT, when set) next to the bundles. Example:
+# just perf-oc-gpu necking_bar
+# Needs nvcc and an idle NVIDIA GPU; no sonium.cuda explicit arm
+# exists, so decks without a checked-in proxy fail closed.
+[group('perf')]
+perf-oc-gpu deck out='perf/oc':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export TMPDIR="${TMPDIR:-$HOME/src/all_of_sonium/tmp}"
+    bash scripts/perf_oc_gpu.sh {{deck}} {{out}}; code=$?
     exit $code
 
 # --- Benchmarks ---
@@ -255,6 +271,12 @@ bench-petsc-build:
 [group('bench')]
 bench-petsc-run out='target/petsc-iterative.json':
     ITERATIVE_PERF_PETSC="$PWD/target/petsc_reference" bash scripts/iterative_solver_perf.sh {{out}}
+
+# FFT (complex/real f32/f64, audio + large sizes) vs rustfft/realfft
+# everywhere and Accelerate on macOS. Feeds perf/<platform>-fft.md.
+[group('bench')]
+bench-fft:
+    {{cargo}} bench -p sonium-fft --bench fft_compare
 
 # --- Cross-architecture validation (x86_64 SIMD paths) ---
 

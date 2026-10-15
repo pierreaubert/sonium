@@ -143,6 +143,57 @@ impl CorotationalShellForm {
         local
     }
 
+    /// Projects corotated local forces to global DOFs.
+    ///
+    /// Evaluates `f_global = (dq/du)^T f_local` where `q` holds the
+    /// corotated local displacements. The current frame depends on the
+    /// nodal translations, so merely rotating by the frame transpose omits
+    /// the frame variation and produces nonconservative forces with a
+    /// nonsymmetric Jacobian. Callers must pass forces conjugate to
+    /// [`Self::corotated_local_displacement`]; forces built from rigid-free
+    /// strains (such as `B^T` resultants) satisfy this.
+    pub(crate) fn project_local_forces(
+        &self,
+        elem_idx: usize,
+        global_solution: &[f64],
+        f_local: &[f64; 18],
+    ) -> Vec<f64> {
+        let elem = &self.elements[elem_idx];
+        let def_pts = self.deformed_points(elem_idx, global_solution);
+        let rot_def = Self::deformed_rotation(&def_pts);
+        let dofs = elem.global_dofs();
+        let mut f_global = vec![0.0; 18];
+        for node in 0..3 {
+            for component in 0..3 {
+                let variation =
+                    Self::deformed_rotation_variation(&def_pts, &rot_def, node, component);
+                let rigid_variation = Self::relative_rotation_vector(&elem.rotation, &variation);
+                for local_node in 0..3 {
+                    let relative = std::array::from_fn(|i| def_pts[local_node][i] - def_pts[0][i]);
+                    let mut motion = [0.0; 3];
+                    motion[component] = f64::from(node == local_node) - f64::from(node == 0);
+                    let frame_motion = Self::global_to_local(&variation, relative);
+                    let direct_motion = Self::global_to_local(&rot_def, motion);
+                    let theta =
+                        std::array::from_fn(|i| global_solution[dofs[6 * local_node + 3 + i]]);
+                    let frame_theta = Self::global_to_local(&variation, theta);
+                    for i in 0..3 {
+                        f_global[6 * node + component] += f_local[6 * local_node + i]
+                            * (frame_motion[i] + direct_motion[i])
+                            + f_local[6 * local_node + 3 + i]
+                                * (frame_theta[i] - rigid_variation[i]);
+                    }
+                }
+                // Rotational unknowns do not change the position-defined frame.
+                for i in 0..3 {
+                    f_global[6 * node + 3 + component] +=
+                        rot_def[3 * component + i] * f_local[6 * node + 3 + i];
+                }
+            }
+        }
+        f_global
+    }
+
     /// Build rotation matrix from deformed triangle (returns 3x3 row-major).
     pub(crate) fn deformed_rotation(pts: &[[f64; 3]; 3]) -> [f64; 9] {
         let v01 = [
@@ -232,6 +283,11 @@ impl CorotationalShellForm {
     }
 
     /// Build the 18x18 block-diagonal local-to-global rotation matrix.
+    /// Builds the 18x18 global-to-local rotation for one element.
+    ///
+    /// Block-diagonal repetition of the frame transpose, matching
+    /// [`Self::global_to_local`]: `rot` stores the local-to-global frame,
+    /// so the global-to-local map needs its transpose.
     pub(crate) fn build_rotation_18x18(rot: &[f64; 9]) -> Vec<f64> {
         let n = 18;
         let mut t = vec![0.0; n * n];
@@ -239,7 +295,7 @@ impl CorotationalShellForm {
             let offset = block * 3;
             for i in 0..3 {
                 for j in 0..3 {
-                    t[(offset + i) * n + (offset + j)] = rot[i * 3 + j];
+                    t[(offset + i) * n + (offset + j)] = rot[j * 3 + i];
                 }
             }
         }
@@ -284,41 +340,9 @@ impl crate::forms::NonlinearElementForm<f64> for CorotationalShellForm {
             }
         }
 
-        // Elastic virtual work: f_global = (dq/du)^T K q. The current frame
-        // depends on translations. Merely rotating Kq omits its variation
-        // and produces nonconservative forces and a nonsymmetric Jacobian.
-        let mut f_global = vec![0.0; 18];
-        let dofs = elem.global_dofs();
-        for node in 0..3 {
-            for component in 0..3 {
-                let variation =
-                    Self::deformed_rotation_variation(&def_pts, &rot_def, node, component);
-                let rigid_variation = Self::relative_rotation_vector(&elem.rotation, &variation);
-                for local_node in 0..3 {
-                    let relative = std::array::from_fn(|i| def_pts[local_node][i] - def_pts[0][i]);
-                    let mut motion = [0.0; 3];
-                    motion[component] = f64::from(node == local_node) - f64::from(node == 0);
-                    let frame_motion = Self::global_to_local(&variation, relative);
-                    let direct_motion = Self::global_to_local(&rot_def, motion);
-                    let theta =
-                        std::array::from_fn(|i| global_solution[dofs[6 * local_node + 3 + i]]);
-                    let frame_theta = Self::global_to_local(&variation, theta);
-                    for i in 0..3 {
-                        f_global[6 * node + component] += f_local[6 * local_node + i]
-                            * (frame_motion[i] + direct_motion[i])
-                            + f_local[6 * local_node + 3 + i]
-                                * (frame_theta[i] - rigid_variation[i]);
-                    }
-                }
-                // Rotational unknowns do not change the position-defined frame.
-                for i in 0..3 {
-                    f_global[6 * node + 3 + component] +=
-                        rot_def[3 * component + i] * f_local[6 * node + 3 + i];
-                }
-            }
-        }
-
-        f_global
+        // Elastic virtual work: f_global = (dq/du)^T K q, including the
+        // frame variation (see `project_local_forces`).
+        self.project_local_forces(elem_idx, global_solution, &f_local)
     }
 
     fn element_tangent(&self, elem_idx: usize, global_solution: &[f64]) -> Vec<f64> {

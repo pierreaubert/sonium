@@ -373,6 +373,11 @@ pub enum LinearSolverCpuPreconditionerKind {
     /// Intended for large 3D Taylor-Hood systems where diagonal scaling
     /// leaves an impractically large Krylov count.
     IlutSchur,
+    /// Upper-triangular saddle-point preconditioner with ILU(0) on the
+    /// velocity block and ILUT on the external Schur approximation.
+    /// Middle ground between JacobiSchur (cheap setup, many iterations)
+    /// and IlutSchur (expensive setup, few iterations).
+    IluSchur,
 }
 
 /// Selects which GPU-friendly preconditioner the backend GMRES path

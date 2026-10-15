@@ -294,21 +294,28 @@ fn consistent_tangent_3d(
     c
 }
 
-/// Perform return mapping for J2 plasticity under plane stress.
+/// Maps an in-plane strain increment to updated plane stress.
 ///
-/// Iteratively adjusts the out-of-plane strain (ε_zz) to enforce σ_zz = 0,
-/// then returns the 3-component in-plane stress and 3×3 consistent tangent.
+/// Iteratively adjusts the out-of-plane strain increment to enforce
+/// σ_zz = 0, then returns the 3-component in-plane stress and 3×3
+/// consistent tangent.
 ///
-/// Voigt ordering (input/output): `[σ_xx, σ_yy, τ_xy]` / `[ε_xx, ε_yy, γ_xy]`.
+/// The input is the strain increment since the committed `state`, not the
+/// total strain: the trial stress is the committed stress plus the elastic
+/// increment. Passing totals double-counts history on every call after the
+/// first commit.
+///
+/// Voigt ordering (input/output): `[Δε_xx, Δε_yy, Δγ_xy]` /
+/// `[σ_xx, σ_yy, τ_xy]`.
 pub fn return_mapping_plane_stress(
     material: &J2Material,
     state: &PlasticState,
-    strain_2d: &[f64; 3],
+    strain_increment_2d: &[f64; 3],
 ) -> StressUpdate {
     let nu = material.poisson_ratio;
 
     // Initial guess for out-of-plane strain: elastic plane-stress relation
-    let mut eps_zz = -nu / (1.0 - nu) * (strain_2d[0] + strain_2d[1]);
+    let mut eps_zz = -nu / (1.0 - nu) * (strain_increment_2d[0] + strain_increment_2d[1]);
 
     let max_iter = 20;
     let tol = 1e-12;
@@ -321,8 +328,15 @@ pub fn return_mapping_plane_stress(
     };
 
     for _ in 0..max_iter {
-        // Build full 3D strain: [ε_xx, ε_yy, ε_zz, 0, 0, γ_xy]
-        let strain_3d = [strain_2d[0], strain_2d[1], eps_zz, 0.0, 0.0, strain_2d[2]];
+        // Build full 3D strain increment: [Δε_xx, Δε_yy, Δε_zz, 0, 0, Δγ_xy]
+        let strain_3d = [
+            strain_increment_2d[0],
+            strain_increment_2d[1],
+            eps_zz,
+            0.0,
+            0.0,
+            strain_increment_2d[2],
+        ];
 
         update_3d = return_mapping_3d(material, state, &strain_3d);
 

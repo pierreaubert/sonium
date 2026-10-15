@@ -343,6 +343,31 @@ pub struct NavierStokesConfig {
     /// Inner f32 GMRES relative-residual tolerance. Loose by design
     /// — the outer FGMRES refines whatever the inner gives. Default `1e-3`.
     pub linear_solver_ir_inner_tolerance: f32,
+    /// Cache the BDF body-force RHS/Jacobian assemblies in the workspace
+    /// instead of reassembling them every step. The closures only see
+    /// spatial coordinates, so time-independent forces (including the
+    /// zero force used when no body force is present) assemble
+    /// identically each step; caching skips two full velocity-space
+    /// assemblies per step after the first. Default `false` preserves
+    /// the legacy reassemble-every-step behavior. Each reuse
+    /// re-evaluates the closures at a few sample DOFs and reassembles
+    /// on any mismatch, so a varying force only wastes the cache.
+    pub cache_body_force_assembly: bool,
+    /// Maximum consecutive BDF solves reusing a stale Schur-complement
+    /// preconditioner setup. The Oseen matrix drifts slowly between
+    /// steps, so rebuilding the BtDiagB product plus ILUT factors every
+    /// step wastes setup work; lagging amortizes it. Default `0`
+    /// preserves the legacy rebuild-on-any-change behavior. Each lagged
+    /// reuse additionally requires the matrix change to sit below
+    /// [`Self::linear_solver_setup_lag_tolerance`], and a lagged solve
+    /// that fails to converge rebuilds fresh and retries once, so a
+    /// stale setup can only waste one solve, never fail a step.
+    pub linear_solver_setup_max_lag_steps: usize,
+    /// Maximum relative matrix change (`||ΔA||_F / ||A||_F`) for one
+    /// lagged preconditioner reuse. Only read when
+    /// [`Self::linear_solver_setup_max_lag_steps`] is nonzero. Default
+    /// `0.1`.
+    pub linear_solver_setup_lag_tolerance: f64,
 }
 
 // Selection policy for the per-Picard-iteration linear solve lives in
@@ -388,6 +413,9 @@ impl Default for NavierStokesConfig {
             linear_solver_kind: LinearSolverKind::F64,
             linear_solver_ir_inner_max_iterations: 50,
             linear_solver_ir_inner_tolerance: 1.0e-3,
+            cache_body_force_assembly: false,
+            linear_solver_setup_max_lag_steps: 0,
+            linear_solver_setup_lag_tolerance: 0.1,
         }
     }
 }
@@ -1479,6 +1507,8 @@ where
                 == LinearSolverCpuPreconditionerKind::JacobiSchur
                 || config.linear_solver_cpu_preconditioner
                     == LinearSolverCpuPreconditionerKind::IlutSchur
+                || config.linear_solver_cpu_preconditioner
+                    == LinearSolverCpuPreconditionerKind::IluSchur
                 || config.linear_solver_backend_preconditioner
                     == BackendPreconditionerKind::JacobiSchur)
                 .then(|| {
@@ -3183,7 +3213,8 @@ fn solve_iterative_cpu(
                 .map(|solution| (solution, false, iterations))
         }
         LinearSolverCpuPreconditionerKind::JacobiSchur
-        | LinearSolverCpuPreconditionerKind::IlutSchur => {
+        | LinearSolverCpuPreconditionerKind::IlutSchur
+        | LinearSolverCpuPreconditionerKind::IluSchur => {
             let pressure_schur = pressure_schur?;
             let block_config = match config.linear_solver_cpu_preconditioner {
                 LinearSolverCpuPreconditionerKind::JacobiSchur => {
@@ -3194,21 +3225,43 @@ fn solve_iterative_cpu(
                         sonium_solvers::IlutConfig::new(1.0e-3, 2, 1.0e-12),
                     )
                 }
+                LinearSolverCpuPreconditionerKind::IluSchur => {
+                    sonium_solvers::BlockPreconditionerConfig::Ilu
+                }
                 LinearSolverCpuPreconditionerKind::Ilu => unreachable!(),
             };
+            // The external Schur block is Laplacian-like, so it always
+            // gets an ILUT subsolver (same drop/fill/pivot values as the
+            // BDF cached path); point Jacobi on the Schur block leaves
+            // an h^{-2} spread that costs tens of thousands of
+            // iterations on fine meshes. If ILUT setup rejects the
+            // Schur block, fall back to Jacobi rather than failing.
+            let schur_ilut = sonium_solvers::BlockPreconditionerConfig::Ilut(
+                sonium_solvers::IlutConfig::new(1.0e-3, 2, 1.0e-12),
+            );
             let sp_config = sonium_solvers::SaddlePointConfig {
                 block1_size: velocity_block_size,
-                block1_config: block_config.clone(),
-                block2_config: block_config,
+                block1_config: block_config,
+                block2_config: schur_ilut,
                 schur_strategy: sonium_solvers::SchurStrategy::External,
                 upper_triangular: true,
             };
+            let mut fallback_config = sp_config.clone();
+            fallback_config.block2_config = sonium_solvers::BlockPreconditionerConfig::Diagonal;
             let preconditioner =
-                sonium_solvers::SaddlePointPreconditioner::<f64>::from_matrix_with_schur(
+                sonium_solvers::SaddlePointPreconditioner::<f64>::try_from_matrix_with_schur(
                     csr,
                     pressure_schur,
                     sp_config,
-                );
+                )
+                .or_else(|_| {
+                    sonium_solvers::SaddlePointPreconditioner::<f64>::try_from_matrix_with_schur(
+                        csr,
+                        pressure_schur,
+                        fallback_config,
+                    )
+                })
+                .ok()?;
             let solve_config = sonium_solvers::FgmresConfig {
                 max_iterations: config.linear_solver_max_iterations.max(1),
                 restart: 50,
@@ -3998,6 +4051,8 @@ where
 
     debug_assert_eq!(workspace.n_v, v_space.num_global_dofs(mesh));
     debug_assert_eq!(workspace.n_p, p_space.num_global_dofs(mesh));
+    let progress = std::env::var("SONIUM_BDF_SOLVER_PROGRESS").as_deref() == Ok("1");
+    let assembly_start = std::time::Instant::now();
     let n_v = workspace.n_v;
     let n_p = workspace.n_p;
     let n_total = n_v + n_p;
@@ -4056,24 +4111,55 @@ where
         }
     }
 
-    let body_force = super::forms::StokesBodyForceForm::new(body_force_fn);
-    let body_force_rhs =
-        crate::assembly::assemble_linear(&body_force, v_space, mesh, workspace.quad_order);
+    // Sample fingerprint first: the miss path below moves the closures
+    // into the assembly forms.
+    let body_sample = config.cache_body_force_assembly.then(|| {
+        body_force_sample_fingerprint(
+            &body_force_fn,
+            &body_force_jacobian_fn,
+            &workspace.velocity_dof_coordinates,
+        )
+    });
+    let cached_body = body_sample.and_then(|sample| {
+        workspace
+            .body_force_cache
+            .borrow()
+            .as_ref()
+            .filter(|cached| cached.sample_fingerprint == sample)
+            .map(|cached| (cached.rhs.clone(), cached.matrix.clone()))
+    });
+    let (body_force_rhs, body_force_matrix) = match cached_body {
+        Some(hit) => hit,
+        None => {
+            let body_force = super::forms::StokesBodyForceForm::new(body_force_fn);
+            let rhs =
+                crate::assembly::assemble_linear(&body_force, v_space, mesh, workspace.quad_order);
+            let body_force_jacobian = BdfBodyForceJacobianForm {
+                jacobian: body_force_jacobian_fn,
+            };
+            let matrix = crate::assembly::assemble_bilinear(
+                &body_force_jacobian,
+                v_space,
+                v_space,
+                mesh,
+                workspace.quad_order,
+            );
+            if let Some(sample) = body_sample {
+                *workspace.body_force_cache.borrow_mut() =
+                    Some(super::workspace::CachedBodyForceAssembly {
+                        rhs: rhs.clone(),
+                        matrix: matrix.clone(),
+                        sample_fingerprint: sample,
+                    });
+            }
+            (rhs, matrix)
+        }
+    };
     for (row, value) in body_force_rhs.iter().enumerate() {
         if row < n_v {
             rhs[row] += *value;
         }
     }
-    let body_force_jacobian = BdfBodyForceJacobianForm {
-        jacobian: body_force_jacobian_fn,
-    };
-    let body_force_matrix = crate::assembly::assemble_bilinear(
-        &body_force_jacobian,
-        v_space,
-        v_space,
-        mesh,
-        workspace.quad_order,
-    );
     // Pressure-traction natural BCs: adds ∫_Γ (−p·n)·v dΓ to the momentum RHS.
     super::traction::assemble_pressure_tractions_for_space(mesh, v_space, tractions, &mut rhs);
 
@@ -4122,6 +4208,7 @@ where
                 &body_force_matrix,
             )
         });
+    let pattern_cached = cached_fill.is_some();
     let (values, value_fingerprints) = match cached_fill {
         Some(filled) => filled,
         None => {
@@ -4190,6 +4277,13 @@ where
         value_fingerprints,
     );
 
+    if progress {
+        eprintln!(
+            "BDF_ASSEMBLY_DONE assembly_ms={:.3} pattern_cached={pattern_cached}",
+            assembly_start.elapsed().as_secs_f64() * 1000.0,
+        );
+    }
+
     // Solve
     let b: Vec<f64> = rhs;
     workspace.record_linear_system(&csr, &b);
@@ -4248,6 +4342,7 @@ fn backend_btdiagb_schur_cached(
         config.linear_solver_cpu_preconditioner,
         LinearSolverCpuPreconditionerKind::JacobiSchur
             | LinearSolverCpuPreconditionerKind::IlutSchur
+            | LinearSolverCpuPreconditionerKind::IluSchur
     );
     if matches!(resolved_backend, LinearSolverBackend::Cpu)
         || (config.linear_solver_backend_preconditioner != BackendPreconditionerKind::JacobiSchur
@@ -4256,11 +4351,11 @@ fn backend_btdiagb_schur_cached(
         return None;
     }
     let mut guard = workspace.bdf_schur_cache.borrow_mut();
-    if let Some(entry) = guard.as_mut() {
-        if entry.matches(mass_coeff, viscous_scale, use_transported, fingerprints) {
-            entry.hits += 1;
-            return Some(entry.schur.clone());
-        }
+    if let Some(entry) = guard.as_mut()
+        && entry.matches(mass_coeff, viscous_scale, use_transported, fingerprints)
+    {
+        entry.hits += 1;
+        return Some(entry.schur.clone());
     }
     let schur = sonium_solvers::btdiagb_schur_from_monolithic(csr, velocity_block_size);
     *guard = Some(super::workspace::BdfSchurCacheEntry {
@@ -4326,6 +4421,9 @@ fn solve_cached_bdf_linear_system(
                     LinearSolverCpuPreconditionerKind::IlutSchur => {
                         BdfLinearSolverKind::FgmresIlutSchur
                     }
+                    LinearSolverCpuPreconditionerKind::IluSchur => {
+                        BdfLinearSolverKind::FgmresIluSchur
+                    }
                 }
             } else {
                 BdfLinearSolverKind::BackendFgmres
@@ -4340,6 +4438,7 @@ fn solve_cached_bdf_linear_system(
                     BdfLinearSolverKind::GmresIlu => "gmres-ilu",
                     BdfLinearSolverKind::FgmresJacobiSchur => "fgmres-jacobi-schur",
                     BdfLinearSolverKind::FgmresIlutSchur => "fgmres-ilut-schur",
+                    BdfLinearSolverKind::FgmresIluSchur => "fgmres-ilu-schur",
                     BdfLinearSolverKind::Direct => "direct",
                 };
                 eprintln!(
@@ -4374,10 +4473,14 @@ fn solve_cached_bdf_linear_system(
                     csr.values.len()
                 );
             }
+            let setup_start = std::time::Instant::now();
             let factorization =
                 sonium_solvers::direct::SparseLuFactorization::factorize(csr).ok()?;
             if progress {
-                eprintln!("BDF_LINEAR_SETUP_DONE solver=direct");
+                eprintln!(
+                    "BDF_LINEAR_SETUP_DONE solver=direct setup_ms={:.3}",
+                    setup_start.elapsed().as_secs_f64() * 1000.0
+                );
             }
             *cache = Some(BdfCachedLinearSolver::Direct {
                 matrix: csr.clone(),
@@ -4408,13 +4511,17 @@ fn solve_cached_bdf_linear_system(
                             csr.values.len()
                         );
                     }
+                    let setup_start = std::time::Instant::now();
                     let preconditioner = sonium_solvers::IluPreconditioner::from_csr(csr);
                     *cache = Some(BdfCachedLinearSolver::Ilu {
                         matrix: csr.clone(),
                         preconditioner,
                     });
                     if progress {
-                        eprintln!("BDF_LINEAR_SETUP_DONE solver=gmres-ilu");
+                        eprintln!(
+                            "BDF_LINEAR_SETUP_DONE solver=gmres-ilu setup_ms={:.3}",
+                            setup_start.elapsed().as_secs_f64() * 1000.0
+                        );
                     }
                 }
                 let solve_config = sonium_solvers::GmresConfig {
@@ -4430,6 +4537,7 @@ fn solve_cached_bdf_linear_system(
                     BdfCachedLinearSolver::Direct { .. }
                     | BdfCachedLinearSolver::JacobiSchur { .. } => unreachable!(),
                 };
+                let solve_start = std::time::Instant::now();
                 let result = sonium_solvers::gmres_preconditioned_with_guess(
                     &operator,
                     preconditioner,
@@ -4439,12 +4547,13 @@ fn solve_cached_bdf_linear_system(
                 );
                 if progress {
                     eprintln!(
-                        "BDF_LINEAR_SOLVE_DONE solver=gmres-ilu iterations={} residual={:.12e} estimated_residual={:.12e} backward_error={:.12e} converged={} reused={setup_reused}",
+                        "BDF_LINEAR_SOLVE_DONE solver=gmres-ilu iterations={} residual={:.12e} estimated_residual={:.12e} backward_error={:.12e} converged={} reused={setup_reused} solve_ms={:.3}",
                         result.iterations,
                         result.residual,
                         result.estimated_residual,
                         result.backward_error,
                         result.converged,
+                        solve_start.elapsed().as_secs_f64() * 1000.0,
                     );
                 }
                 (
@@ -4456,125 +4565,182 @@ fn solve_cached_bdf_linear_system(
                 )
             }
             LinearSolverCpuPreconditionerKind::JacobiSchur
-            | LinearSolverCpuPreconditionerKind::IlutSchur => {
+            | LinearSolverCpuPreconditionerKind::IlutSchur
+            | LinearSolverCpuPreconditionerKind::IluSchur => {
+                let solver_tag = match config.linear_solver_cpu_preconditioner {
+                    LinearSolverCpuPreconditionerKind::IlutSchur => "fgmres-ilut-schur",
+                    LinearSolverCpuPreconditionerKind::IluSchur => "fgmres-ilu-schur",
+                    _ => "fgmres-jacobi-schur",
+                };
                 let mut cache = workspace.linear_solver_cache.borrow_mut();
-                let setup_reused = matches!(
+                let exact_reuse = matches!(
                     cache.as_ref(),
                     Some(BdfCachedLinearSolver::JacobiSchur { matrix, .. })
                         if csr_exactly_equal(matrix, csr)
                 );
-                if !setup_reused {
+                // Lagged reuse: same-pattern matrix within tolerance and
+                // lag budget left. The stored setup matrix is untouched by
+                // lagged solves, so the tolerance always measures drift
+                // from the last fresh setup, not step-to-step wobble.
+                let mut lagged = false;
+                if !exact_reuse
+                    && config.linear_solver_setup_max_lag_steps > 0
+                    && let Some(BdfCachedLinearSolver::JacobiSchur {
+                        matrix, lag_steps, ..
+                    }) = cache.as_ref()
+                    && *lag_steps < config.linear_solver_setup_max_lag_steps
+                    && csr_relative_change(matrix, csr)
+                        .is_some_and(|change| change < config.linear_solver_setup_lag_tolerance)
+                {
+                    lagged = true;
+                }
+                if lagged
+                    && let Some(BdfCachedLinearSolver::JacobiSchur { lag_steps, .. }) =
+                        cache.as_mut()
+                {
+                    *lag_steps += 1;
+                }
+                let mut setup_reused = exact_reuse || lagged;
+                let mut retried = false;
+                let mut total_iterations = 0usize;
+                let (x, iterations, solver, setup_reused, solver_converged) = loop {
+                    if !setup_reused {
+                        if progress {
+                            eprintln!(
+                                "BDF_LINEAR_SETUP solver={solver_tag} rows={} nnz={} reused=false",
+                                csr.num_rows,
+                                csr.values.len()
+                            );
+                        }
+                        let block_config = match config.linear_solver_cpu_preconditioner {
+                            LinearSolverCpuPreconditionerKind::JacobiSchur => {
+                                sonium_solvers::BlockPreconditionerConfig::Diagonal
+                            }
+                            LinearSolverCpuPreconditionerKind::IlutSchur => {
+                                sonium_solvers::BlockPreconditionerConfig::Ilut(
+                                    sonium_solvers::IlutConfig::new(1.0e-3, 2, 1.0e-12),
+                                )
+                            }
+                            LinearSolverCpuPreconditionerKind::IluSchur => {
+                                sonium_solvers::BlockPreconditionerConfig::Ilu
+                            }
+                            LinearSolverCpuPreconditionerKind::Ilu => unreachable!(),
+                        };
+                        // BtDiagB assembles B^T*diag(F)^{-1}*B from the actual
+                        // unsteady momentum block F = sigma*M + mu*K
+                        // (sigma = rho*a0/dt). A steady-Stokes Mp/mu Schur
+                        // approximation mis-scales the preconditioned Schur
+                        // block by ~sigma/mu, splitting the spectrum across 4+
+                        // orders of magnitude and stalling FGMRES on refined
+                        // unsteady systems (speaker-port fine-3D: 5000
+                        // iterations without reaching 1e-8). The assembled
+                        // Schur block is Laplacian-like, so it always gets an
+                        // ILUT subsolver (same drop/fill/pivot values as the
+                        // IlutSchur velocity block); point Jacobi on a
+                        // Laplacian leaves an h^{-2} spread that still costs
+                        // thousands of iterations on fine meshes. If ILUT setup
+                        // rejects the Schur block, fall back to Jacobi rather
+                        // than failing the step.
+                        let schur_ilut = sonium_solvers::BlockPreconditionerConfig::Ilut(
+                            sonium_solvers::IlutConfig::new(1.0e-3, 2, 1.0e-12),
+                        );
+                        let sp_config = sonium_solvers::SaddlePointConfig {
+                            block1_size: velocity_block_size,
+                            block1_config: block_config,
+                            block2_config: schur_ilut,
+                            schur_strategy: sonium_solvers::SchurStrategy::BtDiagB,
+                            upper_triangular: true,
+                        };
+                        let mut fallback_config = sp_config.clone();
+                        fallback_config.block2_config =
+                            sonium_solvers::BlockPreconditionerConfig::Diagonal;
+                        let setup_start = std::time::Instant::now();
+                        let preconditioner =
+                            sonium_solvers::SaddlePointPreconditioner::<f64>::try_from_matrix(
+                                csr, sp_config,
+                            )
+                            .or_else(|_| {
+                                sonium_solvers::SaddlePointPreconditioner::<f64>::try_from_matrix(
+                                    csr,
+                                    fallback_config,
+                                )
+                            })
+                            .ok()?;
+                        *cache = Some(BdfCachedLinearSolver::JacobiSchur {
+                            matrix: csr.clone(),
+                            preconditioner,
+                            lag_steps: 0,
+                        });
+                        if progress {
+                            eprintln!(
+                                "BDF_LINEAR_SETUP_DONE solver={solver_tag} setup_ms={:.3}",
+                                setup_start.elapsed().as_secs_f64() * 1000.0
+                            );
+                        }
+                    }
+                    let preconditioner = match cache.as_ref()? {
+                        BdfCachedLinearSolver::JacobiSchur { preconditioner, .. } => preconditioner,
+                        BdfCachedLinearSolver::Direct { .. }
+                        | BdfCachedLinearSolver::Ilu { .. } => {
+                            unreachable!()
+                        }
+                    };
+                    let solve_config = sonium_solvers::FgmresConfig {
+                        max_iterations: config.linear_solver_max_iterations.max(1),
+                        restart: 50,
+                        tolerance: config.linear_solver_tolerance,
+                        print_interval: if progress { 100 } else { 0 },
+                        exact_residual_check_interval: 10,
+                        convergence_check_interval: 1,
+                    };
+                    let solve_start = std::time::Instant::now();
+                    let result = sonium_solvers::fgmres_preconditioned(
+                        &operator,
+                        preconditioner,
+                        b,
+                        Some(x0),
+                        &solve_config,
+                    );
                     if progress {
                         eprintln!(
-                            "BDF_LINEAR_SETUP solver=fgmres-jacobi-schur rows={} nnz={} reused=false",
-                            csr.num_rows,
-                            csr.values.len()
+                            "BDF_LINEAR_SOLVE_DONE solver={solver_tag} iterations={} residual={:.12e} estimated_residual={:.12e} backward_error={:.12e} converged={} reused={setup_reused} solve_ms={:.3}",
+                            result.iterations,
+                            result.residual,
+                            result.estimated_residual,
+                            result.backward_error,
+                            result.converged,
+                            solve_start.elapsed().as_secs_f64() * 1000.0,
                         );
                     }
-                    let block_config = match config.linear_solver_cpu_preconditioner {
-                        LinearSolverCpuPreconditionerKind::JacobiSchur => {
-                            sonium_solvers::BlockPreconditionerConfig::Diagonal
-                        }
-                        LinearSolverCpuPreconditionerKind::IlutSchur => {
-                            sonium_solvers::BlockPreconditionerConfig::Ilut(
-                                sonium_solvers::IlutConfig::new(1.0e-3, 2, 1.0e-12),
-                            )
-                        }
-                        LinearSolverCpuPreconditionerKind::Ilu => unreachable!(),
-                    };
-                    // BtDiagB assembles B^T*diag(F)^{-1}*B from the actual
-                    // unsteady momentum block F = sigma*M + mu*K
-                    // (sigma = rho*a0/dt). A steady-Stokes Mp/mu Schur
-                    // approximation mis-scales the preconditioned Schur
-                    // block by ~sigma/mu, splitting the spectrum across 4+
-                    // orders of magnitude and stalling FGMRES on refined
-                    // unsteady systems (speaker-port fine-3D: 5000
-                    // iterations without reaching 1e-8). The assembled
-                    // Schur block is Laplacian-like, so it always gets an
-                    // ILUT subsolver (same drop/fill/pivot values as the
-                    // IlutSchur velocity block); point Jacobi on a
-                    // Laplacian leaves an h^{-2} spread that still costs
-                    // thousands of iterations on fine meshes. If ILUT setup
-                    // rejects the Schur block, fall back to Jacobi rather
-                    // than failing the step.
-                    let schur_ilut = sonium_solvers::BlockPreconditionerConfig::Ilut(
-                        sonium_solvers::IlutConfig::new(1.0e-3, 2, 1.0e-12),
-                    );
-                    let sp_config = sonium_solvers::SaddlePointConfig {
-                        block1_size: velocity_block_size,
-                        block1_config: block_config,
-                        block2_config: schur_ilut,
-                        schur_strategy: sonium_solvers::SchurStrategy::BtDiagB,
-                        upper_triangular: true,
-                    };
-                    let mut fallback_config = sp_config.clone();
-                    fallback_config.block2_config =
-                        sonium_solvers::BlockPreconditionerConfig::Diagonal;
-                    let preconditioner =
-                        sonium_solvers::SaddlePointPreconditioner::<f64>::try_from_matrix(
-                            csr, sp_config,
-                        )
-                        .or_else(|_| {
-                            sonium_solvers::SaddlePointPreconditioner::<f64>::try_from_matrix(
-                                csr,
-                                fallback_config,
-                            )
-                        })
-                        .ok()?;
-                    *cache = Some(BdfCachedLinearSolver::JacobiSchur {
-                        matrix: csr.clone(),
-                        preconditioner,
-                    });
-                    if progress {
-                        eprintln!("BDF_LINEAR_SETUP_DONE solver=fgmres-jacobi-schur");
+                    total_iterations += result.iterations;
+                    if result.converged || !lagged || retried {
+                        let solver_kind = match config.linear_solver_cpu_preconditioner {
+                            LinearSolverCpuPreconditionerKind::JacobiSchur => {
+                                BdfLinearSolverKind::FgmresJacobiSchur
+                            }
+                            LinearSolverCpuPreconditionerKind::IlutSchur => {
+                                BdfLinearSolverKind::FgmresIlutSchur
+                            }
+                            LinearSolverCpuPreconditionerKind::IluSchur => {
+                                BdfLinearSolverKind::FgmresIluSchur
+                            }
+                            LinearSolverCpuPreconditionerKind::Ilu => unreachable!(),
+                        };
+                        break (
+                            result.x,
+                            total_iterations,
+                            solver_kind,
+                            setup_reused,
+                            result.converged,
+                        );
                     }
-                }
-                let preconditioner = match cache.as_ref()? {
-                    BdfCachedLinearSolver::JacobiSchur { preconditioner, .. } => preconditioner,
-                    BdfCachedLinearSolver::Direct { .. } | BdfCachedLinearSolver::Ilu { .. } => {
-                        unreachable!()
-                    }
+                    // Lagged setup failed: rebuild fresh and retry once, so a
+                    // stale setup wastes one solve but never fails the step.
+                    retried = true;
+                    lagged = false;
+                    setup_reused = false;
                 };
-                let solve_config = sonium_solvers::FgmresConfig {
-                    max_iterations: config.linear_solver_max_iterations.max(1),
-                    restart: 50,
-                    tolerance: config.linear_solver_tolerance,
-                    print_interval: if progress { 100 } else { 0 },
-                    exact_residual_check_interval: 10,
-                    convergence_check_interval: 1,
-                };
-                let result = sonium_solvers::fgmres_preconditioned(
-                    &operator,
-                    preconditioner,
-                    b,
-                    Some(x0),
-                    &solve_config,
-                );
-                if progress {
-                    eprintln!(
-                        "BDF_LINEAR_SOLVE_DONE solver=fgmres-jacobi-schur iterations={} residual={:.12e} estimated_residual={:.12e} backward_error={:.12e} converged={} reused={setup_reused}",
-                        result.iterations,
-                        result.residual,
-                        result.estimated_residual,
-                        result.backward_error,
-                        result.converged,
-                    );
-                }
-                (
-                    result.x,
-                    result.iterations,
-                    match config.linear_solver_cpu_preconditioner {
-                        LinearSolverCpuPreconditionerKind::JacobiSchur => {
-                            BdfLinearSolverKind::FgmresJacobiSchur
-                        }
-                        LinearSolverCpuPreconditionerKind::IlutSchur => {
-                            BdfLinearSolverKind::FgmresIlutSchur
-                        }
-                        LinearSolverCpuPreconditionerKind::Ilu => unreachable!(),
-                    },
-                    setup_reused,
-                    result.converged,
-                )
+                (x, iterations, solver, setup_reused, solver_converged)
             }
         }
     };
@@ -4609,6 +4775,34 @@ fn csr_exactly_equal(
             .all(|(a, b)| a.to_bits() == b.to_bits())
 }
 
+/// Relative value change `||B - A||_F / ||A||_F` between two CSR
+/// matrices, or `None` when the structure differs. Guards lagged
+/// preconditioner reuse: only a small drift justifies skipping setup.
+fn csr_relative_change(
+    old: &sonium_solvers::CsrMatrix<f64>,
+    new: &sonium_solvers::CsrMatrix<f64>,
+) -> Option<f64> {
+    if old.num_rows != new.num_rows
+        || old.num_cols != new.num_cols
+        || old.row_ptrs != new.row_ptrs
+        || old.col_indices != new.col_indices
+        || old.values.len() != new.values.len()
+    {
+        return None;
+    }
+    let mut diff_squares = 0.0;
+    let mut old_squares = 0.0;
+    for (a, b) in old.values.iter().zip(&new.values) {
+        let delta = b - a;
+        diff_squares += delta * delta;
+        old_squares += a * a;
+    }
+    if old_squares <= 0.0 {
+        return None;
+    }
+    Some((diff_squares / old_squares).sqrt())
+}
+
 fn true_relative_residual(matrix: &sonium_solvers::CsrMatrix<f64>, x: &[f64], b: &[f64]) -> f64 {
     if x.len() != matrix.num_cols || b.len() != matrix.num_rows {
         return f64::INFINITY;
@@ -4622,6 +4816,55 @@ fn true_relative_residual(matrix: &sonium_solvers::CsrMatrix<f64>, x: &[f64], b:
         .sqrt();
     let rhs_norm = b.iter().map(|value| value * value).sum::<f64>().sqrt();
     residual_norm / rhs_norm.max(f64::MIN_POSITIVE)
+}
+
+/// FNV-1a fingerprint of body-force closures at strided sample DOFs.
+///
+/// Guards the workspace body-force cache: a changed force (or a workspace
+/// shared across problems) mismatches and triggers reassembly, so the
+/// cache can only serve closures identical at every sample. Eight samples
+/// keep the check to a handful of closure evaluations per step.
+fn body_force_sample_fingerprint<ForceFn, ForceJacFn>(
+    body_force_fn: &ForceFn,
+    body_force_jacobian_fn: &ForceJacFn,
+    dof_coordinates: &[[f64; 3]],
+) -> u64
+where
+    ForceFn: Fn([f64; 3]) -> Vec<f64>,
+    ForceJacFn: Fn([f64; 3]) -> [[f64; 3]; 3],
+{
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+    const SAMPLES: usize = 8;
+    let mut hash = FNV_OFFSET;
+    let mut push = |bits: u64| {
+        for byte in bits.to_ne_bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(FNV_PRIME);
+        }
+    };
+    let count = dof_coordinates.len();
+    if count == 0 {
+        return hash;
+    }
+    let stride = count.div_ceil(SAMPLES).max(1);
+    let mut sampled = 0usize;
+    for point in dof_coordinates.iter().step_by(stride) {
+        for value in body_force_fn(*point) {
+            push(value.to_bits());
+        }
+        for row in body_force_jacobian_fn(*point) {
+            for value in row {
+                push(value.to_bits());
+            }
+        }
+        sampled += 1;
+        if sampled >= SAMPLES {
+            break;
+        }
+    }
+    push(sampled as u64);
+    hash
 }
 
 fn assemble_bdf_convection<VSpace: crate::spaces::FunctionSpace>(
@@ -4714,6 +4957,8 @@ pub fn audit_bdf_step<VSpace: crate::spaces::FunctionSpace>(
 ) -> BdfStepAudit {
     use super::time_stepping::{BdfCoefficients, extrapolate_velocity};
 
+    let progress = std::env::var("SONIUM_BDF_SOLVER_PROGRESS").as_deref() == Ok("1");
+    let audit_start = std::time::Instant::now();
     let h = bdf.dt;
     let coeffs = BdfCoefficients::for_order(bdf.order);
     let u = &accepted.velocity;
@@ -4766,7 +5011,7 @@ pub fn audit_bdf_step<VSpace: crate::spaces::FunctionSpace>(
     };
     let old_kinetic = kinetic(un);
     let new_kinetic = kinetic(u);
-    BdfStepAudit {
+    let audit = BdfStepAudit {
         fluid_kinetic_old_j: old_kinetic,
         fluid_kinetic_new_j: new_kinetic,
         bdf_mass_work_j: bdf_mass_work,
@@ -4781,7 +5026,14 @@ pub fn audit_bdf_step<VSpace: crate::spaces::FunctionSpace>(
         exterior_traction_work_j: marker_work(exterior_marker),
         solve_residual_j: traction_work - bdf_mass_work - viscous - convection_work - pressure_work,
         effective_viscosity_pa_s: effective_viscosity,
+    };
+    if progress {
+        eprintln!(
+            "BDF_AUDIT_DONE audit_ms={:.3}",
+            audit_start.elapsed().as_secs_f64() * 1000.0
+        );
     }
+    audit
 }
 
 /// Perform one BDF time step of the unsteady Navier-Stokes equations.
@@ -7215,6 +7467,378 @@ mod tests {
         }
         assert!(solve_at_pressure(1.0, &mut perturbed));
         assert_eq!(hits(), Some(0));
+    }
+
+    #[test]
+    fn body_force_cache_matches_reassembly_bitwise() {
+        use crate::physics::fluid::stokes::time_stepping::{BdfConfig, BdfState};
+        use crate::physics::fluid::stokes::traction::PressureTraction;
+        use crate::physics::fluid::stokes::workspace::BdfWorkspace;
+
+        let run_two_steps = |cache: bool| {
+            let (mesh, inlet, outlet) = marked_channel_mesh(1.0, 0.1, 8, 4);
+            let v_space = VectorH1Space::new(PolynomialDegree::P2, 2);
+            let p_space = H1Space::new(PolynomialDegree::P1);
+            let n_v = v_space.num_global_dofs(&mesh);
+            let n_p = p_space.num_global_dofs(&mesh);
+            let mut bc_dofs = v_space.boundary_dofs(&mesh, 3);
+            bc_dofs.sort_unstable();
+            bc_dofs.dedup();
+            let bc_fn = |_: f64, _: f64, _: f64| vec![0.0, 0.0];
+            let bdf = BdfConfig::bdf2(0.125, 2);
+            let config = NavierStokesConfig {
+                mu: 1.0e-3,
+                rho: 1.0,
+                use_residual_stabilisation: false,
+                cache_body_force_assembly: cache,
+                ..Default::default()
+            };
+            let workspace = BdfWorkspace::new(&mesh, &v_space, &p_space);
+            let mut state = BdfState::from_rest(n_v, n_p);
+            // Nonzero body force so the cached triplets carry live
+            // values, not just zeros.
+            let force = |_: [f64; 3]| vec![0.25, -0.125, 0.0];
+            let jacobian = |_: [f64; 3]| [[0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 0.5]];
+            let tractions = [
+                PressureTraction {
+                    marker: inlet,
+                    pressure_pa: 1.0,
+                },
+                PressureTraction {
+                    marker: outlet,
+                    pressure_pa: 0.0,
+                },
+            ];
+            for _ in 0..2 {
+                assert!(solve_bdf_step_cached_with_force(
+                    &mesh, &v_space, &p_space, &config, &bdf, &mut state, &bc_fn, &bc_dofs,
+                    &tractions, force, jacobian, &workspace,
+                ));
+            }
+            let populated = workspace.body_force_cache.borrow().is_some();
+            (state.velocity, state.pressure, populated)
+        };
+        let (v_plain, p_plain, populated_plain) = run_two_steps(false);
+        let (v_cached, p_cached, populated_cached) = run_two_steps(true);
+        assert!(!populated_plain, "disabled cache must stay empty");
+        assert!(populated_cached, "enabled cache must populate");
+        assert_eq!(v_plain.len(), v_cached.len());
+        assert_eq!(p_plain.len(), p_cached.len());
+        for (plain, cached) in v_plain.iter().zip(&v_cached) {
+            assert_eq!(
+                plain.to_bits(),
+                cached.to_bits(),
+                "cached velocity differs from reassembled"
+            );
+        }
+        for (plain, cached) in p_plain.iter().zip(&p_cached) {
+            assert_eq!(
+                plain.to_bits(),
+                cached.to_bits(),
+                "cached pressure differs from reassembled"
+            );
+        }
+    }
+
+    #[test]
+    fn body_force_cache_reassembles_on_changed_force() {
+        use crate::physics::fluid::stokes::time_stepping::{BdfConfig, BdfState};
+        use crate::physics::fluid::stokes::traction::PressureTraction;
+        use crate::physics::fluid::stokes::workspace::BdfWorkspace;
+
+        let (mesh, inlet, outlet) = marked_channel_mesh(1.0, 0.1, 8, 4);
+        let v_space = VectorH1Space::new(PolynomialDegree::P2, 2);
+        let p_space = H1Space::new(PolynomialDegree::P1);
+        let n_v = v_space.num_global_dofs(&mesh);
+        let n_p = p_space.num_global_dofs(&mesh);
+        let mut bc_dofs = v_space.boundary_dofs(&mesh, 3);
+        bc_dofs.sort_unstable();
+        bc_dofs.dedup();
+        let bc_fn = |_: f64, _: f64, _: f64| vec![0.0, 0.0];
+        let bdf = BdfConfig::bdf2(0.125, 1);
+        let config = NavierStokesConfig {
+            mu: 1.0e-3,
+            rho: 1.0,
+            use_residual_stabilisation: false,
+            cache_body_force_assembly: true,
+            ..Default::default()
+        };
+        let tractions = [
+            PressureTraction {
+                marker: inlet,
+                pressure_pa: 1.0,
+            },
+            PressureTraction {
+                marker: outlet,
+                pressure_pa: 0.0,
+            },
+        ];
+        fn zero_jacobian(_: [f64; 3]) -> [[f64; 3]; 3] {
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+        }
+        fn force_a(_: [f64; 3]) -> Vec<f64> {
+            vec![0.25, 0.0, 0.0]
+        }
+        fn force_b(_: [f64; 3]) -> Vec<f64> {
+            vec![-0.5, 0.125, 0.0]
+        }
+        let step =
+            |force: fn([f64; 3]) -> Vec<f64>, state: &mut BdfState, workspace: &BdfWorkspace| {
+                assert!(solve_bdf_step_cached_with_force(
+                    &mesh,
+                    &v_space,
+                    &p_space,
+                    &config,
+                    &bdf,
+                    state,
+                    &bc_fn,
+                    &bc_dofs,
+                    &tractions,
+                    force,
+                    zero_jacobian,
+                    workspace,
+                ));
+            };
+        let fingerprint = |workspace: &BdfWorkspace| {
+            workspace
+                .body_force_cache
+                .borrow()
+                .as_ref()
+                .map(|cached| cached.sample_fingerprint)
+        };
+        // Shared workspace, changed force: the sample fingerprint must
+        // mismatch and trigger reassembly instead of serving stale triplets.
+        let shared = BdfWorkspace::new(&mesh, &v_space, &p_space);
+        let mut state_a = BdfState::from_rest(n_v, n_p);
+        step(force_a, &mut state_a, &shared);
+        let fingerprint_a = fingerprint(&shared).expect("cache populated");
+        let mut state_b_shared = BdfState::from_rest(n_v, n_p);
+        step(force_b, &mut state_b_shared, &shared);
+        let fingerprint_b = fingerprint(&shared).expect("cache repopulated");
+        assert_ne!(
+            fingerprint_a, fingerprint_b,
+            "changed force must produce a new sample fingerprint"
+        );
+        // The reassembled shared-workspace step must match a fresh
+        // workspace that only ever saw force B.
+        let fresh = BdfWorkspace::new(&mesh, &v_space, &p_space);
+        let mut state_b_fresh = BdfState::from_rest(n_v, n_p);
+        step(force_b, &mut state_b_fresh, &fresh);
+        for (shared_value, fresh_value) in
+            state_b_shared.velocity.iter().zip(&state_b_fresh.velocity)
+        {
+            assert_eq!(
+                shared_value.to_bits(),
+                fresh_value.to_bits(),
+                "stale body force served after force change"
+            );
+        }
+    }
+
+    #[test]
+    fn lagged_setup_reuses_across_changed_steps_and_matches_physics() {
+        use crate::physics::fluid::stokes::time_stepping::{BdfConfig, BdfState};
+        use crate::physics::fluid::stokes::traction::PressureTraction;
+        use crate::physics::fluid::stokes::workspace::BdfWorkspace;
+
+        fn relative_l2(a: &[f64], b: &[f64]) -> f64 {
+            assert_eq!(a.len(), b.len());
+            let mut diff = 0.0;
+            let mut norm = 0.0;
+            for (x, y) in a.iter().zip(b) {
+                diff += (x - y) * (x - y);
+                norm += x * x;
+            }
+            (diff / norm.max(f64::MIN_POSITIVE)).sqrt()
+        }
+
+        let run = |max_lag_steps: usize| {
+            let (mesh, inlet, outlet) = marked_channel_mesh(1.0, 0.1, 8, 4);
+            let v_space = VectorH1Space::new(PolynomialDegree::P2, 2);
+            let p_space = H1Space::new(PolynomialDegree::P1);
+            let n_v = v_space.num_global_dofs(&mesh);
+            let n_p = p_space.num_global_dofs(&mesh);
+            let mut bc_dofs = v_space.boundary_dofs(&mesh, 3);
+            bc_dofs.sort_unstable();
+            bc_dofs.dedup();
+            let bc_fn = |_: f64, _: f64, _: f64| vec![0.0, 0.0];
+            let bdf = BdfConfig::bdf2(0.125, 4);
+            let config = NavierStokesConfig {
+                mu: 1.0e-3,
+                rho: 1.0,
+                use_residual_stabilisation: false,
+                use_direct_solver: false,
+                linear_solver_backend: LinearSolverBackend::Cpu,
+                linear_solver_cpu_preconditioner: LinearSolverCpuPreconditionerKind::JacobiSchur,
+                linear_solver_max_iterations: 5000,
+                linear_solver_tolerance: 1.0e-10,
+                linear_solver_setup_max_lag_steps: max_lag_steps,
+                ..Default::default()
+            };
+            let workspace = BdfWorkspace::new(&mesh, &v_space, &p_space);
+            let mut state = BdfState::from_rest(n_v, n_p);
+            let tractions = [
+                PressureTraction {
+                    marker: inlet,
+                    pressure_pa: 1.0,
+                },
+                PressureTraction {
+                    marker: outlet,
+                    pressure_pa: 0.0,
+                },
+            ];
+            let mut reused = Vec::new();
+            for _ in 0..4 {
+                assert!(solve_bdf_step_cached(
+                    &mesh, &v_space, &p_space, &config, &bdf, &mut state, &bc_fn, &bc_dofs,
+                    &tractions, &workspace,
+                ));
+                reused.push(
+                    workspace
+                        .last_linear_solve_telemetry()
+                        .expect("telemetry recorded")
+                        .setup_reused,
+                );
+            }
+            (state.velocity, state.pressure, reused)
+        };
+        let (v_plain, p_plain, reused_plain) = run(0);
+        // Lag disabled: the Oseen matrix changes every step, so every
+        // step rebuilds.
+        assert_eq!(reused_plain, vec![false, false, false, false]);
+        let (v_lagged, p_lagged, reused_lagged) = run(10);
+        // Lag enabled: one fresh setup, then lagged reuse (the
+        // mass-dominated drift sits far below the default tolerance).
+        assert_eq!(reused_lagged, vec![false, true, true, true]);
+        // Same equations, same tolerance: only the Krylov path differs.
+        assert!(
+            relative_l2(&v_plain, &v_lagged) < 1.0e-8,
+            "lagged velocity drifted: {}",
+            relative_l2(&v_plain, &v_lagged)
+        );
+        assert!(
+            relative_l2(&p_plain, &p_lagged) < 1.0e-8,
+            "lagged pressure drifted: {}",
+            relative_l2(&p_plain, &p_lagged)
+        );
+        // The lag cap binds: K=1 alternates fresh and lagged setups.
+        let (_, _, reused_capped) = run(1);
+        assert_eq!(reused_capped, vec![false, true, false, true]);
+    }
+
+    #[test]
+    fn lagged_setup_retries_once_with_fresh_setup() {
+        use crate::physics::fluid::stokes::time_stepping::{BdfConfig, BdfState};
+        use crate::physics::fluid::stokes::traction::PressureTraction;
+        use crate::physics::fluid::stokes::workspace::BdfWorkspace;
+
+        let (mesh, inlet, outlet) = marked_channel_mesh(1.0, 0.1, 8, 4);
+        let v_space = VectorH1Space::new(PolynomialDegree::P2, 2);
+        let p_space = H1Space::new(PolynomialDegree::P1);
+        let n_v = v_space.num_global_dofs(&mesh);
+        let n_p = p_space.num_global_dofs(&mesh);
+        let mut bc_dofs = v_space.boundary_dofs(&mesh, 3);
+        bc_dofs.sort_unstable();
+        bc_dofs.dedup();
+        let bc_fn = |_: f64, _: f64, _: f64| vec![0.0, 0.0];
+        let bdf = BdfConfig::bdf2(0.125, 2);
+        let base = NavierStokesConfig {
+            mu: 1.0e-3,
+            rho: 1.0,
+            use_residual_stabilisation: false,
+            use_direct_solver: false,
+            linear_solver_backend: LinearSolverBackend::Cpu,
+            linear_solver_cpu_preconditioner: LinearSolverCpuPreconditionerKind::JacobiSchur,
+            linear_solver_tolerance: 1.0e-10,
+            linear_solver_setup_max_lag_steps: 10,
+            // Force lag on step 2 regardless of drift size.
+            linear_solver_setup_lag_tolerance: 1.0e30,
+            ..Default::default()
+        };
+        let tractions_at = |pressure_pa: f64| {
+            [
+                PressureTraction {
+                    marker: inlet,
+                    pressure_pa,
+                },
+                PressureTraction {
+                    marker: outlet,
+                    pressure_pa: 0.0,
+                },
+            ]
+        };
+        // Step 2 shrinks dt 1000x after step 1 populates the cache.
+        // The lag tolerance is forced wide open, so the lagged run
+        // reuses a setup built for a mass scaling 1000x off while the
+        // control rebuilds fresh. Both attempts get two Krylov cycles.
+        let step_2_with = |max_lag_steps: usize| {
+            let config = NavierStokesConfig {
+                linear_solver_setup_max_lag_steps: max_lag_steps,
+                ..base.clone()
+            };
+            let workspace = BdfWorkspace::new(&mesh, &v_space, &p_space);
+            let mut state = BdfState::from_rest(n_v, n_p);
+            let converge = NavierStokesConfig {
+                linear_solver_max_iterations: 5000,
+                ..config.clone()
+            };
+            assert!(solve_bdf_step_cached(
+                &mesh,
+                &v_space,
+                &p_space,
+                &converge,
+                &bdf,
+                &mut state,
+                &bc_fn,
+                &bc_dofs,
+                &tractions_at(1.0),
+                &workspace,
+            ));
+            let small_dt = BdfConfig::bdf2(0.125 / 1000.0, 2);
+            let budgeted = NavierStokesConfig {
+                linear_solver_max_iterations: 2,
+                ..config
+            };
+            assert!(solve_bdf_step_cached(
+                &mesh,
+                &v_space,
+                &p_space,
+                &budgeted,
+                &small_dt,
+                &mut state,
+                &bc_fn,
+                &bc_dofs,
+                &tractions_at(1.0),
+                &workspace,
+            ));
+            workspace
+                .last_linear_solve_telemetry()
+                .expect("telemetry recorded")
+        };
+        let fresh_only = step_2_with(0);
+        assert!(
+            fresh_only.converged,
+            "fresh setup handles the dt change within budget"
+        );
+        assert!(
+            !fresh_only.setup_reused,
+            "lag disabled rebuilds the changed matrix"
+        );
+        let lagged = step_2_with(10);
+        // The stale attempt fails but the fresh retry rescues the step.
+        assert!(lagged.converged);
+        // Each attempt runs at most two 50-cycles (the arm's restart
+        // with max_iterations = 2), so exceeding 100 proves the lagged
+        // attempt ran to budget and the retry ran after it.
+        assert!(
+            lagged.iterations > 100,
+            "retry must run a second attempt, got {} iterations",
+            lagged.iterations
+        );
+        assert!(
+            !lagged.setup_reused,
+            "retry rebuilds fresh, so the final setup is not reused"
+        );
     }
 
     #[test]

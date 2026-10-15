@@ -4,6 +4,31 @@
 
 ### Added
 
+- Lagged BDF preconditioner setup reuse (`NavierStokesConfig::linear_solver_setup_max_lag_steps`,
+  default 0 = legacy rebuild-on-any-change): the JacobiSchur setup is reused
+  across steps while matrix drift stays within
+  `linear_solver_setup_lag_tolerance`, with a retry-once fresh rebuild when a
+  lagged solve fails to converge. 128-step 3D smoke validation: 128 → 43
+  fresh setups, identical 81,081 total iterations, energy-closure agreement
+  to 10 digits, ~10% wall savings (12.8 → 11.5 min at 32 threads).
+- ILU(0) velocity-block saddle-point variant: `BlockPreconditionerConfig::Ilu`
+  plus the `LinearSolverCpuPreconditionerKind::IluSchur` /
+  `BdfLinearSolverKind::FgmresIluSchur` path through Picard, BDF, and backend
+  fallback. On the 47.8k-DOF probe it cuts iterations 1814 → 580 at
+  identical physics, but its 3.7× setup cost nets +42s setup+solves even
+  with lag-5 at 128-step smoke scale (25,677 vs 81,081 iterations), so
+  JacobiSchur stays the default and ILU(0) remains an opt-in for
+  iteration-dominated regimes (unit test: ILU(0) block beats diagonal
+  block on Stokes-1D).
+- BDF body-force assembly cache (`NavierStokesConfig::cache_body_force_assembly`,
+  default off): time-independent force RHS/Jacobian quadrature runs once per
+  workspace and is reused across steps, guarded by a per-step sample
+  fingerprint that reassembles on any mismatch (bitwise-equivalence and
+  stale-guard tests).
+- BDF phase timing on `SONIUM_BDF_SOLVER_PROGRESS=1`: new `BDF_ASSEMBLY_DONE`
+  (with pattern-cache flag), `BDF_AUDIT_DONE`, and `BDF_WORKSPACE_DONE`
+  lines, plus `setup_ms`/`solve_ms` on the linear setup/solve lines; the
+  Schur-arm solver tag now reports `fgmres-ilut-schur` for IlutSchur.
 - Added machine-adaptive `parallelism::ParallelPolicy` for assembly merges:
   the rayon gate scales with `available_parallelism`
   (`SONIUM_FEM_PAR_THRESHOLD` absolute override, `SONIUM_SERIAL=1` escape
@@ -22,6 +47,15 @@
 
 ### Fixed
 
+- Capped the `ParallelPolicy::decide` gate at `MAX_PARALLEL_GATE_THREADS = 16`:
+  the uncapped `grain × pool threads` threshold serialized mid-size meshes on
+  many-core machines (a 10374-tet mesh needs 32768 elements to thread on a
+  128-thread pool). Pools with 16 or fewer threads behave exactly as before;
+  measured 22.5s → 1.2s per P2 BDF assembly with identical results.
+- The CPU JacobiSchur/IlutSchur fallback in `solve_iterative_cpu` now builds
+  the external Schur block with ILUT (same settings as the BDF cached path,
+  diagonal fallback preserved) instead of point Jacobi: 16128 → 442
+  iterations on the 47.8k-DOF port probe with identical converged residuals.
 - Fixed the serial triplet-merge bottleneck after parallel element
   tabulation in bilinear assembly: large merges no longer single-thread the
   scatter into the global `TripletMatrix`.
