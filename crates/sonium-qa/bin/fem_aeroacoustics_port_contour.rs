@@ -148,6 +148,10 @@ fn main() {
             mu: 1.85e-5,
             rho: 1.2,
             use_residual_stabilisation: false,
+            // Zero body force through `solve_bdf_step_cached`: the
+            // force quadrature is identical every step, so caching
+            // skips two full assemblies per step after the first.
+            cache_body_force_assembly: true,
             ..Default::default()
         },
         bdf,

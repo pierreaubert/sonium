@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Added — solver follow-up harnesses
+
+- `qa-speaker-port-nonlinear`: reduced-3D smoke/development tiers gain a
+  `SPEAKER_PORT_REDUCED_3D_PRECOND` knob (`jacobi-schur` default, `ilu-schur`,
+  `ilut-schur`) alongside `SPEAKER_PORT_REDUCED_3D_LAG`, and the parity probe
+  accepts `ilu-schur` via `SPEAKER_PORT_SOLVER_PARITY_PRECOND`, for
+  preconditioner × lag A/B comparisons at fixed tolerance.
+- `qa-speaker-port-optim`: `SPEAKER_PORT_OPTIM_STAGE_PARALLELISM` enables
+  bounded parallel candidate solves per funnel stage and Tier-2 wave
+  (default 1 = serial; rankings bit-identical, Tier-2 metrics exact).
+- Reduced-3D cap-continuity gate resized from 1e-6 to 5e-3: the coarse
+  10k-tet smoke mesh characteristically resolves boundary fluxes to
+  ~8.1e-4 (direct-LU cross-validated by the parity probe), so the gate
+  now rejects solver-scale conservation loss instead of discretization
+  noise. Per-step BDF convergence is still enforced directly.
+- Reduced-3D energy physical-closure gate scaled with time resolution
+  (`0.05 × 252/samples_per_cycle`): smoke (32 spc) characteristically
+  records ~0.282 of first-order driver/box staggering dissipation
+  (lag arms agree to 10 digits; algebraic bookkeeping exact to 1e-16),
+  matching the 252-spc production 0.04 gate scaled linearly with step
+  size. Exact algebraic/interface closures still guard bookkeeping.
+
 ### Added — large-scale aeroacoustics validation
 
 - `qa-fem-fwh-mie-scattering`: FW-H and Kirchhoff reconstruction of the

@@ -29,7 +29,7 @@
 //! - `Lsc`: least-squares commutator, `S^{-1} ≈ Q^{-1} M Q^{-1}` with
 //!   `Q = B^T diag(M_u)^{-1} B`, `M = B^T diag(M_u)^{-1} A diag(M_u)^{-1} B`
 
-use crate::{AmgConfig, AmgPreconditioner, IlutConfig, IlutPreconditioner};
+use crate::{AmgConfig, AmgPreconditioner, IluPreconditioner, IlutConfig, IlutPreconditioner};
 use num_traits::{Float, FromPrimitive, Zero};
 use sonium_solvers_core::traits::{
     AdjointCapability, ComplexField, LinearOperator, Preconditioner, SolverError,
@@ -112,6 +112,10 @@ pub enum BlockPreconditionerConfig {
     Amg(AmgConfig),
     /// ILUT factorization.
     Ilut(IlutConfig),
+    /// ILU(0) factorization with default settings (pattern of the block,
+    /// no fill, no pivoting search). Cheaper setup than ILUT; suites
+    /// mass-dominated velocity blocks where the diagonal is strong.
+    Ilu,
     /// Diagonal (Jacobi).
     Diagonal,
     /// No preconditioning (identity).
@@ -1080,6 +1084,13 @@ fn build_preconditioner<T: ComplexField>(
                 ))
             }
         }
+        BlockPreconditionerConfig::Ilu => {
+            if matrix.num_rows == 0 || matrix.nnz() == 0 {
+                Box::new(sonium_solvers_core::traits::IdentityPreconditioner)
+            } else {
+                Box::new(IluPreconditioner::from_csr(matrix))
+            }
+        }
         BlockPreconditionerConfig::Diagonal => {
             Box::new(crate::DiagonalPreconditioner::from_csr(matrix))
         }
@@ -1231,6 +1242,12 @@ fn validate_checked_block_preconditioner<T: ComplexField>(
                 })
                 .map(|_| SaddlePointBlockProvenance::NotRequired)
         }
+        BlockPreconditionerConfig::Ilu => { IluPreconditioner::try_from_csr(matrix).map(|_| ()) }
+            .map_err(|error| SolverError::OperationFailed {
+                operation,
+                reason: error.to_string(),
+            })
+            .map(|_| SaddlePointBlockProvenance::NotRequired),
         BlockPreconditionerConfig::Amg(_) => {
             validate_checked_spd_block(matrix, assumption, operation)
         }
@@ -1914,6 +1931,66 @@ mod tests {
             assert!(
                 (sol_lsc.x[i] - sol_btdiagb.x[i]).abs() < 1e-5,
                 "LSC vs BtDiagB solution mismatch at {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ilu_velocity_block_beats_diagonal_block() {
+        use sonium_solvers_iterative::{GmresConfig, gmres_preconditioned};
+
+        let n_u = 17;
+        let n_p = n_u - 1;
+        let (matrix, _f, _b) = stokes_1d(n_u);
+        assert!(has_saddle_point_structure(&matrix, n_u));
+
+        let rhs: Vec<f64> = (0..n_u + n_p)
+            .map(|i| (i as f64 * 0.9).sin() + 0.5)
+            .collect();
+        let gmres_config = GmresConfig {
+            max_iterations: 400,
+            restart: n_u + n_p,
+            tolerance: 1e-8,
+            ..Default::default()
+        };
+        // Same BtDiagB Schur approximation on both sides: the comparison
+        // isolates the velocity-block solver (ILU(0) vs Jacobi).
+        let make_config = |block1: BlockPreconditionerConfig| SaddlePointConfig {
+            block1_size: n_u,
+            block1_config: block1,
+            block2_config: BlockPreconditionerConfig::Diagonal,
+            schur_strategy: SchurStrategy::BtDiagB,
+            upper_triangular: true,
+        };
+
+        let diag = SaddlePointPreconditioner::<f64>::from_matrix(
+            &matrix,
+            make_config(BlockPreconditionerConfig::Diagonal),
+        );
+        let sol_diag = gmres_preconditioned(&matrix, &diag, &rhs, &gmres_config);
+        assert!(sol_diag.converged, "diagonal-block GMRES must converge");
+
+        let ilu = SaddlePointPreconditioner::<f64>::from_matrix(
+            &matrix,
+            make_config(BlockPreconditionerConfig::Ilu),
+        );
+        let sol_ilu = gmres_preconditioned(&matrix, &ilu, &rhs, &gmres_config);
+        assert!(sol_ilu.converged, "ILU(0)-block GMRES must converge");
+
+        eprintln!(
+            "Stokes GMRES iterations: diagonal block = {}, ILU(0) block = {}",
+            sol_diag.iterations, sol_ilu.iterations
+        );
+        assert!(
+            sol_ilu.iterations < sol_diag.iterations,
+            "ILU(0) block ({}) should need fewer iterations than diagonal block ({})",
+            sol_ilu.iterations,
+            sol_diag.iterations
+        );
+        for i in 0..n_u + n_p {
+            assert!(
+                (sol_ilu.x[i] - sol_diag.x[i]).abs() < 1e-5,
+                "ILU(0) vs diagonal solution mismatch at {i}"
             );
         }
     }

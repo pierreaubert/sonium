@@ -120,6 +120,48 @@ fn sonium_arm_rejects_miniqa_cleanly() {
 }
 
 #[test]
+fn sonium_arm_reports_unsupported_deck_reason() {
+    // N-deck harness: shells resolve as C3 but have no native arm,
+    // so the failure names the unsupported card (fast, no timing).
+    let (mut command, _) = base("shell_reason");
+    let output = command
+        .arg("--deck")
+        .arg("shell_clamped_plate")
+        .arg("--quick")
+        .arg("--sonium-only")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("FAILED: qa-oc-bench"), "stdout: {stdout}");
+    assert!(stderr.contains("/SHELL"), "stderr: {stderr}");
+}
+
+#[test]
+fn nonconforming_deck_dir_fails_closed_with_reason() {
+    // N-deck harness: the foam76 decks carry no C3-named starter
+    // pair, so resolution names the missing artifact (no timing).
+    let (mut command, _) = base("foam76_reason");
+    let output = command
+        .arg("--deck")
+        .arg("foam76_compression")
+        .arg("--quick")
+        .arg("--sonium-only")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("FAILED: qa-oc-bench"), "stdout: {stdout}");
+    assert!(stderr.contains("misses"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("foam76_compression_0000.rad"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
 fn sonium_quick_taylor_emits_valid_bundle() {
     let (mut command, bundle) = base("taylor_quick");
     let output = command

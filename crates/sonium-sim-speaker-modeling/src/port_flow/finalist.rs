@@ -40,7 +40,8 @@ use serde::{Deserialize, Serialize};
 use sonium_fem::basis::PolynomialDegree;
 use sonium_fem::mesh::Mesh;
 use sonium_fem::physics::fluid::stokes::navier_stokes::{
-    LinearSolverBackend, LinearSolverCpuPreconditionerKind, NavierStokesConfig,
+    BackendPreconditionerKind, BackendPressureSchurPreconditionerKind, LinearSolverBackend,
+    LinearSolverCpuPreconditionerKind, NavierStokesConfig,
 };
 use sonium_fem::physics::fluid::stokes::time_stepping::BdfConfig;
 use sonium_fem::spaces::{H1Space, VectorH1Space};
@@ -394,6 +395,19 @@ impl FinalistNoiseLevel {
 // Nightly 3D spot-check
 // ---------------------------------------------------------------------------
 
+/// Linear-solve device for one 3D spot-check run. Execution-only: both
+/// devices solve the same physics to the same tolerance.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpotCheck3dDevice {
+    /// CPU FGMRES + Jacobi/Schur (default; always available).
+    #[default]
+    Cpu,
+    /// CUDA backend GMRES + Jacobi/Schur with a Chebyshev pressure
+    /// block. Requires a `cuda`-feature build plus a CUDA driver; the
+    /// run fails loudly if any solve falls back to CPU.
+    Cuda,
+}
+
 /// Time resolution, run length, and mesh for one 3D spot-check run.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SpotCheck3dFidelity {
@@ -405,6 +419,8 @@ pub struct SpotCheck3dFidelity {
     pub discarded_cycles: usize,
     /// Settled tail cycles analysed.
     pub tail_cycles: usize,
+    /// Linear-solve device ([`SpotCheck3dDevice::Cpu`] by default).
+    pub device: SpotCheck3dDevice,
 }
 
 impl SpotCheck3dFidelity {
@@ -418,6 +434,7 @@ impl SpotCheck3dFidelity {
             samples_per_cycle: 32,
             discarded_cycles: 2,
             tail_cycles: 2,
+            device: SpotCheck3dDevice::Cpu,
         }
     }
 
@@ -528,6 +545,8 @@ pub struct SpotCheck3dRun {
 /// Taylor–Hood P2–P1 BDF2 with residual stabilisation off and the nightly
 /// iterative Jacobi–Schur saddle solver, mirroring the `SPEAKER_PORT_3D=1`
 /// reduced-3D leg. A pure function of (profile, voltage, frequency, fidelity).
+/// The linear-solve device comes from [`SpotCheck3dFidelity::device`]
+/// (CPU by default; CUDA selects the tuned backend Chebyshev–Schur path).
 pub fn run_3d_spot_check(
     case: &PortOptimReferenceCase,
     profile: &SplinePortProfile,
@@ -572,14 +591,38 @@ pub fn run_3d_spot_check(
     let velocity_space = VectorH1Space::new(PolynomialDegree::P2, 3);
     let pressure_space = H1Space::new(PolynomialDegree::P1);
     let frequency_hz = drive_frequency_hz;
+    // The CUDA device uses the backend Jacobi/Schur solver with a
+    // Chebyshev pressure block: measured fastest on the 47.8k-DOF
+    // parity probe (16.9s vs 24.0s diagonal-Schur and 26.6s CPU
+    // JacobiSchur at tighter 1e-10 tolerance). The CPU-only knobs are
+    // ignored on the backend path and vice versa.
+    let (linear_solver_backend, backend_preconditioner, schur_preconditioner) =
+        match fidelity.device {
+            SpotCheck3dDevice::Cpu => (
+                LinearSolverBackend::Cpu,
+                BackendPreconditionerKind::PolynomialJacobi,
+                BackendPressureSchurPreconditionerKind::Polynomial,
+            ),
+            SpotCheck3dDevice::Cuda => (
+                LinearSolverBackend::Cuda,
+                BackendPreconditionerKind::JacobiSchur,
+                BackendPressureSchurPreconditionerKind::Chebyshev,
+            ),
+        };
     let config = CoupledPortConfig {
         driver: case.driver(),
         ns_config: NavierStokesConfig {
             mu: case.dynamic_viscosity_pa_s,
             rho: case.density_kg_per_m3,
             use_residual_stabilisation: false,
+            // Zero body force through `solve_bdf_step_cached`: the
+            // force quadrature is identical every step, so caching
+            // skips two full assemblies per step after the first.
+            cache_body_force_assembly: true,
             use_direct_solver: false,
-            linear_solver_backend: LinearSolverBackend::Cpu,
+            linear_solver_backend,
+            linear_solver_backend_preconditioner: backend_preconditioner,
+            linear_solver_schur_preconditioner: schur_preconditioner,
             linear_solver_cpu_preconditioner: LinearSolverCpuPreconditionerKind::JacobiSchur,
             linear_solver_max_iterations: 5000,
             linear_solver_tolerance: 1.0e-8,
@@ -591,6 +634,22 @@ pub fn run_3d_spot_check(
         exterior_pressure_pa: 0.0,
     };
     let result = run_coupled_port(&mesh, &velocity_space, &pressure_space, &config)?;
+    // A CUDA run must never silently report CPU numbers: every linear
+    // solve has to resolve to the requested device.
+    if matches!(fidelity.device, SpotCheck3dDevice::Cuda)
+        && result.linear_solves.iter().any(|solve| {
+            !matches!(
+                solve.resolved_linear_solver_backend,
+                LinearSolverBackend::Cuda
+            )
+        })
+    {
+        return Err(PortFlowError::InvalidConfig(
+            "3D spot-check requested the CUDA device but a linear solve fell back to CPU; \
+             build with the cuda feature and provide a CUDA driver"
+                .to_string(),
+        ));
+    }
     let last_time = result.time_s.last().copied().unwrap_or(0.0);
     let diverged = |step: usize| PortFlowError::SolverDiverged {
         step,

@@ -146,8 +146,10 @@ fn config_tag(config: &BlockPreconditionerConfig) -> Result<u8, SolverError> {
     match config {
         BlockPreconditionerConfig::Diagonal => Ok(0),
         BlockPreconditionerConfig::None => Ok(1),
-        BlockPreconditionerConfig::Amg(_) | BlockPreconditionerConfig::Ilut(_) => Err(error(
-            "checkpoint format v1 does not support AMG or ILUT block factors",
+        BlockPreconditionerConfig::Amg(_)
+        | BlockPreconditionerConfig::Ilut(_)
+        | BlockPreconditionerConfig::Ilu => Err(error(
+            "checkpoint format v1 does not support AMG, ILUT, or ILU block factors",
         )),
     }
 }

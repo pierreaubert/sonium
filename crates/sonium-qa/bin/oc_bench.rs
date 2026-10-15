@@ -103,7 +103,9 @@ enum FlavorOpt {
     about = "Time sonium-vs-engine explicit dynamics and emit a comparison bundle."
 )]
 struct Args {
-    /// Deck id: C3 case (`taylor_bar`) or miniqa path (`LOIS/...`).
+    /// Deck id: any case under the crate `decks/` dir (e.g.
+    /// `taylor_bar`) or miniqa path (`LOIS/...`). Unknown ids and
+    /// decks without a native arm fail closed with the reason.
     /// Defaults to the smallest C3 explicit deck.
     #[arg(long)]
     deck: Option<String>,
@@ -5084,16 +5086,21 @@ enum DeckFamily {
 
 /// Resolves a deck id to its family, failing closed on unknown ids.
 fn resolve_deck_family(deck: &str, miniqa_root: Option<PathBuf>) -> Result<DeckFamily, String> {
-    if let Ok(c3) = resolve_c3_decks(deck) {
-        return Ok(DeckFamily::C3(c3));
-    }
+    let c3_error = match resolve_c3_decks(deck) {
+        Ok(c3) => return Ok(DeckFamily::C3(c3)),
+        Err(error) => error,
+    };
+    // The C3 miss reason travels into both errors: new deck ids
+    // usually fail here first, and the missing artifact (or the
+    // unknown id) is the actionable part.
     let Some(root) = miniqa_root else {
         return Err(format!(
-            "deck {deck} is not a C3 case and no --miniqa/{MINIQA_ENV} resolves it as miniqa"
+            "deck {deck} is not a C3 case ({c3_error}) and no --miniqa/{MINIQA_ENV} resolves it as miniqa"
         ));
     };
-    find_deck(&root, deck)
-        .map_err(|error| format!("deck {deck} resolves neither as C3 nor miniqa: {error}"))?;
+    find_deck(&root, deck).map_err(|error| {
+        format!("deck {deck} resolves neither as C3 ({c3_error}) nor miniqa: {error}")
+    })?;
     Ok(DeckFamily::Miniqa(root))
 }
 
@@ -5761,6 +5768,55 @@ mod tests {
         assert!(matches!(family, DeckFamily::C3(_)));
         let error = resolve_deck_family("no_such_deck", None).unwrap_err();
         assert!(error.contains("not a C3 case"));
+    }
+
+    #[test]
+    fn every_deck_dir_resolves_or_fails_closed_with_reason() {
+        // N-deck harness audit: parsing only, no timing. Each
+        // checked-in deck either builds a native model or fails with
+        // a reason naming the deck or the missing/unsupported
+        // artifact; units adding arms only flip entries from the
+        // second set to the first, never this shape.
+        let decks_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("decks");
+        let mut entries: Vec<String> = std::fs::read_dir(&decks_root)
+            .expect("decks dir readable")
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
+            .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+            .collect();
+        entries.sort();
+        assert!(!entries.is_empty(), "decks dir holds no cases");
+        for deck in &entries {
+            match resolve_c3_decks(deck) {
+                Err(error) => {
+                    assert!(!error.trim().is_empty(), "{deck}: empty C3 reason");
+                    assert!(
+                        error.contains(deck),
+                        "{deck}: C3 reason names neither deck nor artifact: {error}"
+                    );
+                }
+                Ok(c3) => {
+                    read_probe_file(&c3.probes)
+                        .unwrap_or_else(|error| panic!("{deck}: probes unreadable: {error}"));
+                    if let Err(error) = parse_native_model(&c3) {
+                        assert!(!error.trim().is_empty(), "{deck}: empty native reason");
+                    }
+                }
+            }
+        }
+        // The Phase 6 subset keeps resolving on file and model level.
+        for deck in [
+            "taylor_bar",
+            "hertz_sphere",
+            "necking_bar",
+            "rail_crush",
+            "taylor_plastic",
+            "plasticity_thick_cylinder",
+        ] {
+            let c3 = resolve_c3_decks(deck).unwrap_or_else(|error| panic!("{deck}: {error}"));
+            parse_native_model(&c3).unwrap_or_else(|error| panic!("{deck}: {error}"));
+        }
+        assert!(resolve_c3_decks("no_such_deck").is_err());
     }
 
     fn sample(wall_s: f64, correct: bool) -> RepeatSample {

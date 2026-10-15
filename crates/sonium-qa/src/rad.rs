@@ -894,13 +894,9 @@ pub fn engine_exe() -> Option<PathBuf> {
 }
 
 /// Names the engine flavor behind an executable path.
-pub fn engine_flavor(exe: &Path) -> &'static str {
-    let haystack = exe.to_string_lossy().to_lowercase();
-    if haystack.contains("courant") {
-        "OpenCourant"
-    } else {
-        "OpenCourant"
-    }
+pub fn engine_flavor(_exe: &Path) -> &'static str {
+    // All supported engine paths currently resolve to OpenCourant.
+    "OpenCourant"
 }
 
 /// Rank a starter/engine candidate filename (lower is better).

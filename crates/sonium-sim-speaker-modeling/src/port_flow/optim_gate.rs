@@ -23,6 +23,7 @@
 
 use std::path::Path;
 
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use super::baseline::PortOptimReferenceCase;
@@ -85,6 +86,12 @@ pub struct Step10GateConfig {
     pub run_tier1: bool,
     /// Tier-2 leg behind the gate.
     pub tier2: Step10Tier2Fidelity,
+    /// Max candidates solved concurrently per stage/wave (`1` = serial).
+    ///
+    /// Applies to the Tier-0 screen, the Tier-1 re-rank, and the Tier-2
+    /// verification waves. Rankings and Tier-2 metrics match the serial
+    /// path; only per-record wall times vary run to run.
+    pub stage_parallelism: usize,
 }
 
 impl Step10GateConfig {
@@ -96,6 +103,7 @@ impl Step10GateConfig {
             quota: 6,
             run_tier1: true,
             tier2: Step10Tier2Fidelity::Capped,
+            stage_parallelism: 1,
         }
     }
 
@@ -133,6 +141,9 @@ impl Step10GateConfig {
         }
         if self.quota == 0 {
             return Err(bad("Step-10 gate needs quota >= 1".to_string()));
+        }
+        if self.stage_parallelism == 0 {
+            return Err(bad("Step-10 gate needs stage_parallelism >= 1".to_string()));
         }
         if self.tier2 != Step10Tier2Fidelity::Skip && !self.run_tier1 {
             return Err(bad(
@@ -416,6 +427,46 @@ fn fidelity_label(fidelity: &PortEvalFidelity, capped: bool) -> String {
     )
 }
 
+/// One independent Tier-2 verification solve: profile, drive level, and
+/// optional small-signal compression reference.
+type Tier2GateJob<'a> = (
+    &'a super::profile::SplinePortProfile,
+    f64,
+    Option<SmallSignalReference>,
+);
+
+/// One Tier-2 verification solve runner (shared across wave jobs).
+type Tier2GateRunner<'a> = &'a (
+        dyn Fn(
+    &super::profile::SplinePortProfile,
+    f64,
+    Option<SmallSignalReference>,
+) -> Result<PortCandidateMetrics, PortFlowError>
+            + Sync
+    );
+
+/// Run one independent Tier-2 verification wave, serially or in bounded
+/// parallel chunks. Results keep job order, so parallel waves reproduce the
+/// serial metrics exactly (Tier-2 metrics carry no wall times).
+fn run_tier2_wave(
+    run: Tier2GateRunner<'_>,
+    jobs: &[Tier2GateJob<'_>],
+    width: usize,
+) -> Result<Vec<PortCandidateMetrics>, PortFlowError> {
+    if width <= 1 {
+        return jobs.iter().map(|job| run(job.0, job.1, job.2)).collect();
+    }
+    let mut out = Vec::with_capacity(jobs.len());
+    for chunk in jobs.chunks(width) {
+        let mut partial: Vec<PortCandidateMetrics> = chunk
+            .par_iter()
+            .map(|job| run(job.0, job.1, job.2))
+            .collect::<Result<Vec<_>, _>>()?;
+        out.append(&mut partial);
+    }
+    Ok(out)
+}
+
 /// Run the bounded Step-10 gate: Tier-0 screen + refine, optional Tier-1
 /// re-rank, optional Tier-2 capped/production leg, then the SC1/SC2 verdicts.
 ///
@@ -464,6 +515,7 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
             tier2_quota: 0,
             cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
             pareto_penalty: PARETO_VIOLATION_PENALTY,
+            stage_parallelism: config.stage_parallelism,
         },
         Box::new(tier0),
         tier1,
@@ -597,8 +649,19 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
         };
         // Wave 1: small-signal references for both profiles.
         let small = drives[0];
-        let straight_small = run(&straight_profile, small, None)?;
-        let winner_small = run(&winner_profile, small, None)?;
+        let wave1 = run_tier2_wave(
+            &run,
+            &[
+                (&straight_profile, small, None),
+                (&winner_profile, small, None),
+            ],
+            config.stage_parallelism,
+        )?;
+        let mut wave1 = wave1.into_iter();
+        let (straight_small, winner_small) = (
+            wave1.next().expect("wave 1 runs two jobs"),
+            wave1.next().expect("wave 1 runs two jobs"),
+        );
         let reference_of = |metrics: &PortCandidateMetrics| SmallSignalReference {
             voltage_peak_v: small,
             port_flow_fundamental_amplitude_m3s: metrics.port_flow_fundamental_amplitude_m3s,
@@ -606,11 +669,26 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
         let straight_ref = reference_of(&straight_small);
         let winner_ref = reference_of(&winner_small);
         // Wave 2: nominal + Vmax with per-profile compression references.
+        let wave2_jobs: Vec<Tier2GateJob<'_>> = drives[1..]
+            .iter()
+            .flat_map(|voltage| {
+                [
+                    (&straight_profile, *voltage, Some(straight_ref)),
+                    (&winner_profile, *voltage, Some(winner_ref)),
+                ]
+            })
+            .collect();
+        let wave2 = run_tier2_wave(&run, &wave2_jobs, config.stage_parallelism)?;
         let mut straight = vec![straight_small];
         let mut winner = vec![winner_small];
-        for voltage in &drives[1..] {
-            straight.push(run(&straight_profile, *voltage, Some(straight_ref))?);
-            winner.push(run(&winner_profile, *voltage, Some(winner_ref))?);
+        let (pairs, remainder) = wave2.as_chunks::<2>();
+        assert!(
+            remainder.is_empty(),
+            "wave-2 jobs come in straight/winner pairs"
+        );
+        for [straight_metrics, winner_metrics] in pairs {
+            straight.push(straight_metrics.clone());
+            winner.push(winner_metrics.clone());
         }
         // Equal-airflow rescale at the nominal level + verification run.
         let nominal = drives[1];
@@ -697,10 +775,9 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
         _ => false,
     };
     let passed = t0_ok && t1_ok && t2_ok;
-    let sc1_label =
-        criterion_1
-            .as_ref()
-            .map_or("skipped", |v| if v.passed { "pass" } else { "FAIL" });
+    let sc1_label = criterion_1
+        .as_ref()
+        .map_or("skipped", |v| if v.passed { "pass" } else { "FAIL" });
     let sc2_label = criterion_2_pareto.as_ref().map_or("skipped", |v| {
         if v.passed { v.outcome.as_str() } else { "FAIL" }
     });

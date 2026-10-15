@@ -466,6 +466,10 @@ impl PortOptimReferenceCase {
                 mu: self.dynamic_viscosity_pa_s,
                 rho: self.density_kg_per_m3,
                 use_residual_stabilisation: false,
+                // Zero body force through `solve_bdf_step_cached`: the
+                // force quadrature is identical every step, so caching
+                // skips two full assemblies per step after the first.
+                cache_body_force_assembly: true,
                 ..Default::default()
             },
             bdf: BdfConfig::bdf2(dt, self.num_steps()),

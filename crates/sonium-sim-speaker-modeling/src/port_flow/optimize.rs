@@ -71,11 +71,12 @@
 //! to the equal-voltage deltas. Success Criterion 2 judges the equal-airflow
 //! levels only; see [`super::campaign::EqualAirflowDelta`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sonium_fem::physics::acoustics::pressure::FluidProperties;
 use sonium_solvers_optimization::{
@@ -879,6 +880,13 @@ pub struct FunnelConfig {
     pub cache_quantization_step: f64,
     /// Additive Pareto penalty per unit of constraint violation.
     pub pareto_penalty: f64,
+    /// Max candidates solved concurrently inside one stage (`1` = serial).
+    ///
+    /// Values below 1 behave as 1. Parallel stages replay history records,
+    /// cache inserts, and budget accounting in candidate order, so rankings
+    /// and histories match the serial path (baseline records land before the
+    /// stage records; per-record wall times still vary run to run).
+    pub stage_parallelism: usize,
 }
 
 /// Straight-tube normalisation references at one tier.
@@ -911,6 +919,38 @@ struct FunnelState {
     budget_exhausted: bool,
 }
 
+/// One candidate's fate under the serial admission order.
+#[derive(Debug, Clone)]
+enum StageDisposition {
+    /// Solve in a worker, then stamp/cache/record in replay order.
+    Solve { key: CacheKey },
+    /// Serve from a pre-existing (or earlier-admitted) cache entry.
+    CacheHit { key: CacheKey },
+    /// Straight-tube candidate served through the baseline insert.
+    CacheHitThroughBaseline { key: CacheKey },
+    /// Budget-free construction rejection with the serial message.
+    Rejected { reason: String },
+}
+
+/// Serial-order admission plan for a parallel stage.
+struct StageAdmissionPlan {
+    /// Per-candidate dispositions in candidate order (a prefix when the
+    /// budget runs out; the tail is skipped exactly like the serial loop).
+    dispositions: Vec<StageDisposition>,
+    /// Unpacked profiles to solve, in admission (= candidate) order.
+    admitted: Vec<SplinePortProfile>,
+    /// Whether any disposition needs the straight-tube baseline.
+    needs_baseline: bool,
+}
+
+/// Baseline pre-resolution outcome for a parallel stage.
+enum StageBaseline {
+    /// Budget ran out before the baseline could resolve (state unchanged).
+    Exhausted,
+    /// The straight tube itself is broken (rejection or solver failure).
+    Broken(String),
+}
+
 /// Tiered evaluation funnel with caching, budgets, and history.
 ///
 /// All methods take `&self`; shared state lives behind a mutex so optimiser
@@ -932,6 +972,8 @@ impl PortOptimFunnel {
         tier1: Option<Box<dyn Tier1Evaluator>>,
         tier2: Option<Box<dyn Tier2Evaluator>>,
     ) -> Result<Self, PortOptimError> {
+        let mut config = config;
+        config.stage_parallelism = config.stage_parallelism.max(1);
         config.template.straight().map_err(PortOptimError::Eval)?;
         config.weights.validate().map_err(PortOptimError::Eval)?;
         config
@@ -1054,24 +1096,8 @@ impl PortOptimFunnel {
         u: &[f64],
         is_baseline: bool,
     ) -> Result<FunnelOutcome, PortOptimError> {
-        let n_free = self.n_free();
-        if u.len() != n_free {
-            return self.record_rejection(
-                tier,
-                u,
-                format!("expected {n_free} free variables, got {}", u.len()),
-            );
-        }
-        if let Some((index, value)) = u
-            .iter()
-            .enumerate()
-            .find(|(_, v)| !v.is_finite() || **v < 0.0 || **v > 1.0)
-        {
-            return self.record_rejection(
-                tier,
-                u,
-                format!("u[{index}] = {value} outside the [0, 1] search box"),
-            );
+        if let Err(reason) = self.validate_u(u) {
+            return self.record_rejection(tier, u, reason);
         }
 
         let key = self.quantize(u, tier);
@@ -1115,48 +1141,88 @@ impl PortOptimFunnel {
         let evaluated = self.run_tier(tier, &profile, baseline);
         let wall_time_ms = started.elapsed().as_secs_f64() * 1000.0;
         match evaluated {
-            Ok(mut candidate) => {
-                candidate.u = u.to_vec();
-                candidate.tier = tier;
-                candidate.cached = false;
-                candidate.wall_time_ms = wall_time_ms;
-                if tier == self.config.search_tier && candidate.objective_j.is_finite() {
-                    let mut state = self.lock_state();
-                    state.best_search_j = state.best_search_j.min(candidate.objective_j);
-                }
-                self.lock_state().cache.insert(key, candidate.clone());
-                self.push_record(HistoryRecord {
-                    seq: 0,
-                    tier,
-                    u: u.to_vec(),
-                    outcome: HistoryOutcomeKind::Evaluated,
-                    candidate: Some(candidate.clone()),
-                    reason: None,
-                    cached: false,
-                    wall_time_ms,
-                });
-                Ok(FunnelOutcome::Evaluated(candidate))
-            }
-            Err(error) => {
-                let reason = error.to_string();
-                self.lock_state().history.usage.failed_evals += 1;
-                self.push_record(HistoryRecord {
-                    seq: 0,
-                    tier,
-                    u: u.to_vec(),
-                    outcome: HistoryOutcomeKind::Failed,
-                    candidate: None,
-                    reason: Some(reason.clone()),
-                    cached: false,
-                    wall_time_ms,
-                });
-                Ok(FunnelOutcome::Failed {
-                    u: u.to_vec(),
-                    tier,
-                    error: reason,
-                })
-            }
+            Ok(candidate) => Ok(self.record_evaluated(tier, u, key, candidate, wall_time_ms)),
+            Err(error) => Ok(self.record_failed(tier, u, wall_time_ms, error.to_string())),
         }
+    }
+
+    /// Stamp, cache, and record one solved candidate (serial and parallel
+    /// stages share this so their histories stay identical).
+    fn record_evaluated(
+        &self,
+        tier: EvalTier,
+        u: &[f64],
+        key: CacheKey,
+        mut candidate: EvaluatedCandidate,
+        wall_time_ms: f64,
+    ) -> FunnelOutcome {
+        candidate.u = u.to_vec();
+        candidate.tier = tier;
+        candidate.cached = false;
+        candidate.wall_time_ms = wall_time_ms;
+        if tier == self.config.search_tier && candidate.objective_j.is_finite() {
+            let mut state = self.lock_state();
+            state.best_search_j = state.best_search_j.min(candidate.objective_j);
+        }
+        self.lock_state().cache.insert(key, candidate.clone());
+        self.push_record(HistoryRecord {
+            seq: 0,
+            tier,
+            u: u.to_vec(),
+            outcome: HistoryOutcomeKind::Evaluated,
+            candidate: Some(candidate.clone()),
+            reason: None,
+            cached: false,
+            wall_time_ms,
+        });
+        FunnelOutcome::Evaluated(candidate)
+    }
+
+    /// Record one failed solve (budget was already consumed by reservation).
+    fn record_failed(
+        &self,
+        tier: EvalTier,
+        u: &[f64],
+        wall_time_ms: f64,
+        reason: String,
+    ) -> FunnelOutcome {
+        self.lock_state().history.usage.failed_evals += 1;
+        self.push_record(HistoryRecord {
+            seq: 0,
+            tier,
+            u: u.to_vec(),
+            outcome: HistoryOutcomeKind::Failed,
+            candidate: None,
+            reason: Some(reason.clone()),
+            cached: false,
+            wall_time_ms,
+        });
+        FunnelOutcome::Failed {
+            u: u.to_vec(),
+            tier,
+            error: reason,
+        }
+    }
+
+    /// Validate search-box membership, returning the rejection reason.
+    ///
+    /// Shared by the serial path and the parallel admission simulation so
+    /// both reject the same candidates with identical messages.
+    fn validate_u(&self, u: &[f64]) -> Result<(), String> {
+        let n_free = self.n_free();
+        if u.len() != n_free {
+            return Err(format!("expected {n_free} free variables, got {}", u.len()));
+        }
+        if let Some((index, value)) = u
+            .iter()
+            .enumerate()
+            .find(|(_, v)| !v.is_finite() || **v < 0.0 || **v > 1.0)
+        {
+            return Err(format!(
+                "u[{index}] = {value} outside the [0, 1] search box"
+            ));
+        }
+        Ok(())
     }
 
     /// Serve a cache hit (budget-free), recording it in the history.
@@ -2266,6 +2332,14 @@ impl PortOptimFunnel {
 
     /// Run one stage over explicit candidates, stopping at budget exhaustion.
     fn run_stage(&self, tier: EvalTier, candidates: &[Vec<f64>]) -> StageReport {
+        if self.config.stage_parallelism <= 1 || candidates.len() <= 1 {
+            return self.run_stage_serial(tier, candidates);
+        }
+        self.run_stage_parallel(tier, candidates)
+    }
+
+    /// Legacy serial stage loop (also the parallel-path fallback).
+    fn run_stage_serial(&self, tier: EvalTier, candidates: &[Vec<f64>]) -> StageReport {
         let mut outcomes = Vec::with_capacity(candidates.len());
         let mut skipped_for_budget = 0usize;
         for u in candidates {
@@ -2288,6 +2362,274 @@ impl PortOptimFunnel {
         StageReport {
             ranking: Self::rank_outcomes(tier, outcomes),
             skipped_for_budget,
+        }
+    }
+
+    /// Parallel stage: simulate serial admission, solve the admitted set in
+    /// bounded parallel chunks, then replay cache inserts, history records,
+    /// and budget accounting in candidate order.
+    ///
+    /// Rankings match the serial path exactly; histories match except that
+    /// baseline records land before the stage records and per-record wall
+    /// times vary run to run (as they do between any two serial runs).
+    fn run_stage_parallel(&self, tier: EvalTier, candidates: &[Vec<f64>]) -> StageReport {
+        let plan = self.simulate_stage_admission(tier, candidates);
+        // Resolve the straight-tube baseline up front (serially, exactly
+        // once) so workers can reduce without shared state.
+        let baseline = match self.ensure_baseline_for_plan(tier, &plan) {
+            Ok(baseline) => baseline,
+            Err(StageBaseline::Exhausted) => {
+                // Reservation-free failure: no state changed, exact fallback.
+                return self.run_stage_serial(tier, candidates);
+            }
+            Err(StageBaseline::Broken(reason)) => {
+                return self.replay_broken_baseline(tier, candidates, &plan, reason);
+            }
+        };
+        // Atomically reserve the admitted budget; a concurrent stage that
+        // moved the counters since the simulation forces exact fallback.
+        {
+            let mut state = self.lock_state();
+            let used = state.history.usage.used(tier);
+            let limit = self.config.budgets.limit(tier);
+            if used + plan.admitted.len() > limit {
+                drop(state);
+                return self.run_stage_serial(tier, candidates);
+            }
+            match tier {
+                EvalTier::Tier0 => state.history.usage.tier0_used += plan.admitted.len(),
+                EvalTier::Tier1 => state.history.usage.tier1_used += plan.admitted.len(),
+                EvalTier::Tier2 => state.history.usage.tier2_used += plan.admitted.len(),
+            }
+        }
+        // Bounded in-flight solves: each chunk runs on the shared rayon pool
+        // (nested FEM assembly work-steals with the candidates), and results
+        // collect in admission order. Without needy candidates there is
+        // nothing to solve and the replay below only serves hits/rejections.
+        let mut solved: Vec<(f64, Result<EvaluatedCandidate, PortFlowError>)> =
+            Vec::with_capacity(plan.admitted.len());
+        if let Some(baseline) = baseline {
+            let width = self.config.stage_parallelism.max(1);
+            for chunk in plan.admitted.chunks(width) {
+                let mut partial: Vec<(f64, Result<EvaluatedCandidate, PortFlowError>)> = chunk
+                    .par_iter()
+                    .map(|profile: &SplinePortProfile| {
+                        let started = Instant::now();
+                        let outcome = self.run_tier(tier, profile, Some(baseline));
+                        (started.elapsed().as_secs_f64() * 1000.0, outcome)
+                    })
+                    .collect();
+                solved.append(&mut partial);
+            }
+        }
+        // Ordered replay: identical records to the serial loop.
+        let mut outcomes = Vec::with_capacity(plan.dispositions.len());
+        let mut solved_iter = solved.into_iter();
+        for (index, disposition) in plan.dispositions.iter().enumerate() {
+            let u = &candidates[index];
+            match disposition {
+                StageDisposition::Solve { key } => {
+                    let (wall_time_ms, outcome) = solved_iter
+                        .next()
+                        .expect("one worker result per admitted candidate");
+                    match outcome {
+                        Ok(candidate) => outcomes.push((
+                            u.clone(),
+                            self.record_evaluated(tier, u, key.clone(), candidate, wall_time_ms),
+                        )),
+                        Err(error) => outcomes.push((
+                            u.clone(),
+                            self.record_failed(tier, u, wall_time_ms, error.to_string()),
+                        )),
+                    }
+                }
+                StageDisposition::CacheHit { key }
+                | StageDisposition::CacheHitThroughBaseline { key } => {
+                    let outcome = self
+                        .cache_hit(tier, u, key)
+                        .expect("simulated hit must be served from cache");
+                    outcomes.push((u.clone(), outcome));
+                }
+                StageDisposition::Rejected { reason } => {
+                    let outcome = self
+                        .record_rejection(tier, u, reason.clone())
+                        .expect("rejection recording cannot fail");
+                    outcomes.push((u.clone(), outcome));
+                }
+            }
+        }
+        StageReport {
+            ranking: Self::rank_outcomes(tier, outcomes),
+            skipped_for_budget: candidates.len() - plan.dispositions.len(),
+        }
+    }
+
+    /// Replay a stage whose straight-tube baseline is broken: rejections and
+    /// pre-existing cache hits are served exactly as the serial loop would;
+    /// every needy candidate fails with the identical baseline error and
+    /// burns one budget unit, matching serial budget accounting.
+    ///
+    /// The serial loop would additionally re-run (and re-record) the failing
+    /// straight-tube solve per needy candidate; the parallel path records the
+    /// single real attempt. A broken straight tube means the campaign has no
+    /// normalisation reference, so the stage is degenerate either way.
+    fn replay_broken_baseline(
+        &self,
+        tier: EvalTier,
+        candidates: &[Vec<f64>],
+        plan: &StageAdmissionPlan,
+        reason: String,
+    ) -> StageReport {
+        let mut outcomes = Vec::with_capacity(plan.dispositions.len());
+        // The failed pre-resolve already consumed one unit; the remaining
+        // needy candidates each burn one more, exactly like serial retries.
+        let mut extra_budget = plan
+            .dispositions
+            .iter()
+            .filter(|d| matches!(d, StageDisposition::Solve { .. }))
+            .count()
+            .saturating_sub(1);
+        // The straight-tube candidate (a simulated hit through the baseline
+        // insert) also fails: serially its baseline resolution fails first.
+        extra_budget += plan
+            .dispositions
+            .iter()
+            .filter(|d| matches!(d, StageDisposition::CacheHitThroughBaseline { .. }))
+            .count();
+        {
+            let mut state = self.lock_state();
+            match tier {
+                EvalTier::Tier0 => state.history.usage.tier0_used += extra_budget,
+                EvalTier::Tier1 => state.history.usage.tier1_used += extra_budget,
+                EvalTier::Tier2 => state.history.usage.tier2_used += extra_budget,
+            }
+        }
+        for (index, disposition) in plan.dispositions.iter().enumerate() {
+            let u = &candidates[index];
+            match disposition {
+                StageDisposition::Solve { .. }
+                | StageDisposition::CacheHitThroughBaseline { .. } => {
+                    outcomes.push((
+                        u.clone(),
+                        FunnelOutcome::Failed {
+                            u: u.clone(),
+                            tier,
+                            error: reason.clone(),
+                        },
+                    ));
+                }
+                StageDisposition::CacheHit { key } => {
+                    let outcome = self
+                        .cache_hit(tier, u, key)
+                        .expect("simulated hit must be served from cache");
+                    outcomes.push((u.clone(), outcome));
+                }
+                StageDisposition::Rejected { reason } => {
+                    let outcome = self
+                        .record_rejection(tier, u, reason.clone())
+                        .expect("rejection recording cannot fail");
+                    outcomes.push((u.clone(), outcome));
+                }
+            }
+        }
+        StageReport {
+            ranking: Self::rank_outcomes(tier, outcomes),
+            skipped_for_budget: candidates.len() - plan.dispositions.len(),
+        }
+    }
+
+    /// Pure serial-order admission simulation: decide each candidate's fate
+    /// (solve / cache hit / rejection / budget skip) from one state snapshot,
+    /// without running any solves.
+    ///
+    /// The walk mirrors [`Self::evaluate_inner`] exactly — validate, cache,
+    /// unpack, baseline, re-check, reserve — so the parallel replay admits
+    /// precisely the candidates the serial loop would submit.
+    fn simulate_stage_admission(
+        &self,
+        tier: EvalTier,
+        candidates: &[Vec<f64>],
+    ) -> StageAdmissionPlan {
+        let straight = vec![0.0; self.n_free()];
+        let straight_key = self.quantize(&straight, tier);
+        let (mut simulated_cache, baseline_cached, mut simulated_used) = {
+            let state = self.lock_state();
+            (
+                state.cache.keys().cloned().collect::<HashSet<_>>(),
+                state.baselines.contains_key(&tier),
+                state.history.usage.used(tier),
+            )
+        };
+        let limit = self.config.budgets.limit(tier);
+        let mut simulated_baseline = baseline_cached;
+        let mut dispositions = Vec::with_capacity(candidates.len());
+        let mut admitted = Vec::new();
+        for u in candidates {
+            if let Err(reason) = self.validate_u(u) {
+                dispositions.push(StageDisposition::Rejected { reason });
+                continue;
+            }
+            let key = self.quantize(u, tier);
+            if simulated_cache.contains(&key) {
+                dispositions.push(StageDisposition::CacheHit { key });
+                continue;
+            }
+            let profile = match self.config.template.unpack(u) {
+                Ok(profile) => profile,
+                Err(error) => {
+                    dispositions.push(StageDisposition::Rejected {
+                        reason: error.to_string(),
+                    });
+                    continue;
+                }
+            };
+            if !simulated_baseline {
+                if simulated_used >= limit {
+                    break;
+                }
+                simulated_used += 1;
+                simulated_baseline = true;
+                simulated_cache.insert(straight_key.clone());
+                if key == straight_key {
+                    dispositions.push(StageDisposition::CacheHitThroughBaseline { key });
+                    continue;
+                }
+            }
+            if simulated_used >= limit {
+                break;
+            }
+            simulated_used += 1;
+            simulated_cache.insert(key.clone());
+            admitted.push(profile);
+            dispositions.push(StageDisposition::Solve { key });
+        }
+        let needs_baseline = dispositions.iter().any(|disposition| {
+            matches!(
+                disposition,
+                StageDisposition::Solve { .. } | StageDisposition::CacheHitThroughBaseline { .. }
+            )
+        });
+        StageAdmissionPlan {
+            dispositions,
+            admitted,
+            needs_baseline,
+        }
+    }
+
+    /// Resolve the straight-tube baseline for an admission plan (exactly once,
+    /// serially), unless no disposition needs it.
+    fn ensure_baseline_for_plan(
+        &self,
+        tier: EvalTier,
+        plan: &StageAdmissionPlan,
+    ) -> Result<Option<BaselineObs>, StageBaseline> {
+        if !plan.needs_baseline {
+            return Ok(None);
+        }
+        match self.ensure_baseline(tier) {
+            Ok(baseline) => Ok(Some(baseline)),
+            Err(PortOptimError::BudgetExhausted { .. }) => Err(StageBaseline::Exhausted),
+            Err(error) => Err(StageBaseline::Broken(error.to_string())),
         }
     }
 
@@ -2452,6 +2794,7 @@ mod tests {
             tier2_quota: 2,
             cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
             pareto_penalty: PARETO_VIOLATION_PENALTY,
+            stage_parallelism: 1,
         }
     }
 
@@ -2601,7 +2944,22 @@ mod tests {
     }
 
     fn toy_funnel(tuning_offset_hz: f64) -> ToyFunnel {
+        toy_funnel_with_config(tuning_offset_hz, toy_config(), false)
+    }
+
+    /// Toy funnel with an explicit config; `failing` swaps in a Tier 0
+    /// evaluator that errors for `u[0] > 0.9` (failure-path coverage).
+    fn toy_funnel_with_config(
+        tuning_offset_hz: f64,
+        config: FunnelConfig,
+        failing: bool,
+    ) -> ToyFunnel {
         let (tier0_calls, tier0) = ToyTier0::shared(tuning_offset_hz);
+        let tier0: Box<dyn Tier0Evaluator> = if failing {
+            Box::new(FailingToyTier0(Arc::clone(&tier0_calls)))
+        } else {
+            tier0
+        };
         let tier1_calls = Arc::new(ToyTier1 {
             calls: AtomicUsize::new(0),
         });
@@ -2624,7 +2982,7 @@ mod tests {
             }
         }
         let funnel = PortOptimFunnel::new(
-            toy_config(),
+            config,
             tier0,
             Some(Box::new(T1(Arc::clone(&tier1_calls)))),
             Some(Box::new(T2(Arc::clone(&tier2_calls)))),
@@ -2636,6 +2994,211 @@ mod tests {
             tier1_calls,
             tier2_calls,
         }
+    }
+
+    /// Tier 0 evaluator that fails deterministically for `u[0] > 0.9`,
+    /// covering the solver-failure replay path.
+    struct FailingToyTier0(Arc<ToyTier0>);
+
+    impl Tier0Evaluator for FailingToyTier0 {
+        fn eval_tier0(&self, profile: &SplinePortProfile) -> Result<Tier0Obs, PortFlowError> {
+            let u = pack_u(profile);
+            if u[0] > 0.9 {
+                return Err(PortFlowError::InvalidConfig(format!(
+                    "toy failure for u[0] = {}",
+                    u[0]
+                )));
+            }
+            self.0.eval_tier0(profile)
+        }
+    }
+
+    /// Candidate list exercising every disposition: solves, duplicates,
+    /// a mid-list straight tube, rejections, and a solver failure.
+    fn stage_equivalence_candidates() -> Vec<Vec<f64>> {
+        vec![
+            vec![0.25, 0.75],
+            vec![0.25, 0.75],
+            vec![0.5, 0.5],
+            vec![0.0, 0.0],
+            vec![1.5, 0.5],
+            vec![0.1],
+            vec![0.95, 0.05],
+            vec![0.3, 0.6],
+            vec![0.7, 0.2],
+            vec![0.5, 0.5],
+        ]
+    }
+
+    /// History records with run-dependent fields stripped, as a sorted
+    /// multiset (parallel replay resolves the baseline before the stage, so
+    /// baseline records land earlier than in the serial loop).
+    fn normalized_records(history: &OptimHistory) -> Vec<String> {
+        let mut rows: Vec<String> = history
+            .records
+            .iter()
+            .map(|record| {
+                let mut flat = record.clone();
+                flat.seq = 0;
+                flat.wall_time_ms = 0.0;
+                if let Some(candidate) = flat.candidate.as_mut() {
+                    candidate.wall_time_ms = 0.0;
+                }
+                format!("{flat:?}")
+            })
+            .collect();
+        rows.sort();
+        rows
+    }
+
+    fn assert_stage_equivalent(serial: &ToyFunnel, parallel: &ToyFunnel) {
+        let serial_history = serial.funnel.history();
+        let parallel_history = parallel.funnel.history();
+        assert_eq!(
+            serial_history.usage, parallel_history.usage,
+            "budget accounting must match"
+        );
+        assert_eq!(
+            normalized_records(&serial_history),
+            normalized_records(&parallel_history),
+            "history records must match up to order and wall time"
+        );
+        assert_eq!(
+            serial.tier0_calls.calls.load(Ordering::SeqCst),
+            parallel.tier0_calls.calls.load(Ordering::SeqCst),
+            "both paths must run the same Tier-0 solves"
+        );
+        assert_eq!(
+            serial.tier1_calls.calls.load(Ordering::SeqCst),
+            parallel.tier1_calls.calls.load(Ordering::SeqCst),
+            "both paths must run the same Tier-1 solves"
+        );
+        assert_eq!(
+            serial.tier2_calls.calls.load(Ordering::SeqCst),
+            parallel.tier2_calls.calls.load(Ordering::SeqCst),
+            "both paths must run the same Tier-2 solves"
+        );
+    }
+
+    #[test]
+    fn parallel_stage_matches_serial_tier0() {
+        let candidates = stage_equivalence_candidates();
+        let serial = toy_funnel_with_config(0.0, toy_config(), true);
+        let serial_report = serial.funnel.screen_tier0(&candidates);
+        let mut parallel_config = toy_config();
+        parallel_config.stage_parallelism = 3;
+        let parallel = toy_funnel_with_config(0.0, parallel_config, true);
+        let parallel_report = parallel.funnel.screen_tier0(&candidates);
+        assert_eq!(
+            format!("{serial_report:?}"),
+            format!("{parallel_report:?}"),
+            "parallel ranking must match serial exactly"
+        );
+        assert_stage_equivalent(&serial, &parallel);
+    }
+
+    #[test]
+    fn parallel_stage_matches_serial_under_budget_pressure() {
+        let candidates = stage_equivalence_candidates();
+        let mut budgets = TierBudgets::default();
+        budgets.tier0 = 4;
+        let mut serial_config = toy_config();
+        serial_config.budgets = budgets;
+        let serial = toy_funnel_with_config(0.0, serial_config, true);
+        let serial_report = serial.funnel.screen_tier0(&candidates);
+        assert!(
+            serial_report.skipped_for_budget > 0,
+            "budget must bind for this test"
+        );
+        let mut parallel_config = toy_config();
+        parallel_config.budgets = budgets;
+        parallel_config.stage_parallelism = 4;
+        let parallel = toy_funnel_with_config(0.0, parallel_config, true);
+        let parallel_report = parallel.funnel.screen_tier0(&candidates);
+        assert_eq!(
+            format!("{serial_report:?}"),
+            format!("{parallel_report:?}"),
+            "parallel ranking must match serial exactly under budget pressure"
+        );
+        assert_stage_equivalent(&serial, &parallel);
+    }
+
+    #[test]
+    fn parallel_stage_is_deterministic_across_runs() {
+        let candidates = stage_equivalence_candidates();
+        let mut config = toy_config();
+        config.stage_parallelism = 4;
+        let first = toy_funnel_with_config(0.0, config.clone(), true);
+        let first_report = first.funnel.screen_tier0(&candidates);
+        let second = toy_funnel_with_config(0.0, config, true);
+        let second_report = second.funnel.screen_tier0(&candidates);
+        assert_eq!(
+            format!("{first_report:?}"),
+            format!("{second_report:?}"),
+            "parallel rankings must be identical across runs"
+        );
+        // Ordered comparison (not the multiset): replay order is fixed.
+        let strip = |history: OptimHistory| {
+            history
+                .records
+                .iter()
+                .map(|record| {
+                    let mut flat = record.clone();
+                    flat.wall_time_ms = 0.0;
+                    if let Some(candidate) = flat.candidate.as_mut() {
+                        candidate.wall_time_ms = 0.0;
+                    }
+                    format!("{flat:?}")
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            strip(first.funnel.history()),
+            strip(second.funnel.history()),
+            "parallel histories must be identical across runs up to wall time"
+        );
+    }
+
+    #[test]
+    fn parallel_rerank_and_quota_match_serial() {
+        let candidates = stage_equivalence_candidates();
+        let mut quota: Vec<Vec<f64>> = candidates
+            .iter()
+            .filter(|u| u.len() == 2)
+            .cloned()
+            .collect();
+        quota.push(vec![2.0, 0.5]);
+        let serial = toy_funnel_with_config(0.0, toy_config(), true);
+        let serial_rerank = serial
+            .funnel
+            .rerank_tier1(&quota)
+            .expect("serial rerank must run");
+        let serial_quota = serial
+            .funnel
+            .evaluate_tier2_quota(&serial_rerank.ranking)
+            .expect("serial quota must run");
+        let mut parallel_config = toy_config();
+        parallel_config.stage_parallelism = 2;
+        let parallel = toy_funnel_with_config(0.0, parallel_config, true);
+        let parallel_rerank = parallel
+            .funnel
+            .rerank_tier1(&quota)
+            .expect("parallel rerank must run");
+        let parallel_quota = parallel
+            .funnel
+            .evaluate_tier2_quota(&parallel_rerank.ranking)
+            .expect("parallel quota must run");
+        assert_eq!(
+            format!("{serial_rerank:?}"),
+            format!("{parallel_rerank:?}"),
+            "parallel Tier-1 rerank must match serial exactly"
+        );
+        assert_eq!(
+            format!("{serial_quota:?}"),
+            format!("{parallel_quota:?}"),
+            "parallel Tier-2 quota must match serial exactly"
+        );
+        assert_stage_equivalent(&serial, &parallel);
     }
 
     #[test]
@@ -3085,6 +3648,7 @@ mod tests {
             tier2_quota: 0,
             cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
             pareto_penalty: PARETO_VIOLATION_PENALTY,
+            stage_parallelism: 1,
         };
         let funnel = PortOptimFunnel::new(config, Box::new(evaluator), None, None)
             .expect("real Tier 0 funnel must build");
@@ -3140,6 +3704,7 @@ mod tests {
             tier2_quota: 2,
             cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
             pareto_penalty: PARETO_VIOLATION_PENALTY,
+            stage_parallelism: 1,
         };
         // NOTE: the toy Tier 1/2 maps are centred on F_TARGET (60 Hz), not on
         // the campaign duct tuning, so a mixed real/toy funnel would misjudge
@@ -3277,6 +3842,7 @@ mod tests {
             tier2_quota: 2,
             cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
             pareto_penalty: PARETO_VIOLATION_PENALTY,
+            stage_parallelism: 1,
         };
         let funnel = PortOptimFunnel::new(config, Box::new(tier0), None, Some(Box::new(tier2)))
             .expect("slot funnel must build");
@@ -3340,6 +3906,7 @@ mod tests {
             tier2_quota: 0,
             cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
             pareto_penalty: PARETO_VIOLATION_PENALTY,
+            stage_parallelism: 1,
         };
         let funnel = PortOptimFunnel::new(config, Box::new(tier0), Some(Box::new(tier1)), None)
             .expect("Tier 1 funnel must build");

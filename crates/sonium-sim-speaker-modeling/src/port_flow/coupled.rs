@@ -948,6 +948,10 @@ mod tests {
                 rho: 1.2,
                 // Taylor–Hood P2–P1 is inf-sup stable: no stabilisation.
                 use_residual_stabilisation: false,
+                // Zero body force through `solve_bdf_step_cached`: the
+                // force quadrature is identical every step, so caching
+                // skips two full assemblies per step after the first.
+                cache_body_force_assembly: true,
                 ..Default::default()
             },
             bdf: BdfConfig::bdf2(dt, num_steps),
@@ -1011,6 +1015,10 @@ mod tests {
             mu,
             rho: 1.0,
             use_residual_stabilisation: false,
+            // Zero body force through `solve_bdf_step_cached`: the
+            // force quadrature is identical every step, so caching
+            // skips two full assemblies per step after the first.
+            cache_body_force_assembly: true,
             ..Default::default()
         };
         let bdf = BdfConfig::bdf2(0.125, 4);

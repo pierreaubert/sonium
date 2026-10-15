@@ -108,8 +108,15 @@ fn extract(report: &Step10GateReport) -> Result<GateNumbers, String> {
 }
 
 fn run() -> Result<(Step10GateReport, GateNumbers), String> {
-    let report =
-        run_step10_gate(&Step10GateConfig::bounded()).map_err(|error| error.to_string())?;
+    let mut config = Step10GateConfig::bounded();
+    if let Ok(value) = std::env::var("SPEAKER_PORT_OPTIM_STAGE_PARALLELISM") {
+        config.stage_parallelism = value.parse::<usize>().map_err(|_| {
+            format!(
+                "SPEAKER_PORT_OPTIM_STAGE_PARALLELISM must be a positive integer, got {value:?}"
+            )
+        })?;
+    }
+    let report = run_step10_gate(&config).map_err(|error| error.to_string())?;
     report.validate().map_err(|error| error.to_string())?;
     let numbers = extract(&report)?;
     Ok((report, numbers))

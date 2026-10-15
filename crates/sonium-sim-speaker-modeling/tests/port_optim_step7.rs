@@ -63,6 +63,7 @@ fn screen_funnel(n_control_points: usize) -> (PortOptimFunnel, f64) {
         tier2_quota: 0,
         cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
         pareto_penalty: PARETO_VIOLATION_PENALTY,
+        stage_parallelism: 1,
     };
     let funnel = PortOptimFunnel::new(config, Box::new(tier0), None, None)
         .expect("screen funnel must build");
@@ -265,6 +266,7 @@ fn step7_campaign_full() -> Result<(), CampaignError> {
         tier2_quota: 0,
         cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
         pareto_penalty: PARETO_VIOLATION_PENALTY,
+        stage_parallelism: 1,
     };
     let funnel = PortOptimFunnel::new(config, Box::new(tier0), Some(Box::new(tier1)), None)
         .map_err(|error| error.to_string())?;
@@ -893,6 +895,7 @@ fn step7_pareto_tier2_coarse() -> Result<(), CampaignError> {
         tier2_quota: 0,
         cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
         pareto_penalty: PARETO_VIOLATION_PENALTY,
+        stage_parallelism: 1,
     };
     let funnel = PortOptimFunnel::new(config, Box::new(tier0), None, Some(Box::new(tier2)))
         .map_err(|error| error.to_string())?;
