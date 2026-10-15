@@ -1,0 +1,24 @@
+=== machine_profile ===
+device: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+compute capability: 12.0
+SMs: 188, max threads/SM: 1536, shared/SM: 100 KB
+L2 cache: 128.0 MB
+global mem: 95.0 GB, bus width: 512 bit
+(clocks via nvidia-smi; legacy clockRate fields removed in CUDA 13)
+empty-launch: 2.839 us/launch (2000 launches, device time)
+launch+sync roundtrip: 7.142 us/step (host-driven floor)
+4KB H2D+D2H roundtrip: 12.612 us (pinned)
+H2D pinned BW: 26.5 GB/s (256 MB)
+D2H pinned BW: 26.9 GB/s (256 MB)
+STREAM triad: 2161 GB/s (achieved DRAM ceiling)
+FP64 MAD: 543.6 GFLOP/s (achieved compute ceiling)
+done
+=== proxy N=1 ===
+nstep=1 wall=0.002 s (2383.328 us/step) tip_x=1.000000e-01 max|f|=1.477e-08
+=== proxy N=2000 (x2) ===
+nstep=2000 wall=4.183 s (2091.423 us/step) tip_x=1.000001e-01 max|f|=6.053e+00
+nstep=2000 wall=4.182 s (2091.231 us/step) tip_x=1.000001e-01 max|f|=6.053e+00
+=== proxy N=20000 ===
+nstep=20000 wall=41.814 s (2090.682 us/step) tip_x=1.000013e-01 max|f|=5.981e+01
+=== proxy EMPTY N=2000 ===
+nstep=2000 wall=0.008 s (3.814 us/step) tip_x=1.007588e-01 max|f|=0.000e+00

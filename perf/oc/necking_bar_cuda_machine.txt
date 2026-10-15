@@ -1,0 +1,14 @@
+device: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+compute capability: 12.0
+SMs: 188, max threads/SM: 1536, shared/SM: 100 KB
+L2 cache: 128.0 MB
+global mem: 95.0 GB, bus width: 512 bit
+(clocks via nvidia-smi; legacy clockRate fields removed in CUDA 13)
+empty-launch: 2.839 us/launch (2000 launches, device time)
+launch+sync roundtrip: 7.142 us/step (host-driven floor)
+4KB H2D+D2H roundtrip: 12.612 us (pinned)
+H2D pinned BW: 26.5 GB/s (256 MB)
+D2H pinned BW: 26.9 GB/s (256 MB)
+STREAM triad: 2161 GB/s (achieved DRAM ceiling)
+FP64 MAD: 543.6 GFLOP/s (achieved compute ceiling)
+done

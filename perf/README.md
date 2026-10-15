@@ -47,7 +47,7 @@ formatted per-platform performance tables for the website.
 
 ## Workflow
 
-Each platform owner regenerates and commits their five files:
+Each platform owner regenerates and commits their six files:
 
 ```bash
 just perf-m1     # on the Apple M1 Mac (perf-m2 / perf-m4 likewise, per chip)
@@ -76,13 +76,15 @@ All generation goes through `scripts/perf_cells.py`:
 | `sparse-matrix` | `roofline_preflight` bench (+ iterative effective BW) | `csr_spmv` estimates + `sonium_roofline_preflight` byte models |
 | `dense-solvers` | `scripts/direct_solver_perf.sh` dense section | end-to-end factor+solve table |
 | `sparse-solvers` | direct sparse section + `scripts/iterative_solver_perf.sh` JSON | sparse-LU table + scaling/coverage + PETSc KSP comparison (when `ITERATIVE_PERF_PETSC` is set) |
+| `fft` | `cargo bench -p sonium-fft --bench fft_compare` | criterion medians sonium vs vendor (complex/real f32/f64, audio + large sizes) |
 
-Vendor arms: Accelerate (m4), OpenBLAS/SuperLU/CHOLMOD/PETSc (x86),
-cuBLAS/cuSPARSE/cuSOLVER (cuda). Gap = Sonium ÷ vendor throughout.
+Vendor arms: Accelerate (m4), OpenBLAS/SuperLU/CHOLMOD/PETSc/rustfft (x86),
+cuBLAS/cuSPARSE/cuSOLVER (cuda, plus host-CPU rustfft for the fft cell).
+Gap = Sonium ÷ vendor throughout.
 
 Standalone vendor benches (see `just --list`, group `bench`):
 `bench-lapack`, `bench-lapack-cuda`, `bench-sparse-cpu`,
-`bench-gmres-cuda`, `bench-petsc-build`, `bench-petsc-run`.
+`bench-gmres-cuda`, `bench-petsc-build`, `bench-petsc-run`, `bench-fft`.
 
 ## Relation to `PERF.md` / `ITERATIVE_PERF.json`
 

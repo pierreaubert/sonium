@@ -8,7 +8,7 @@ harnesses. Run on each platform, then commit the results:
     just perf-x86    # Linux x86-64
     just perf-cuda   # Linux x86-64 with NVIDIA GPU
 
-Cells: blas, lapack, sparse-matrix, dense-solvers, sparse-solvers.
+Cells: blas, lapack, sparse-matrix, dense-solvers, sparse-solvers, fft.
 
 Harness mapping:
   blas           cargo bench -p sonium-compute blas{1,2,3}_compare
@@ -18,6 +18,9 @@ Harness mapping:
   sparse-matrix  roofline_preflight SpMV + iterative-run effective BW
   dense-solvers  direct-solver-perf dense section (end-to-end)
   sparse-solvers direct-solver-perf sparse section + iterative JSON summary
+  fft            cargo bench -p sonium-fft fft_compare (single forward
+                 complex/real f32/f64 at audio + large sizes; vendor arms:
+                 Accelerate on macOS, rustfft/realfft elsewhere)
 
 Environment:
   PERF_QUICK=1            bounded run (quick criterion, small sizes)
@@ -50,9 +53,11 @@ TARGET_DIR = REPO_ROOT / "target"
 # one-line change here plus a `just perf-m<N>` recipe (and a row in
 # perf/README.md); auto-detection parses any `Apple M<N>` brand string,
 # so an unlisted future chip still generates correctly titled files.
-APPLE_PLATFORMS = ("m1", "m2", "m3", "m4", "m5")
+APPLE_PLATFORMS = ("m1", "m2", "m3", "m4", "m5", "m6")
 PLATFORMS = APPLE_PLATFORMS + ("x86", "cuda")
 CELLS = ("blas", "lapack", "sparse-matrix", "dense-solvers", "sparse-solvers")
+PLATFORMS = ("m1", "m2", "m4", "x86", "cuda")
+CELLS = ("blas", "lapack", "sparse-matrix", "dense-solvers", "sparse-solvers", "fft")
 
 PLATFORM_TITLE = {
     **{chip: f"Apple {chip.upper()} (macOS, aarch64)"
@@ -66,11 +71,20 @@ CELL_TITLE = {
     "sparse-matrix": "Sparse matrix",
     "dense-solvers": "Dense solvers",
     "sparse-solvers": "Sparse solvers + preconditioners",
+    "fft": "FFT",
 }
 # Preferred vendor arm id per platform for the criterion blas benches.
 VENDOR_ARM = {**{chip: "accelerate" for chip in APPLE_PLATFORMS},
               "x86": "openblas", "cuda": "cublas"}
-
+# Preferred vendor arm id per platform for the criterion fft bench
+# (fft_compare has no GPU arm; cuda records the host-CPU comparison).
+FFT_VENDOR_ARM = {
+    "m1": "accelerate",
+    "m2": "accelerate",
+    "m4": "accelerate",
+    "x86": "rustfft",
+    "cuda": "rustfft" # cuFFT?
+}
 
 def sh(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=REPO_ROOT, text=True,
@@ -322,6 +336,62 @@ def render_blas(platform: str, medians: dict, commands: list[str],
             body += (f"| {label} | "
                      f"{fmt_time(s) if s else '—'} | "
                      f"{fmt_time(v) if v else '—'} | "
+                     f"{ratio_cell(s, v)} |\n")
+        body += "\n"
+    return body
+
+
+FFT_GROUPS = ("fft_complex_f32", "fft_complex_f64",
+              "fft_real_f32", "fft_real_f64")
+
+
+def collect_fft(platform: str, work: Work, quick: bool):
+    ok, cmd, _ = run_cargo_bench(
+        ["fft_compare"], [], work, f"{platform}-fft", quick,
+        package="sonium-fft")
+    medians = {}
+    if ok:
+        all_medians = criterion_medians()
+        medians = {p: ns for p, ns in all_medians.items()
+                   if p and p[0] in FFT_GROUPS}
+    return ok, [cmd], medians
+
+
+def render_fft(platform: str, medians: dict, commands: list[str],
+               quick: bool) -> str:
+    vendor = FFT_VENDOR_ARM[platform]
+    # group -> size -> variant -> ns
+    groups: dict[str, dict[str, dict[str, float]]] = {}
+    for parts, ns in medians.items():
+        if len(parts) < 3:
+            continue
+        group, variant = parts[0], parts[1]
+        label = "/".join(parts[2:])
+        groups.setdefault(group, {}).setdefault(label, {})[variant] = ns
+    body = header(platform, "fft", commands, quick,
+                  "measured" if groups else
+                  "not measured (no criterion estimates found)")
+    body += "## Results\n\n"
+    if not groups:
+        body += "No criterion estimates were produced by this run.\n"
+        return body
+    body += ("Single unnormalised forward transforms; "
+             f"gap = sonium ÷ {vendor} (1.00× is parity). The non-vendor "
+             f"arm is bonus context (— where the harness has no such arm).\n\n")
+    for group in sorted(groups):
+        body += f"### `{group}`\n\n"
+        body += ("| size | sonium | rustfft | accelerate | gap |\n"
+                 "|---|---|---|---|---|\n")
+        for label in sorted(groups[group], key=sort_key):
+            arms = groups[group][label]
+            s = arms.get("sonium")
+            r = arms.get("rustfft")
+            a = arms.get("accelerate")
+            v = arms.get(vendor)
+            body += (f"| {label} | "
+                     f"{fmt_time(s) if s else '—'} | "
+                     f"{fmt_time(r) if r else '—'} | "
+                     f"{fmt_time(a) if a else '—'} | "
                      f"{ratio_cell(s, v)} |\n")
         body += "\n"
     return body
@@ -718,6 +788,13 @@ def main() -> int:
             else:
                 write(cell, stub(platform, cell,
                                  "direct + iterative runs failed", quick))
+                failures.append(cell)
+        elif cell == "fft":
+            ok, cmds, medians = collect_fft(platform, work, quick)
+            write(cell, render_fft(platform, medians, cmds, quick)
+                  if ok else stub(platform, cell,
+                                  "fft benches failed", quick))
+            if not ok:
                 failures.append(cell)
 
     if failures:

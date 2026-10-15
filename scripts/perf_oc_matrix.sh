@@ -10,8 +10,11 @@
 # bundles in out_dir are left alone.
 #
 # Env:
-#   PERF_OC_DECKS      space-separated deck ids (default: all six C3
-#                      explicit decks with a native arm).
+#   PERF_OC_DECKS      space-separated deck ids (default: every deck
+#                      dir under crates/sonium-qa/decks holding the C3
+#                      trio `<id>_0000.rad`, `<id>_0001.rad`,
+#                      `probes.json`; dirs without the trio are listed
+#                      and skipped, loudly).
 #   PERF_OC_QUICK=1    one repeat, no warmup everywhere (CI/smoke).
 #   PERF_OC_HERTZ_FULL=1
 #                      full protocol for hertz_sphere too (default is
@@ -25,9 +28,37 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 output="${1:-${repo_root}/perf/oc}"
 cargo_bin="${CARGO:-cargo}"
-decks="${PERF_OC_DECKS:-taylor_bar hertz_sphere necking_bar rail_crush taylor_plastic plasticity_thick_cylinder}"
 quick_all="${PERF_OC_QUICK:-0}"
 hertz_full="${PERF_OC_HERTZ_FULL:-0}"
+
+# Default deck set: every deck dir holding the C3 trio, so units
+# adding arms only drop files in place. Non-conforming dirs are
+# skipped loudly (never silently) to keep the default honest.
+discover_decks() {
+    local dir id found=""
+    for dir in "${repo_root}/crates/sonium-qa/decks/"*/; do
+        [ -d "${dir}" ] || continue
+        id="$(basename "${dir}")"
+        if [ -f "${dir}${id}_0000.rad" ] && [ -f "${dir}${id}_0001.rad" ] \
+            && [ -f "${dir}probes.json" ]; then
+            found="${found} ${id}"
+        else
+            echo "skip ${id}: no C3 trio (${id}_0000.rad + ${id}_0001.rad + probes.json)" >&2
+        fi
+    done
+    echo "${found}"
+}
+
+if [ -n "${PERF_OC_DECKS:-}" ]; then
+    decks="${PERF_OC_DECKS}"
+else
+    decks="$(discover_decks)"
+fi
+if [ -z "${decks// /}" ]; then
+    echo "no decks resolve (empty PERF_OC_DECKS and no C3 trio under crates/sonium-qa/decks)" >&2
+    exit 1
+fi
+echo "decks:${decks}"
 
 mkdir -p "${output}"
 cd "${repo_root}"
