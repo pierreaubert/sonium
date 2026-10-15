@@ -898,7 +898,7 @@ fn f32_narrow_cpt(
     if f32_narrow_skip_1pass_l1(k, f32_kc_nsplit(k), legacy_cpt) {
         return None;
     }
-    let l3 = crate::cpu::affinity::l3_total_bytes()?;
+    let l3 = sonium_topology::affinity::l3_total_bytes()?;
     let bands = f32_narrow_bands(m, n, k, workers, l3);
     Some((n.div_ceil(bands).div_ceil(F32_NR) * F32_NR).max(F32_NR))
 }
@@ -994,7 +994,7 @@ fn f64_narrow_cpt(
     if f64_narrow_skip_1pass_l1(k, f64_kc_nsplit(n, k), legacy_cpt) {
         return None;
     }
-    let l3 = crate::cpu::affinity::l3_total_bytes()?;
+    let l3 = sonium_topology::affinity::l3_total_bytes()?;
     let bands = f64_narrow_bands(m, n, k, workers, l3);
     Some((n.div_ceil(bands).div_ceil(F64_NR) * F64_NR).max(F64_NR))
 }
@@ -1023,7 +1023,7 @@ fn l3_fit_cpt(
     if m < 512 || k < 256 {
         return None;
     }
-    let l3 = crate::cpu::affinity::l3_total_bytes()?;
+    let l3 = sonium_topology::affinity::l3_total_bytes()?;
     let a_bytes = m.saturating_mul(k).saturating_mul(elsize).max(1);
     let fit = (l3 / a_bytes).max(1);
     let macs = m.saturating_mul(n).saturating_mul(k);
@@ -3929,7 +3929,7 @@ pub(crate) unsafe fn sgemm_serial(
             F32_KC,
             F32_NC,
             core::mem::size_of::<f32>(),
-            crate::cpu::affinity::l3_bytes(),
+            sonium_topology::affinity::l3_bytes(),
         )
     {
         sgemm_serial_apack(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc, trans_b);
@@ -4669,7 +4669,7 @@ pub(crate) unsafe fn dgemm_serial(
             F64_KC,
             F64_NC,
             core::mem::size_of::<f64>(),
-            crate::cpu::affinity::l3_bytes(),
+            sonium_topology::affinity::l3_bytes(),
         )
     {
         dgemm_serial_apack(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc, trans_b);
@@ -4856,7 +4856,7 @@ mod tests {
         assert_eq!(l3_fit_cpt(100, 1024, 1024, 4, 16, 16, 150_000_000), None);
         assert_eq!(l3_fit_cpt(1024, 1024, 100, 4, 16, 16, 150_000_000), None);
         assert_eq!(l3_fit_cpt(32, 2048, 2048, 4, 16, 16, 150_000_000), None);
-        let Some(l3) = crate::cpu::affinity::l3_total_bytes() else {
+        let Some(l3) = sonium_topology::affinity::l3_total_bytes() else {
             return;
         };
         assert!(l3 > 0 && l3 % 1024 == 0, "sane L3 total: {l3}");
@@ -6016,7 +6016,7 @@ mod tests {
             return;
         }
         let _guard = env_test_lock();
-        let slice = crate::cpu::affinity::l3_bytes();
+        let slice = sonium_topology::affinity::l3_bytes();
         if slice.is_none() {
             return;
         }
@@ -6081,7 +6081,7 @@ mod tests {
             return;
         }
         let _guard = env_test_lock();
-        let slice = crate::cpu::affinity::l3_bytes();
+        let slice = sonium_topology::affinity::l3_bytes();
         if slice.is_none() {
             return;
         }
@@ -6263,7 +6263,7 @@ mod tests {
         if !is_available() {
             return;
         }
-        if crate::cpu::affinity::l3_total_bytes().is_none() {
+        if sonium_topology::affinity::l3_total_bytes().is_none() {
             return;
         }
         let _guard = env_test_lock();
@@ -6351,7 +6351,7 @@ mod tests {
         if !is_available() {
             return;
         }
-        if crate::cpu::affinity::l3_total_bytes().is_none() {
+        if sonium_topology::affinity::l3_total_bytes().is_none() {
             return;
         }
         let _guard = env_test_lock();

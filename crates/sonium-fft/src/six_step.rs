@@ -149,10 +149,11 @@ impl<T: FftScalar> FftPlan<T> for SixStepFftPlan<T> {
             let counts = crate::cpu::plan::split_batch(batch, workers);
             let mut rest = buffer;
             std::thread::scope(|scope| {
-                for count in counts {
+                for (index, count) in counts.into_iter().enumerate() {
                     let (head, tail) = rest.split_at_mut(count * self.n);
                     rest = tail;
                     scope.spawn(move || {
+                        sonium_topology::affinity::pin_physical_worker(index);
                         let mut local = vec![Complex::new(T::zero(), T::zero()); scratch_len];
                         for chunk in head.chunks_exact_mut(self.n) {
                             self.process_one(chunk, &mut local);

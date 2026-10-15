@@ -59,6 +59,12 @@ const PAR_ELEMS_PER_THREAD: usize = 8_192;
 struct BatchParGate {
     force_serial: bool,
     threshold_override: Option<usize>,
+    /// Worker budget: packed physical CPUs (one thread per physical
+    /// core, SMT tail excluded) from `sonium-topology`; falls back to
+    /// `available_parallelism` when topology is unavailable (affinity
+    /// disabled, non-Linux). Workers pin to these CPUs in order, so a
+    /// parallel batch packs NUMA/CCD/CCX-local like sonium-compute's
+    /// pinned pools instead of spraying over every hardware thread.
     threads: usize,
 }
 
@@ -72,8 +78,12 @@ fn batch_par_gate() -> &'static BatchParGate {
         threshold_override: std::env::var("SONIUM_FFT_PAR_THRESHOLD")
             .ok()
             .and_then(|value| value.parse::<usize>().ok()),
-        threads: std::thread::available_parallelism()
-            .map(|count| count.get())
+        threads: sonium_topology::affinity::physical_cpu_count()
+            .or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|count| count.get())
+                    .ok()
+            })
             .unwrap_or(1),
     })
 }
@@ -195,10 +205,11 @@ impl<T: FftScalar> FftPlan<T> for StockhamFftPlan<T> {
             let counts = split_batch(batch, workers);
             let mut rest = buffer;
             std::thread::scope(|scope| {
-                for count in counts {
+                for (index, count) in counts.into_iter().enumerate() {
                     let (head, tail) = rest.split_at_mut(count * self.n);
                     rest = tail;
                     scope.spawn(move || {
+                        sonium_topology::affinity::pin_physical_worker(index);
                         let mut local = vec![Complex::new(T::zero(), T::zero()); self.n];
                         stockham::run_batched_with_dispatch(
                             &self.stages,
@@ -299,10 +310,11 @@ impl<T: FftScalar> FftPlan<T> for BluesteinFftPlan<T> {
             let counts = split_batch(batch, workers);
             let mut rest = buffer;
             std::thread::scope(|scope| {
-                for count in counts {
+                for (index, count) in counts.into_iter().enumerate() {
                     let (head, tail) = rest.split_at_mut(count * n);
                     rest = tail;
                     scope.spawn(move || {
+                        sonium_topology::affinity::pin_physical_worker(index);
                         let mut local = vec![Complex::new(T::zero(), T::zero()); scratch_len];
                         for chunk in head.chunks_exact_mut(n) {
                             self.inner.process(chunk, &mut local);

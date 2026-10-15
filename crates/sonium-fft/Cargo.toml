@@ -15,6 +15,7 @@ path = "src/lib.rs"
 
 [dependencies]
 sonium-compute = { workspace = true }
+sonium-topology = { workspace = true }
 sonium-fastmath = { workspace = true }
 num-complex = { workspace = true }
 num-traits = { workspace = true }
@@ -22,6 +23,7 @@ num-traits = { workspace = true }
 [dev-dependencies]
 approx = { workspace = true }
 libloading = { workspace = true }
+realfft = "3"
 rustfft = "6.2"
 rand = { workspace = true }
 serde = { workspace = true }
@@ -45,6 +47,10 @@ harness = false
 
 [[bench]]
 name = "fft_vs_accelerate"
+harness = false
+
+[[bench]]
+name = "fft_compare"
 harness = false
 
 [[bin]]

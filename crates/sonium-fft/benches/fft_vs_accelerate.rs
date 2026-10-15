@@ -6,6 +6,8 @@
 #[cfg(target_arch = "wasm32")]
 fn main() {}
 
+#[cfg(target_os = "macos")]
+use criterion::BenchmarkId;
 #[cfg(not(target_arch = "wasm32"))]
 use criterion::{Criterion, criterion_group, criterion_main};
 #[cfg(target_os = "macos")]

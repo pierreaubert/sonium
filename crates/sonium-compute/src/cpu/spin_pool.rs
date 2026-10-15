@@ -248,12 +248,27 @@ impl SpinPool {
         }
     }
 
-    /// Run `f(band, t0, t1)` over `n` elements split into at most
-    /// `width` contiguous bands (empty when `n == 0`).
-    pub(crate) fn broadcast_bands<F: Fn(usize, usize, usize) + Sync>(&self, n: usize, f: &F) {
-        let bands = self.width.min(n).max(1);
+    /// Run `f(worker, t0, t1)` over `n` elements split into at most `k`
+    /// contiguous bands owned by workers `0..k` (empty when `n == 0`).
+    /// `k` clamps into `[1, width]`; workers at or past `k` return
+    /// without invoking `f` but stay in the generation protocol, so the
+    /// steady-state cost is unchanged. Streaming callers pass the
+    /// bandwidth-calibrated width (see `bandwidth::stream_width`) so
+    /// saturated kernels stop waking cores past the knee; compute-bound
+    /// callers keep the full width.
+    pub(crate) fn broadcast_bands_k<F: Fn(usize, usize, usize) + Sync>(
+        &self,
+        n: usize,
+        k: usize,
+        f: &F,
+    ) {
+        let k = k.clamp(1, self.width);
+        let bands = k.min(n).max(1);
         let els_per_band = n.div_ceil(bands);
         self.broadcast(&|w: usize| {
+            if w >= k {
+                return;
+            }
             let t0 = w.saturating_mul(els_per_band).min(n);
             let t1 = t0.saturating_add(els_per_band).min(n);
             if t0 < t1 {
@@ -293,7 +308,7 @@ impl Drop for SpinPool {
 /// Worker main loop: run the job slot whenever the generation advances,
 /// else spin briefly and then park until unparked or bumped.
 fn worker_loop(pool: &SpinPool, index: usize) {
-    super::affinity::pin_spread_worker(index);
+    sonium_topology::affinity::pin_spread_worker(index);
     ON_WORKER.set(true);
     let mut last = 0u64;
     let mut spins = 0u32;
@@ -344,7 +359,7 @@ fn worker_loop(pool: &SpinPool, index: usize) {
 /// rayon broadcast path.
 pub(crate) fn spin_pool() -> Option<&'static SpinPool> {
     static POOL: std::sync::LazyLock<Option<Box<SpinPool>>> = std::sync::LazyLock::new(|| {
-        let width = super::affinity::spread_cpus().map(|cpus| cpus.len())?;
+        let width = sonium_topology::affinity::spread_cpus().map(|cpus| cpus.len())?;
         SpinPool::new(width)
     });
     POOL.as_deref()
@@ -360,7 +375,7 @@ mod tests {
         let pool = SpinPool::new(8).expect("spawn 8 workers");
         let n = 1000usize;
         let hits: Vec<AtomicUsize> = (0..n).map(|_| AtomicUsize::new(0)).collect();
-        pool.broadcast_bands(n, &|_, t0, t1| {
+        pool.broadcast_bands_k(n, 8, &|_, t0, t1| {
             for i in t0..t1 {
                 hits[i].fetch_add(1, AtomicOrdering::Relaxed);
             }
@@ -384,10 +399,37 @@ mod tests {
     fn empty_bands_are_noop() {
         let pool = SpinPool::new(4).expect("spawn 4 workers");
         let calls = AtomicUsize::new(0);
-        pool.broadcast_bands(0, &|_, _, _| {
+        pool.broadcast_bands_k(0, 4, &|_, _, _| {
             calls.fetch_add(1, AtomicOrdering::Relaxed);
         });
         assert_eq!(calls.load(AtomicOrdering::Relaxed), 0);
+    }
+
+    #[test]
+    fn bands_k_covers_exactly_once_on_first_k_workers() {
+        // Subset bands (streaming width): every index runs exactly once,
+        // only workers below `k` invoke the closure, and `k` past the
+        // width clamps to the full pool.
+        let pool = SpinPool::new(8).expect("spawn 8 workers");
+        let n = 1000usize;
+        let hits: Vec<AtomicUsize> = (0..n).map(|_| AtomicUsize::new(0)).collect();
+        let seen = AtomicUsize::new(0);
+        pool.broadcast_bands_k(n, 3, &|w: usize, t0: usize, t1: usize| {
+            seen.fetch_or(1 << w, AtomicOrdering::Relaxed);
+            for i in t0..t1 {
+                hits[i].fetch_add(1, AtomicOrdering::Relaxed);
+            }
+        });
+        for (i, hit) in hits.iter().enumerate() {
+            assert_eq!(hit.load(AtomicOrdering::Relaxed), 1, "index {i}");
+        }
+        assert_eq!(seen.load(AtomicOrdering::Relaxed), 0b111);
+        // Clamp: k above the width behaves like the full pool.
+        let seen = AtomicUsize::new(0);
+        pool.broadcast_bands_k(n, 100, &|w: usize, _, _| {
+            seen.fetch_or(1 << w, AtomicOrdering::Relaxed);
+        });
+        assert_eq!(seen.load(AtomicOrdering::Relaxed), 0xff);
     }
 
     #[test]

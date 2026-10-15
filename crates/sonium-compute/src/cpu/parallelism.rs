@@ -81,12 +81,13 @@ fn env_threshold(name: &str) -> Option<usize> {
 /// This is the single crate-wide serialiser for ALL `SONIUM_*`-flipping
 /// lib tests (GEMM/GEMV/TRSM/SYRK/SpMV); the former module-local locks
 /// in `blas2::avx2`/`syrk` could not see each other and were folded in.
-/// Switches are read per call on the calling thread only (rayon workers
-/// never read them), so holding this across set/call/restore is sound.
+/// The lock itself lives in `sonium-topology` so env-mutating tests in
+/// every crate of a test binary mutually exclude. Switches are read per
+/// call on the calling thread only (rayon workers never read them), so
+/// holding this across set/call/restore is sound.
 #[cfg(test)]
 pub(crate) fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    ENV_LOCK.lock().expect("gate env-test lock poisoned")
+    sonium_topology::env_test_lock()
 }
 
 #[cfg(test)]

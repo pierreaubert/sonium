@@ -819,17 +819,21 @@ fn spin_pool_for_blas1() -> Option<&'static SpinPool> {
 fn spin_axpy_f32(alpha: f32, x: &[f32], y: &mut [f32], pool: &SpinPool) {
     let x_send = SendConstPtr(x.as_ptr());
     let y_send = SendMutPtr(y.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|_, t0, t1| {
-        let x_send: SendConstPtr<f32> = x_send;
-        let y_send: SendMutPtr<f32> = y_send;
-        // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
-        // joins before returning. AVX2 checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
-            let yb = std::slice::from_raw_parts_mut(y_send.0.add(t0), t1 - t0);
-            avx2::axpy_f32(alpha, xb, yb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|_, t0, t1| {
+            let x_send: SendConstPtr<f32> = x_send;
+            let y_send: SendMutPtr<f32> = y_send;
+            // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
+            // joins before returning. AVX2 checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
+                let yb = std::slice::from_raw_parts_mut(y_send.0.add(t0), t1 - t0);
+                avx2::axpy_f32(alpha, xb, yb);
+            }
+        },
+    );
 }
 
 /// `axpy` over spin-pool bands (f64). Same contract as
@@ -839,17 +843,21 @@ fn spin_axpy_f32(alpha: f32, x: &[f32], y: &mut [f32], pool: &SpinPool) {
 fn spin_axpy_f64(alpha: f64, x: &[f64], y: &mut [f64], pool: &SpinPool) {
     let x_send = SendConstPtr(x.as_ptr());
     let y_send = SendMutPtr(y.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|_, t0, t1| {
-        let x_send: SendConstPtr<f64> = x_send;
-        let y_send: SendMutPtr<f64> = y_send;
-        // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
-        // joins before returning. AVX2 checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
-            let yb = std::slice::from_raw_parts_mut(y_send.0.add(t0), t1 - t0);
-            avx2::axpy_f64(alpha, xb, yb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|_, t0, t1| {
+            let x_send: SendConstPtr<f64> = x_send;
+            let y_send: SendMutPtr<f64> = y_send;
+            // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
+            // joins before returning. AVX2 checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
+                let yb = std::slice::from_raw_parts_mut(y_send.0.add(t0), t1 - t0);
+                avx2::axpy_f64(alpha, xb, yb);
+            }
+        },
+    );
 }
 
 /// `axpy` over spin-pool bands (Complex32). Same contract as
@@ -859,17 +867,21 @@ fn spin_axpy_f64(alpha: f64, x: &[f64], y: &mut [f64], pool: &SpinPool) {
 fn spin_axpy_c32(alpha: Complex32, x: &[Complex32], y: &mut [Complex32], pool: &SpinPool) {
     let x_send = SendConstPtr(x.as_ptr());
     let y_send = SendMutPtr(y.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|_, t0, t1| {
-        let x_send: SendConstPtr<Complex32> = x_send;
-        let y_send: SendMutPtr<Complex32> = y_send;
-        // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
-        // joins before returning. AVX2 checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
-            let yb = std::slice::from_raw_parts_mut(y_send.0.add(t0), t1 - t0);
-            avx2::axpy_c32(alpha, xb, yb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|_, t0, t1| {
+            let x_send: SendConstPtr<Complex32> = x_send;
+            let y_send: SendMutPtr<Complex32> = y_send;
+            // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
+            // joins before returning. AVX2 checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
+                let yb = std::slice::from_raw_parts_mut(y_send.0.add(t0), t1 - t0);
+                avx2::axpy_c32(alpha, xb, yb);
+            }
+        },
+    );
 }
 
 /// `axpy` over spin-pool bands (Complex64). Same contract as
@@ -879,17 +891,21 @@ fn spin_axpy_c32(alpha: Complex32, x: &[Complex32], y: &mut [Complex32], pool: &
 fn spin_axpy_c64(alpha: Complex64, x: &[Complex64], y: &mut [Complex64], pool: &SpinPool) {
     let x_send = SendConstPtr(x.as_ptr());
     let y_send = SendMutPtr(y.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|_, t0, t1| {
-        let x_send: SendConstPtr<Complex64> = x_send;
-        let y_send: SendMutPtr<Complex64> = y_send;
-        // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
-        // joins before returning. AVX2 checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
-            let yb = std::slice::from_raw_parts_mut(y_send.0.add(t0), t1 - t0);
-            avx2::axpy_c64(alpha, xb, yb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|_, t0, t1| {
+            let x_send: SendConstPtr<Complex64> = x_send;
+            let y_send: SendMutPtr<Complex64> = y_send;
+            // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
+            // joins before returning. AVX2 checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
+                let yb = std::slice::from_raw_parts_mut(y_send.0.add(t0), t1 - t0);
+                avx2::axpy_c64(alpha, xb, yb);
+            }
+        },
+    );
 }
 
 /// `scal` over spin-pool bands (f32). Elementwise, so bitwise identical
@@ -898,15 +914,19 @@ fn spin_axpy_c64(alpha: Complex64, x: &[Complex64], y: &mut [Complex64], pool: &
 #[inline]
 fn spin_scal_f32(alpha: f32, x: &mut [f32], pool: &SpinPool) {
     let x_send = SendMutPtr(x.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|_, t0, t1| {
-        let x_send: SendMutPtr<f32> = x_send;
-        // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
-        // joins before returning. AVX2 checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts_mut(x_send.0.add(t0), t1 - t0);
-            avx2::scal_f32(alpha, xb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|_, t0, t1| {
+            let x_send: SendMutPtr<f32> = x_send;
+            // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
+            // joins before returning. AVX2 checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts_mut(x_send.0.add(t0), t1 - t0);
+                avx2::scal_f32(alpha, xb);
+            }
+        },
+    );
 }
 
 /// `scal` over spin-pool bands (f64). Same contract as
@@ -915,15 +935,19 @@ fn spin_scal_f32(alpha: f32, x: &mut [f32], pool: &SpinPool) {
 #[inline]
 fn spin_scal_f64(alpha: f64, x: &mut [f64], pool: &SpinPool) {
     let x_send = SendMutPtr(x.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|_, t0, t1| {
-        let x_send: SendMutPtr<f64> = x_send;
-        // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
-        // joins before returning. AVX2 checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts_mut(x_send.0.add(t0), t1 - t0);
-            avx2::scal_f64(alpha, xb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|_, t0, t1| {
+            let x_send: SendMutPtr<f64> = x_send;
+            // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
+            // joins before returning. AVX2 checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts_mut(x_send.0.add(t0), t1 - t0);
+                avx2::scal_f64(alpha, xb);
+            }
+        },
+    );
 }
 
 /// `scal` over spin-pool bands (Complex32). Same contract as
@@ -932,15 +956,19 @@ fn spin_scal_f64(alpha: f64, x: &mut [f64], pool: &SpinPool) {
 #[inline]
 fn spin_scal_c32(alpha: Complex32, x: &mut [Complex32], pool: &SpinPool) {
     let x_send = SendMutPtr(x.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|_, t0, t1| {
-        let x_send: SendMutPtr<Complex32> = x_send;
-        // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
-        // joins before returning. AVX2 checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts_mut(x_send.0.add(t0), t1 - t0);
-            avx2::scal_c32(alpha, xb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|_, t0, t1| {
+            let x_send: SendMutPtr<Complex32> = x_send;
+            // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
+            // joins before returning. AVX2 checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts_mut(x_send.0.add(t0), t1 - t0);
+                avx2::scal_c32(alpha, xb);
+            }
+        },
+    );
 }
 
 /// `scal` over spin-pool bands (Complex64). Same contract as
@@ -949,15 +977,19 @@ fn spin_scal_c32(alpha: Complex32, x: &mut [Complex32], pool: &SpinPool) {
 #[inline]
 fn spin_scal_c64(alpha: Complex64, x: &mut [Complex64], pool: &SpinPool) {
     let x_send = SendMutPtr(x.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|_, t0, t1| {
-        let x_send: SendMutPtr<Complex64> = x_send;
-        // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
-        // joins before returning. AVX2 checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts_mut(x_send.0.add(t0), t1 - t0);
-            avx2::scal_c64(alpha, xb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|_, t0, t1| {
+            let x_send: SendMutPtr<Complex64> = x_send;
+            // SAFETY: bands are disjoint in-bounds slices; `broadcast_bands`
+            // joins before returning. AVX2 checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts_mut(x_send.0.add(t0), t1 - t0);
+                avx2::scal_c64(alpha, xb);
+            }
+        },
+    );
 }
 
 /// `dot` over spin-pool bands (f32): band partials reduce in slice order
@@ -970,19 +1002,23 @@ fn spin_dot_f32(x: &[f32], y: &[f32], pool: &SpinPool) -> f32 {
     let x_send = SendConstPtr(x.as_ptr());
     let y_send = SendConstPtr(y.as_ptr());
     let p_send = SendMutPtr(partials.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|w, t0, t1| {
-        let x_send: SendConstPtr<f32> = x_send;
-        let y_send: SendConstPtr<f32> = y_send;
-        let p_send: SendMutPtr<f32> = p_send;
-        // SAFETY: band slices are in bounds; `partials[w]` is owned by
-        // worker `w`; `broadcast_bands` joins before returning. AVX2
-        // checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
-            let yb = std::slice::from_raw_parts(y_send.0.add(t0), t1 - t0);
-            *p_send.0.add(w) = avx2::dot_f32(xb, yb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|w, t0, t1| {
+            let x_send: SendConstPtr<f32> = x_send;
+            let y_send: SendConstPtr<f32> = y_send;
+            let p_send: SendMutPtr<f32> = p_send;
+            // SAFETY: band slices are in bounds; `partials[w]` is owned by
+            // worker `w`; `broadcast_bands` joins before returning. AVX2
+            // checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
+                let yb = std::slice::from_raw_parts(y_send.0.add(t0), t1 - t0);
+                *p_send.0.add(w) = avx2::dot_f32(xb, yb);
+            }
+        },
+    );
     partials.iter().sum()
 }
 
@@ -995,19 +1031,23 @@ fn spin_dot_f64(x: &[f64], y: &[f64], pool: &SpinPool) -> f64 {
     let x_send = SendConstPtr(x.as_ptr());
     let y_send = SendConstPtr(y.as_ptr());
     let p_send = SendMutPtr(partials.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|w, t0, t1| {
-        let x_send: SendConstPtr<f64> = x_send;
-        let y_send: SendConstPtr<f64> = y_send;
-        let p_send: SendMutPtr<f64> = p_send;
-        // SAFETY: band slices are in bounds; `partials[w]` is owned by
-        // worker `w`; `broadcast_bands` joins before returning. AVX2
-        // checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
-            let yb = std::slice::from_raw_parts(y_send.0.add(t0), t1 - t0);
-            *p_send.0.add(w) = avx2::dot_f64(xb, yb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|w, t0, t1| {
+            let x_send: SendConstPtr<f64> = x_send;
+            let y_send: SendConstPtr<f64> = y_send;
+            let p_send: SendMutPtr<f64> = p_send;
+            // SAFETY: band slices are in bounds; `partials[w]` is owned by
+            // worker `w`; `broadcast_bands` joins before returning. AVX2
+            // checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
+                let yb = std::slice::from_raw_parts(y_send.0.add(t0), t1 - t0);
+                *p_send.0.add(w) = avx2::dot_f64(xb, yb);
+            }
+        },
+    );
     partials.iter().sum()
 }
 
@@ -1020,19 +1060,23 @@ fn spin_dotc_c32(x: &[Complex32], y: &[Complex32], pool: &SpinPool) -> Complex32
     let x_send = SendConstPtr(x.as_ptr());
     let y_send = SendConstPtr(y.as_ptr());
     let p_send = SendMutPtr(partials.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|w, t0, t1| {
-        let x_send: SendConstPtr<Complex32> = x_send;
-        let y_send: SendConstPtr<Complex32> = y_send;
-        let p_send: SendMutPtr<Complex32> = p_send;
-        // SAFETY: band slices are in bounds; `partials[w]` is owned by
-        // worker `w`; `broadcast_bands` joins before returning. AVX2
-        // checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
-            let yb = std::slice::from_raw_parts(y_send.0.add(t0), t1 - t0);
-            *p_send.0.add(w) = avx2::dotc_c32(xb, yb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|w, t0, t1| {
+            let x_send: SendConstPtr<Complex32> = x_send;
+            let y_send: SendConstPtr<Complex32> = y_send;
+            let p_send: SendMutPtr<Complex32> = p_send;
+            // SAFETY: band slices are in bounds; `partials[w]` is owned by
+            // worker `w`; `broadcast_bands` joins before returning. AVX2
+            // checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
+                let yb = std::slice::from_raw_parts(y_send.0.add(t0), t1 - t0);
+                *p_send.0.add(w) = avx2::dotc_c32(xb, yb);
+            }
+        },
+    );
     partials.iter().sum()
 }
 
@@ -1045,19 +1089,23 @@ fn spin_dotc_c64(x: &[Complex64], y: &[Complex64], pool: &SpinPool) -> Complex64
     let x_send = SendConstPtr(x.as_ptr());
     let y_send = SendConstPtr(y.as_ptr());
     let p_send = SendMutPtr(partials.as_mut_ptr());
-    pool.broadcast_bands(x.len(), &|w, t0, t1| {
-        let x_send: SendConstPtr<Complex64> = x_send;
-        let y_send: SendConstPtr<Complex64> = y_send;
-        let p_send: SendMutPtr<Complex64> = p_send;
-        // SAFETY: band slices are in bounds; `partials[w]` is owned by
-        // worker `w`; `broadcast_bands` joins before returning. AVX2
-        // checked by caller.
-        unsafe {
-            let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
-            let yb = std::slice::from_raw_parts(y_send.0.add(t0), t1 - t0);
-            *p_send.0.add(w) = avx2::dotc_c64(xb, yb);
-        }
-    });
+    pool.broadcast_bands_k(
+        x.len(),
+        sonium_topology::bandwidth::stream_width(),
+        &|w, t0, t1| {
+            let x_send: SendConstPtr<Complex64> = x_send;
+            let y_send: SendConstPtr<Complex64> = y_send;
+            let p_send: SendMutPtr<Complex64> = p_send;
+            // SAFETY: band slices are in bounds; `partials[w]` is owned by
+            // worker `w`; `broadcast_bands` joins before returning. AVX2
+            // checked by caller.
+            unsafe {
+                let xb = std::slice::from_raw_parts(x_send.0.add(t0), t1 - t0);
+                let yb = std::slice::from_raw_parts(y_send.0.add(t0), t1 - t0);
+                *p_send.0.add(w) = avx2::dotc_c64(xb, yb);
+            }
+        },
+    );
     partials.iter().sum()
 }
 

@@ -761,7 +761,7 @@ thread_local! {
 }
 
 /// Compact single-L3-domain pool for factorizations whose working set
-/// fits in L3 (see [`super::affinity::compact_cpus`]): keeping the whole
+/// fits in L3 (see [`sonium_topology::affinity::compact_cpus`]): keeping the whole
 /// panel/TRSM/update sequence on one CCX holds the trailing matrix
 /// L3-resident across panels (dgetrf-1024 ~11.7ms vs ~14.6 spread).
 /// `None` when topology gave no compact set or the build failed — the
@@ -769,20 +769,20 @@ thread_local! {
 /// (measured shape: 4 workers on 4 cores), not the ambient pool.
 static COMPACT_POOL: std::sync::LazyLock<Option<rayon::ThreadPool>> =
     std::sync::LazyLock::new(|| {
-        let cpus = super::affinity::compact_cpus()?;
+        let cpus = sonium_topology::affinity::compact_cpus()?;
         if cpus.is_empty() {
             return None;
         }
         rayon::ThreadPoolBuilder::new()
             .num_threads(cpus.len())
             .thread_name(|i| format!("sonium-compact-{i}"))
-            .start_handler(super::affinity::pin_compact_worker)
+            .start_handler(sonium_topology::affinity::pin_compact_worker)
             .build()
             .ok()
     });
 
-/// Wide compact pool over [`super::affinity::COMPACT_WIDE_GROUPS`]
-/// L3 domains (see [`super::affinity::compact_cpus_wide`]):
+/// Wide compact pool over [`sonium_topology::affinity::COMPACT_WIDE_GROUPS`]
+/// L3 domains (see [`sonium_topology::affinity::compact_cpus_wide`]):
 /// compute-dense rank-64 SYRK
 /// wants the extra domains' slices and FMA units (spotrf-1024 7.3 ->
 /// 5.9ms vs one CCX at two domains; dpotrf-1024 -6% more at four),
@@ -791,14 +791,14 @@ static COMPACT_POOL: std::sync::LazyLock<Option<rayon::ThreadPool>> =
 /// then, so no duplicate pool is ever built.
 static COMPACT_POOL_WIDE: std::sync::LazyLock<Option<rayon::ThreadPool>> =
     std::sync::LazyLock::new(|| {
-        let cpus = super::affinity::compact_cpus_wide()?;
+        let cpus = sonium_topology::affinity::compact_cpus_wide()?;
         if cpus.is_empty() {
             return None;
         }
         rayon::ThreadPoolBuilder::new()
             .num_threads(cpus.len())
             .thread_name(|i| format!("sonium-compact-wide-{i}"))
-            .start_handler(super::affinity::pin_compact_wide_worker)
+            .start_handler(sonium_topology::affinity::pin_compact_wide_worker)
             .build()
             .ok()
     });
@@ -826,7 +826,7 @@ static SMALL_POOL: std::sync::LazyLock<rayon::ThreadPool> = std::sync::LazyLock:
     rayon::ThreadPoolBuilder::new()
         .num_threads(SMALL_THREADS)
         .thread_name(|i| format!("sonium-small-{i}"))
-        .start_handler(super::affinity::pin_worker)
+        .start_handler(sonium_topology::affinity::pin_worker)
         .build()
         .expect("small-work rayon pool")
 });
@@ -835,7 +835,7 @@ static TINY_POOL: std::sync::LazyLock<rayon::ThreadPool> = std::sync::LazyLock::
     rayon::ThreadPoolBuilder::new()
         .num_threads(TINY_THREADS)
         .thread_name(|i| format!("sonium-tiny-{i}"))
-        .start_handler(super::affinity::pin_worker)
+        .start_handler(sonium_topology::affinity::pin_worker)
         .build()
         .expect("tiny-work rayon pool")
 });
@@ -854,20 +854,20 @@ static MIRROR_POOL: std::sync::LazyLock<rayon::ThreadPool> = std::sync::LazyLock
     // (e.g. 128 threads on 8 cores); size by the inherited mask instead.
     // The min keeps explicit `RAYON_NUM_THREADS` caps and small-pool
     // inits working as before; ambient unmasked processes are unchanged.
-    let n = super::affinity::mask_cpu_count()
+    let n = sonium_topology::affinity::mask_cpu_count()
         .map(|m| ambient.min(m))
         .unwrap_or(ambient)
         .max(1);
     rayon::ThreadPoolBuilder::new()
         .num_threads(n)
         .thread_name(|i| format!("sonium-mirror-{i}"))
-        .start_handler(super::affinity::pin_worker)
+        .start_handler(sonium_topology::affinity::pin_worker)
         .build()
         .expect("mirror rayon pool")
 });
 
 /// Spread pool for streaming kernels (currently GEMV NoTrans): workers
-/// pinned one per L3 slice (see [`super::affinity::spread_cpus`]) so each
+/// pinned one per L3 slice (see [`sonium_topology::affinity::spread_cpus`]) so each
 /// worker's band stays in its own slice across reps. Callers use
 /// [`rayon::ThreadPool::broadcast`] (exactly one invocation per worker,
 /// indexed by [`rayon::WorkerContext::index`]) rather than scopes: work
@@ -876,21 +876,21 @@ static MIRROR_POOL: std::sync::LazyLock<rayon::ThreadPool> = std::sync::LazyLock
 /// global pool). `None` when topology gave no spread set — callers fall
 /// back to a raw scope. Sized by the spread set, not the ambient pool.
 fn build_spread_pool(num_threads: usize, tag: &'static str) -> Option<rayon::ThreadPool> {
-    let cpus = super::affinity::spread_cpus()?;
+    let cpus = sonium_topology::affinity::spread_cpus()?;
     if cpus.is_empty() {
         return None;
     }
     rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .thread_name(move |i| format!("sonium-spread-{tag}-{i}"))
-        .start_handler(super::affinity::pin_spread_worker)
+        .start_handler(sonium_topology::affinity::pin_spread_worker)
         .build()
         .ok()
 }
 
 static SPREAD_POOL: std::sync::LazyLock<Option<rayon::ThreadPool>> =
     std::sync::LazyLock::new(|| {
-        let cpus = super::affinity::spread_cpus()?;
+        let cpus = sonium_topology::affinity::spread_cpus()?;
         build_spread_pool(cpus.len(), "full")
     });
 
@@ -1014,7 +1014,7 @@ pub(crate) fn workers_for_macs(macs: usize) -> usize {
 /// ambient-sized [`MIRROR_POOL`]: same worker count the plain
 /// `rayon::scope` fallback would have used, but with pinned workers, so
 /// FMA-bound bands stop sharing physical cores with SMT siblings (see
-/// [`super::affinity`]). Nested calls — inside our pools (tracked per
+/// [`sonium_topology::affinity`]). Nested calls — inside our pools (tracked per
 /// thread), the ambient global pool, or an app pool — run inline on the
 /// enclosing pool, exactly as before: stealing the scope onto the mirror
 /// would abandon the enclosing pool's workers mid-solve. Results are
@@ -1180,7 +1180,7 @@ pub fn compact_applies(est_bytes: u64, wide: bool) -> bool {
     {
         return false;
     }
-    let Some(l3) = super::affinity::l3_bytes() else {
+    let Some(l3) = sonium_topology::affinity::l3_bytes() else {
         return false;
     };
     if compact_pool(wide).is_none() {
@@ -3168,12 +3168,12 @@ mod tests {
         // active and the mask is exactly the predicted singleton, or it
         // is disabled/unavailable and the pin is a verified no-op.
         let mask = std::thread::spawn(|| {
-            crate::cpu::affinity::pin_worker(0);
-            crate::cpu::affinity::current_mask()
+            sonium_topology::affinity::pin_worker(0);
+            sonium_topology::affinity::current_mask()
         })
         .join()
         .expect("affinity probe thread");
-        match crate::cpu::affinity::pinned_cpu(0) {
+        match sonium_topology::affinity::pinned_cpu(0) {
             Some(cpu) => assert_eq!(mask, vec![cpu]),
             None => {}
         }
@@ -3239,7 +3239,7 @@ mod tests {
         let est = 1u64 << 20; // 1 MiB fits any real L3
         let threads = run_compact(est, false, || rayon::current_num_threads().max(1));
         if compact_applies(est, false) {
-            let len = crate::cpu::affinity::compact_cpus()
+            let len = sonium_topology::affinity::compact_cpus()
                 .map(|c| c.len())
                 .unwrap_or(0);
             assert!(len > 0);
@@ -3257,8 +3257,8 @@ mod tests {
             // Wide pool when built, else the narrow pool (see
             // `compact_pool`); either way a compact width, and on a
             // multi-domain box exactly the wide set.
-            let wide_len = crate::cpu::affinity::compact_cpus_wide().map(|c| c.len());
-            let narrow_len = crate::cpu::affinity::compact_cpus()
+            let wide_len = sonium_topology::affinity::compact_cpus_wide().map(|c| c.len());
+            let narrow_len = sonium_topology::affinity::compact_cpus()
                 .map(|c| c.len())
                 .unwrap_or(0);
             match wide_len {

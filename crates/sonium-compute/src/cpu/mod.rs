@@ -13,7 +13,6 @@
 //! not compute-bound — SME2 doesn't apply. The SME2 path lives in
 //! `sonium-compute::sme2` and is invoked from dense GEMM/GEMV callers.
 
-pub(crate) mod affinity;
 pub mod blas1;
 pub mod blas2;
 pub mod blas3;

@@ -21,6 +21,7 @@ thiserror = { workspace = true }
 log = { workspace = true }
 rayon = { workspace = true }
 libc = { workspace = true }
+sonium-topology = { workspace = true }
 half = { workspace = true }
 sonium-fastmath = { workspace = true }
 # Explicit-dynamics restart serialization (Phase 1): versioned state
