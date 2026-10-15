@@ -53,6 +53,7 @@ def main():
         run(sys.executable, SONIUM / 'scripts/website_gallery.py', '--work-dir', ROOT / 'target/website-regenerate',
             '--out-dir', ROOT / 'website/public/gallery')
     run(sys.executable, ROOT / 'website/scripts/generate_qa_pages.py')
+    run(sys.executable, ROOT / 'website/scripts/generate_perf_data.py')
     run(CARGO, 'build', '--release', '-p', 'sonium-sim-speaker', '--example', 'speaker_lab_worker')
     run(CARGO, 'build', '--release', '-p', 'sonium-demo-workers', '--bin', 'sonium-demo-workers')
     run(sys.executable, ROOT / 'apps/sim-demo/prepare_studies.py', '--worker', ROOT / 'target/release/sonium-demo-workers')

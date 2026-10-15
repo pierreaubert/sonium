@@ -119,7 +119,10 @@ DEMOS: dict[str, DemoSpec] = {
         field_mode="pressure",
         signed_field=True,
         volume_slices=True,
-        direction="1.15,-1,0.62",
+        # Near-face-on: the xy mid-plane reads as a rectangle with the
+        # pulse rings; the equal-angle view collapses all three planes
+        # into an illegible star.
+        direction="0.3,-0.45,1.0",
         distance_factor=3.0,
         poster_at=0.5,
     ),
@@ -184,6 +187,11 @@ def run(command: list[str], label: str, cwd: Path | None = None) -> None:
 def simulate(spec: DemoSpec, work: Path) -> Path:
     out = work / spec.slug / "vtu"
     out.mkdir(parents=True, exist_ok=True)
+    # Drop stale frames: the sim overwrites in place, so a shorter rerun
+    # would otherwise leave a tail of previous-run frames behind.
+    for stale in out.glob("frame_*.vtu"):
+        stale.unlink()
+    (out / "manifest.json").unlink(missing_ok=True)
     cargo = os.environ.get("SONIUM_CARGO") or os.environ.get("CARGO", "cargo")
     run(
         [
@@ -284,23 +292,23 @@ def convert(spec: DemoSpec, vtu_dir: Path, work: Path) -> Path:
 def render(spec: DemoSpec, ply_dir: Path, work: Path) -> Path:
     png_dir = work / spec.slug / "png"
     png_dir.mkdir(parents=True, exist_ok=True)
-    run(
-        [
-            sys.executable,
-            str(SONIUM_ROOT / "scripts" / "blender_movie_render.py"),
-            "--frames-dir",
-            str(ply_dir),
-            "--out-dir",
-            str(png_dir),
-            "--direction",
-            spec.direction,
-            "--distance-factor",
-            str(spec.distance_factor),
-            "--material",
-            spec.material,
-        ],
-        f"render {spec.slug}",
-    )
+    for stale in png_dir.glob("frame_*.png"):
+        stale.unlink()
+    args = [
+        sys.executable,
+        str(SONIUM_ROOT / "scripts" / "blender_movie_render.py"),
+        "--frames-dir",
+        str(ply_dir),
+        "--out-dir",
+        str(png_dir),
+        "--direction",
+        spec.direction,
+        "--distance-factor",
+        str(spec.distance_factor),
+        "--material",
+        spec.material,
+    ]
+    run(args, f"render {spec.slug}")
     return png_dir
 
 
@@ -333,78 +341,18 @@ def encode(spec: DemoSpec, png_dir: Path, out_dir: Path) -> None:
     )
 
 
-# OpenCourant comparison, measured 2026-10-12 on a Threadripper PRO
-# 3995WX (128 threads) + RTX PRO 6000 Blackwell. Metric: wall time to
-# matched accuracy (lid-driven cavity Re=100, Ghia gate 0.03; each code
-# on its native discretization — OpenCourant has no incompressible
-# solver, so the engine arm is a low-Mach compressible surrogate).
-OC_BENCHMARKS = {
-    "generated": "2026-10-12",
-    "hardware": "AMD Threadripper PRO 3995WX + NVIDIA RTX PRO 6000 Blackwell",
-    "metric": (
-        "Wall time to matched accuracy: lid-driven cavity at Re=100 against "
-        "Ghia reference profiles (max error gate 0.03). Sonium runs its "
-        "incompressible Navier-Stokes solver; OpenCourant (Radioss) runs a "
-        "low-Mach compressible ALE surrogate, its closest native option."
-    ),
-    "rows": [
-        {"threads": "1", "sonium_s": 15.6, "engine_s": 226.3, "speedup": 14.5,
-         "sonium_error": 0.0162, "engine_error": 0.0264},
-        {"threads": "8", "sonium_s": 11.0, "engine_s": 60.8, "speedup": 5.5,
-         "sonium_error": 0.0162, "engine_error": 0.0264},
-        {"threads": "16 / 32", "sonium_s": 10.8, "engine_s": 57.2, "speedup": 5.3,
-         "sonium_error": 0.0162, "engine_error": 0.0264},
-    ],
-    "gpu_rows": [
-        {"case": "Lid cavity n=64", "cpu_s": 15.6, "gpu_s": 11.6, "speedup": 1.34},
-        {"case": "Lid cavity n=128", "cpu_s": 354.0, "gpu_s": 38.1, "speedup": 9.3},
-        {"case": "Taylor-Green n=128", "cpu_s": 23.1, "gpu_s": 11.3, "speedup": 2.0},
-    ],
-    "notes": [
-        "Sonium is faster at every thread count and more accurate at the gate "
-        "(0.0162 vs 0.0264 max error). Both codes saturate with threads: "
-        "sonium 1.44x self-speedup at 16 threads, the engine 3.95x at 32.",
-        "Every GPU row is backend-audited per solve: a silent CPU fallback "
-        "marks the row failed instead of relabeling it.",
-    ],
-}
-
-
-def explicit_rows() -> list[dict]:
-    """Best Sonium vs engine-serial ns/dof/cycle per deck, from perf/oc bundles."""
-    decks: dict[str, dict] = {}
-    for path in sorted((SONIUM_ROOT / "perf" / "oc").glob("*.json")):
-        try:
-            bundle = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if bundle.get("schema") != "sonium.oc-bench/v1":
-            continue
-        for row in bundle.get("rows", []):
-            if not row.get("correctness_passed"):
-                continue
-            deck = decks.setdefault(row["deck"], {"deck": row["deck"], "dof": row["dof"]})
-            key = "sonium" if row["side"] == "sonium" else "engine"
-            # Serial-vs-serial, matching perf/oc-explicit.md "Reading".
-            if row["threads"] != 1 or (key == "engine" and row["flavor"] != "serial"):
-                continue
-            if key not in deck or row["ns_per_dof_cycle"] < deck[key]["ns_per_dof_cycle"]:
-                deck[key] = row
-    rows = []
-    for deck in decks.values():
-        if "sonium" not in deck or "engine" not in deck:
-            continue
-        sonium, engine = deck["sonium"], deck["engine"]
-        rows.append({
-            "deck": deck["deck"],
-            "dof": deck["dof"],
-            "sonium_ns_per_dof_cycle": round(sonium["ns_per_dof_cycle"], 1),
-            "engine_ns_per_dof_cycle": round(engine["ns_per_dof_cycle"], 1),
-            "speedup": round(engine["ns_per_dof_cycle"] / sonium["ns_per_dof_cycle"], 2),
-            "sonium_wall_s": sonium["wall_s"],
-            "engine_wall_s": engine["wall_s"],
-        })
-    return sorted(rows, key=lambda row: row["deck"])
+def write_perf_data(site_data: Path) -> None:
+    """Regenerate oc-benchmarks.json via the single-writer perf data script."""
+    run(
+        [
+            sys.executable,
+            str(WORKSPACE_ROOT / "website" / "scripts" / "generate_perf_data.py"),
+            "--oc-only",
+            "--site-data",
+            str(site_data),
+        ],
+        "perf data (oc-benchmarks.json)",
+    )
 
 
 def write_site_data(site_data: Path, specs: list[DemoSpec]) -> None:
@@ -430,10 +378,7 @@ def write_site_data(site_data: Path, specs: list[DemoSpec]) -> None:
         }
     catalogue = [existing[slug] for slug in DEMOS if slug in existing]
     catalogue_path.write_text(json.dumps(catalogue, indent=2) + "\n", encoding="utf-8")
-    benchmarks = dict(OC_BENCHMARKS, explicit_rows=explicit_rows())
-    (site_data / "oc-benchmarks.json").write_text(
-        json.dumps(benchmarks, indent=2) + "\n", encoding="utf-8"
-    )
+    write_perf_data(site_data)
     print(f"site data written to {site_data}")
 
 
