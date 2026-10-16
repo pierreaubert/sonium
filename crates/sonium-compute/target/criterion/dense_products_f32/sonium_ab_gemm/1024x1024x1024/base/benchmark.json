@@ -1,0 +1,1 @@
+{"group_id":"dense_products_f32","function_id":"sonium_ab_gemm","value_str":"1024x1024x1024","throughput":{"Elements":2147483648},"full_id":"dense_products_f32/sonium_ab_gemm/1024x1024x1024","directory_name":"dense_products_f32/sonium_ab_gemm/1024x1024x1024","title":"dense_products_f32/sonium_ab_gemm/1024x1024x1024"}

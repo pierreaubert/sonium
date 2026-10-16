@@ -1,0 +1,1 @@
+{"group_id":"gemv_f32_trans","function_id":"oxiblas","value_str":"64x64","throughput":{"Elements":8192},"full_id":"gemv_f32_trans/oxiblas/64x64","directory_name":"gemv_f32_trans/oxiblas/64x64","title":"gemv_f32_trans/oxiblas/64x64"}

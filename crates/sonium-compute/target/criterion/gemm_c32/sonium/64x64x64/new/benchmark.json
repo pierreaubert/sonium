@@ -1,0 +1,1 @@
+{"group_id":"gemm_c32","function_id":"sonium","value_str":"64x64x64","throughput":{"Elements":2097152},"full_id":"gemm_c32/sonium/64x64x64","directory_name":"gemm_c32/sonium/64x64x64","title":"gemm_c32/sonium/64x64x64"}

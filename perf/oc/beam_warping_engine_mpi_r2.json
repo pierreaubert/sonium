@@ -1,0 +1,27 @@
+{
+  "schema": "sonium.oc-bench/v1",
+  "hardware": {
+    "arch": "x86_64",
+    "model": "AMD Ryzen Threadripper PRO 3995WX 64-Cores",
+    "threads": "2"
+  },
+  "protocol": {
+    "repeats": 3,
+    "warmup": 1,
+    "correctness": "probe-tolerances"
+  },
+  "rows": [
+    {
+      "deck": "beam_warping",
+      "side": "engine",
+      "flavor": "mpi",
+      "threads": 2,
+      "wall_s": 300.582715322,
+      "cycles": 686616,
+      "dof": 8091,
+      "ns_per_dof_cycle": 54.10630579778034,
+      "peak_rss_bytes": 73400320,
+      "correctness_passed": true
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"group_id":"gemv_c32","function_id":"oxiblas","value_str":"256x256","throughput":{"Elements":524288},"full_id":"gemv_c32/oxiblas/256x256","directory_name":"gemv_c32/oxiblas/256x256","title":"gemv_c32/oxiblas/256x256"}

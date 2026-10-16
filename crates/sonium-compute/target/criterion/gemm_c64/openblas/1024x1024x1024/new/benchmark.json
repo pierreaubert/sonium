@@ -1,0 +1,1 @@
+{"group_id":"gemm_c64","function_id":"openblas","value_str":"1024x1024x1024","throughput":{"Elements":8589934592},"full_id":"gemm_c64/openblas/1024x1024x1024","directory_name":"gemm_c64/openblas/1024x1024x1024","title":"gemm_c64/openblas/1024x1024x1024"}

@@ -1,0 +1,1 @@
+{"group_id":"gemm_bf16","function_id":"sonium_bf16","value_str":"64x64x64","throughput":{"Elements":524288},"full_id":"gemm_bf16/sonium_bf16/64x64x64","directory_name":"gemm_bf16/sonium_bf16/64x64x64","title":"gemm_bf16/sonium_bf16/64x64x64"}

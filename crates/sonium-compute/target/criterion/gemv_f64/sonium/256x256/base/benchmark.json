@@ -1,0 +1,1 @@
+{"group_id":"gemv_f64","function_id":"sonium","value_str":"256x256","throughput":{"Elements":131072},"full_id":"gemv_f64/sonium/256x256","directory_name":"gemv_f64/sonium/256x256","title":"gemv_f64/sonium/256x256"}

@@ -1770,10 +1770,8 @@ mod tests {
                     // arm under env_test_lock; per-row sweeps are single-row
                     // regardless of gate (no quad/pair fits one row).
                     for gate in ["1", "2"] {
-                        // SAFETY: env_test_lock serializes env flips (see above).
-                        unsafe {
-                            std::env::set_var("SONIUM_GEMV_DOT4", gate);
-                        }
+                        // env_test_lock serializes env flips (see above).
+                        std::env::set_var("SONIUM_GEMV_DOT4", gate);
                         let mut quad = y0.clone();
                         sweep_f32(
                             0,
@@ -1794,10 +1792,8 @@ mod tests {
                             );
                         }
                     }
-                    // SAFETY: as above; restores the legacy dispatch.
-                    unsafe {
-                        std::env::remove_var("SONIUM_GEMV_DOT4");
-                    }
+                    // As above; restores the legacy dispatch.
+                    std::env::remove_var("SONIUM_GEMV_DOT4");
                 }
             }
         }
@@ -1865,10 +1861,8 @@ mod tests {
                     // arm under env_test_lock; per-row sweeps are single-row
                     // regardless of gate (no quad/pair fits one row).
                     for gate in ["1", "2"] {
-                        // SAFETY: env_test_lock serializes env flips (see above).
-                        unsafe {
-                            std::env::set_var("SONIUM_GEMV_DOT4", gate);
-                        }
+                        // env_test_lock serializes env flips (see above).
+                        std::env::set_var("SONIUM_GEMV_DOT4", gate);
                         let mut quad = y0.clone();
                         sweep_f64(
                             0,
@@ -1889,10 +1883,8 @@ mod tests {
                             );
                         }
                     }
-                    // SAFETY: as above; restores the legacy dispatch.
-                    unsafe {
-                        std::env::remove_var("SONIUM_GEMV_DOT4");
-                    }
+                    // As above; restores the legacy dispatch.
+                    std::env::remove_var("SONIUM_GEMV_DOT4");
                 }
             }
         }

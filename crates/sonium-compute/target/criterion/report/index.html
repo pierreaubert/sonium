@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Index - Criterion.rs</title>
+    <style type="text/css">
+        body {
+            font: 14px Helvetica Neue;
+            text-rendering: optimizelegibility;
+        }
+
+        .body {
+            width: 960px;
+            margin: auto;
+        }
+
+        a:link {
+            color: #1F78B4;
+            text-decoration: none;
+        }
+
+        h2 {
+            font-size: 36px;
+            font-weight: 300;
+        }
+
+        h3 {
+            font-size: 24px;
+            font-weight: 300;
+        }
+
+        #footer {
+            height: 40px;
+            background: #888;
+            color: white;
+            font-size: larger;
+            font-weight: 300;
+        }
+
+        #footer a {
+            color: white;
+            text-decoration: underline;
+        }
+
+        #footer p {
+            text-align: center
+        }
+
+        table {
+            border-collapse: collapse;
+        }
+
+        table,
+        th,
+        td {
+            border: 1px solid #888;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="body">
+        <h2>Criterion.rs Benchmark Index</h2>
+        See individual benchmark pages below for more details.
+        <ul>
+            <li><a href="../dense_products_f32/report/index.html">dense_products_f32</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../dense_products_f32/sonium_ab_gemm/report/index.html">sonium_ab_gemm</a></th>
+                            <th><a href="../dense_products_f32/sonium_cov_gemm/report/index.html">sonium_cov_gemm</a></th>
+                            <th><a href="../dense_products_f32/sonium_gram_gemm/report/index.html">sonium_gram_gemm</a></th>
+                        </tr>
+                        <tr>
+                            <th>1024x1024x1024</th>
+                            <td><a href="../dense_products_f32/sonium_ab_gemm/1024x1024x1024/report/index.html">dense_products_f32/sonium_ab_gemm/1024x1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../dense_products_f32/16384x64/report/index.html">16384x64</a></th>
+                            <td><a href="../dense_products_f32/sonium_cov_gemm/16384x64/report/index.html">dense_products_f32/sonium_cov_gemm/16384x64</a></td>
+                            <td><a href="../dense_products_f32/sonium_gram_gemm/16384x64/report/index.html">dense_products_f32/sonium_gram_gemm/16384x64</a></td>
+                        </tr>
+                        <tr>
+                            <th>2048x128x2048</th>
+                            <td><a href="../dense_products_f32/sonium_ab_gemm/2048x128x2048/report/index.html">dense_products_f32/sonium_ab_gemm/2048x128x2048</a></td>
+                        </tr>
+                        <tr>
+                            <th>256x256x256</th>
+                            <td><a href="../dense_products_f32/sonium_ab_gemm/256x256x256/report/index.html">dense_products_f32/sonium_ab_gemm/256x256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../dense_products_f32/4096x256/report/index.html">4096x256</a></th>
+                            <td><a href="../dense_products_f32/sonium_cov_gemm/4096x256/report/index.html">dense_products_f32/sonium_cov_gemm/4096x256</a></td>
+                            <td><a href="../dense_products_f32/sonium_gram_gemm/4096x256/report/index.html">dense_products_f32/sonium_gram_gemm/4096x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../dense_products_f32/4096x64/report/index.html">4096x64</a></th>
+                            <td><a href="../dense_products_f32/sonium_cov_gemm/4096x64/report/index.html">dense_products_f32/sonium_cov_gemm/4096x64</a></td>
+                            <td><a href="../dense_products_f32/sonium_gram_gemm/4096x64/report/index.html">dense_products_f32/sonium_gram_gemm/4096x64</a></td>
+                        </tr>
+                        <tr>
+                            <th>64x64x64</th>
+                            <td><a href="../dense_products_f32/sonium_ab_gemm/64x64x64/report/index.html">dense_products_f32/sonium_ab_gemm/64x64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../dense_products_f64/report/index.html">dense_products_f64</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../dense_products_f64/sonium_ab_gemm/report/index.html">sonium_ab_gemm</a></th>
+                            <th><a href="../dense_products_f64/sonium_cov_gemm/report/index.html">sonium_cov_gemm</a></th>
+                            <th><a href="../dense_products_f64/sonium_gram_gemm/report/index.html">sonium_gram_gemm</a></th>
+                        </tr>
+                        <tr>
+                            <th>1024x1024x1024</th>
+                            <td><a href="../dense_products_f64/sonium_ab_gemm/1024x1024x1024/report/index.html">dense_products_f64/sonium_ab_gemm/1024x1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../dense_products_f64/16384x64/report/index.html">16384x64</a></th>
+                            <td><a href="../dense_products_f64/sonium_cov_gemm/16384x64/report/index.html">dense_products_f64/sonium_cov_gemm/16384x64</a></td>
+                            <td><a href="../dense_products_f64/sonium_gram_gemm/16384x64/report/index.html">dense_products_f64/sonium_gram_gemm/16384x64</a></td>
+                        </tr>
+                        <tr>
+                            <th>2048x128x2048</th>
+                            <td><a href="../dense_products_f64/sonium_ab_gemm/2048x128x2048/report/index.html">dense_products_f64/sonium_ab_gemm/2048x128x2048</a></td>
+                        </tr>
+                        <tr>
+                            <th>256x256x256</th>
+                            <td><a href="../dense_products_f64/sonium_ab_gemm/256x256x256/report/index.html">dense_products_f64/sonium_ab_gemm/256x256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../dense_products_f64/4096x256/report/index.html">4096x256</a></th>
+                            <td><a href="../dense_products_f64/sonium_cov_gemm/4096x256/report/index.html">dense_products_f64/sonium_cov_gemm/4096x256</a></td>
+                            <td><a href="../dense_products_f64/sonium_gram_gemm/4096x256/report/index.html">dense_products_f64/sonium_gram_gemm/4096x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../dense_products_f64/4096x64/report/index.html">4096x64</a></th>
+                            <td><a href="../dense_products_f64/sonium_cov_gemm/4096x64/report/index.html">dense_products_f64/sonium_cov_gemm/4096x64</a></td>
+                            <td><a href="../dense_products_f64/sonium_gram_gemm/4096x64/report/index.html">dense_products_f64/sonium_gram_gemm/4096x64</a></td>
+                        </tr>
+                        <tr>
+                            <th>64x64x64</th>
+                            <td><a href="../dense_products_f64/sonium_ab_gemm/64x64x64/report/index.html">dense_products_f64/sonium_ab_gemm/64x64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../gemm_bf16/report/index.html">gemm_bf16</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../gemm_bf16/sonium_bf16/report/index.html">sonium_bf16</a></th>
+                            <th><a href="../gemm_bf16/sonium_f32_baseline/report/index.html">sonium_f32_baseline</a></th>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_bf16/1024x1024x1024/report/index.html">1024x1024x1024</a></th>
+                            <td><a href="../gemm_bf16/sonium_bf16/1024x1024x1024/report/index.html">gemm_bf16/sonium_bf16/1024x1024x1024</a></td>
+                            <td><a href="../gemm_bf16/sonium_f32_baseline/1024x1024x1024/report/index.html">gemm_bf16/sonium_f32_baseline/1024x1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_bf16/2048x128x2048/report/index.html">2048x128x2048</a></th>
+                            <td><a href="../gemm_bf16/sonium_bf16/2048x128x2048/report/index.html">gemm_bf16/sonium_bf16/2048x128x2048</a></td>
+                            <td><a href="../gemm_bf16/sonium_f32_baseline/2048x128x2048/report/index.html">gemm_bf16/sonium_f32_baseline/2048x128x2048</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_bf16/256x256x256/report/index.html">256x256x256</a></th>
+                            <td><a href="../gemm_bf16/sonium_bf16/256x256x256/report/index.html">gemm_bf16/sonium_bf16/256x256x256</a></td>
+                            <td><a href="../gemm_bf16/sonium_f32_baseline/256x256x256/report/index.html">gemm_bf16/sonium_f32_baseline/256x256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_bf16/64x64x64/report/index.html">64x64x64</a></th>
+                            <td><a href="../gemm_bf16/sonium_bf16/64x64x64/report/index.html">gemm_bf16/sonium_bf16/64x64x64</a></td>
+                            <td><a href="../gemm_bf16/sonium_f32_baseline/64x64x64/report/index.html">gemm_bf16/sonium_f32_baseline/64x64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../gemm_c32/report/index.html">gemm_c32</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../gemm_c32/openblas/report/index.html">openblas</a></th>
+                            <th><a href="../gemm_c32/sonium/report/index.html">sonium</a></th>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_c32/1024x1024x1024/report/index.html">1024x1024x1024</a></th>
+                            <td><a href="../gemm_c32/openblas/1024x1024x1024/report/index.html">gemm_c32/openblas/1024x1024x1024</a></td>
+                            <td><a href="../gemm_c32/sonium/1024x1024x1024/report/index.html">gemm_c32/sonium/1024x1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_c32/2048x128x2048/report/index.html">2048x128x2048</a></th>
+                            <td><a href="../gemm_c32/openblas/2048x128x2048/report/index.html">gemm_c32/openblas/2048x128x2048</a></td>
+                            <td><a href="../gemm_c32/sonium/2048x128x2048/report/index.html">gemm_c32/sonium/2048x128x2048</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_c32/256x256x256/report/index.html">256x256x256</a></th>
+                            <td><a href="../gemm_c32/openblas/256x256x256/report/index.html">gemm_c32/openblas/256x256x256</a></td>
+                            <td><a href="../gemm_c32/sonium/256x256x256/report/index.html">gemm_c32/sonium/256x256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_c32/64x64x64/report/index.html">64x64x64</a></th>
+                            <td><a href="../gemm_c32/openblas/64x64x64/report/index.html">gemm_c32/openblas/64x64x64</a></td>
+                            <td><a href="../gemm_c32/sonium/64x64x64/report/index.html">gemm_c32/sonium/64x64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../gemm_c64/report/index.html">gemm_c64</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../gemm_c64/openblas/report/index.html">openblas</a></th>
+                            <th><a href="../gemm_c64/sonium/report/index.html">sonium</a></th>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_c64/1024x1024x1024/report/index.html">1024x1024x1024</a></th>
+                            <td><a href="../gemm_c64/openblas/1024x1024x1024/report/index.html">gemm_c64/openblas/1024x1024x1024</a></td>
+                            <td><a href="../gemm_c64/sonium/1024x1024x1024/report/index.html">gemm_c64/sonium/1024x1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_c64/2048x128x2048/report/index.html">2048x128x2048</a></th>
+                            <td><a href="../gemm_c64/openblas/2048x128x2048/report/index.html">gemm_c64/openblas/2048x128x2048</a></td>
+                            <td><a href="../gemm_c64/sonium/2048x128x2048/report/index.html">gemm_c64/sonium/2048x128x2048</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_c64/256x256x256/report/index.html">256x256x256</a></th>
+                            <td><a href="../gemm_c64/openblas/256x256x256/report/index.html">gemm_c64/openblas/256x256x256</a></td>
+                            <td><a href="../gemm_c64/sonium/256x256x256/report/index.html">gemm_c64/sonium/256x256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_c64/64x64x64/report/index.html">64x64x64</a></th>
+                            <td><a href="../gemm_c64/openblas/64x64x64/report/index.html">gemm_c64/openblas/64x64x64</a></td>
+                            <td><a href="../gemm_c64/sonium/64x64x64/report/index.html">gemm_c64/sonium/64x64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../gemm_f32/report/index.html">gemm_f32</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../gemm_f32/openblas/report/index.html">openblas</a></th>
+                            <th><a href="../gemm_f32/sonium/report/index.html">sonium</a></th>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_f32/1024x1024x1024/report/index.html">1024x1024x1024</a></th>
+                            <td><a href="../gemm_f32/openblas/1024x1024x1024/report/index.html">gemm_f32/openblas/1024x1024x1024</a></td>
+                            <td><a href="../gemm_f32/sonium/1024x1024x1024/report/index.html">gemm_f32/sonium/1024x1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_f32/2048x128x2048/report/index.html">2048x128x2048</a></th>
+                            <td><a href="../gemm_f32/openblas/2048x128x2048/report/index.html">gemm_f32/openblas/2048x128x2048</a></td>
+                            <td><a href="../gemm_f32/sonium/2048x128x2048/report/index.html">gemm_f32/sonium/2048x128x2048</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_f32/256x256x256/report/index.html">256x256x256</a></th>
+                            <td><a href="../gemm_f32/openblas/256x256x256/report/index.html">gemm_f32/openblas/256x256x256</a></td>
+                            <td><a href="../gemm_f32/sonium/256x256x256/report/index.html">gemm_f32/sonium/256x256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_f32/64x64x64/report/index.html">64x64x64</a></th>
+                            <td><a href="../gemm_f32/openblas/64x64x64/report/index.html">gemm_f32/openblas/64x64x64</a></td>
+                            <td><a href="../gemm_f32/sonium/64x64x64/report/index.html">gemm_f32/sonium/64x64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../gemm_f64/report/index.html">gemm_f64</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../gemm_f64/openblas/report/index.html">openblas</a></th>
+                            <th><a href="../gemm_f64/sonium/report/index.html">sonium</a></th>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_f64/1024x1024x1024/report/index.html">1024x1024x1024</a></th>
+                            <td><a href="../gemm_f64/openblas/1024x1024x1024/report/index.html">gemm_f64/openblas/1024x1024x1024</a></td>
+                            <td><a href="../gemm_f64/sonium/1024x1024x1024/report/index.html">gemm_f64/sonium/1024x1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_f64/2048x128x2048/report/index.html">2048x128x2048</a></th>
+                            <td><a href="../gemm_f64/openblas/2048x128x2048/report/index.html">gemm_f64/openblas/2048x128x2048</a></td>
+                            <td><a href="../gemm_f64/sonium/2048x128x2048/report/index.html">gemm_f64/sonium/2048x128x2048</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_f64/256x256x256/report/index.html">256x256x256</a></th>
+                            <td><a href="../gemm_f64/openblas/256x256x256/report/index.html">gemm_f64/openblas/256x256x256</a></td>
+                            <td><a href="../gemm_f64/sonium/256x256x256/report/index.html">gemm_f64/sonium/256x256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemm_f64/64x64x64/report/index.html">64x64x64</a></th>
+                            <td><a href="../gemm_f64/openblas/64x64x64/report/index.html">gemm_f64/openblas/64x64x64</a></td>
+                            <td><a href="../gemm_f64/sonium/64x64x64/report/index.html">gemm_f64/sonium/64x64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../gemv_c32/report/index.html">gemv_c32</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../gemv_c32/openblas/report/index.html">openblas</a></th>
+                            <th><a href="../gemv_c32/oxiblas/report/index.html">oxiblas</a></th>
+                            <th><a href="../gemv_c32/sonium/report/index.html">sonium</a></th>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_c32/1024x1024/report/index.html">1024x1024</a></th>
+                            <td><a href="../gemv_c32/openblas/1024x1024/report/index.html">gemv_c32/openblas/1024x1024</a></td>
+                            <td><a href="../gemv_c32/oxiblas/1024x1024/report/index.html">gemv_c32/oxiblas/1024x1024</a></td>
+                            <td><a href="../gemv_c32/sonium/1024x1024/report/index.html">gemv_c32/sonium/1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_c32/256x256/report/index.html">256x256</a></th>
+                            <td><a href="../gemv_c32/openblas/256x256/report/index.html">gemv_c32/openblas/256x256</a></td>
+                            <td><a href="../gemv_c32/oxiblas/256x256/report/index.html">gemv_c32/oxiblas/256x256</a></td>
+                            <td><a href="../gemv_c32/sonium/256x256/report/index.html">gemv_c32/sonium/256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_c32/4096x1024/report/index.html">4096x1024</a></th>
+                            <td><a href="../gemv_c32/openblas/4096x1024/report/index.html">gemv_c32/openblas/4096x1024</a></td>
+                            <td><a href="../gemv_c32/oxiblas/4096x1024/report/index.html">gemv_c32/oxiblas/4096x1024</a></td>
+                            <td><a href="../gemv_c32/sonium/4096x1024/report/index.html">gemv_c32/sonium/4096x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_c32/64x64/report/index.html">64x64</a></th>
+                            <td><a href="../gemv_c32/openblas/64x64/report/index.html">gemv_c32/openblas/64x64</a></td>
+                            <td><a href="../gemv_c32/oxiblas/64x64/report/index.html">gemv_c32/oxiblas/64x64</a></td>
+                            <td><a href="../gemv_c32/sonium/64x64/report/index.html">gemv_c32/sonium/64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../gemv_c64/report/index.html">gemv_c64</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../gemv_c64/openblas/report/index.html">openblas</a></th>
+                            <th><a href="../gemv_c64/oxiblas/report/index.html">oxiblas</a></th>
+                            <th><a href="../gemv_c64/sonium/report/index.html">sonium</a></th>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_c64/1024x1024/report/index.html">1024x1024</a></th>
+                            <td><a href="../gemv_c64/openblas/1024x1024/report/index.html">gemv_c64/openblas/1024x1024</a></td>
+                            <td><a href="../gemv_c64/oxiblas/1024x1024/report/index.html">gemv_c64/oxiblas/1024x1024</a></td>
+                            <td><a href="../gemv_c64/sonium/1024x1024/report/index.html">gemv_c64/sonium/1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_c64/256x256/report/index.html">256x256</a></th>
+                            <td><a href="../gemv_c64/openblas/256x256/report/index.html">gemv_c64/openblas/256x256</a></td>
+                            <td><a href="../gemv_c64/oxiblas/256x256/report/index.html">gemv_c64/oxiblas/256x256</a></td>
+                            <td><a href="../gemv_c64/sonium/256x256/report/index.html">gemv_c64/sonium/256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_c64/4096x1024/report/index.html">4096x1024</a></th>
+                            <td><a href="../gemv_c64/openblas/4096x1024/report/index.html">gemv_c64/openblas/4096x1024</a></td>
+                            <td><a href="../gemv_c64/oxiblas/4096x1024/report/index.html">gemv_c64/oxiblas/4096x1024</a></td>
+                            <td><a href="../gemv_c64/sonium/4096x1024/report/index.html">gemv_c64/sonium/4096x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_c64/64x64/report/index.html">64x64</a></th>
+                            <td><a href="../gemv_c64/openblas/64x64/report/index.html">gemv_c64/openblas/64x64</a></td>
+                            <td><a href="../gemv_c64/oxiblas/64x64/report/index.html">gemv_c64/oxiblas/64x64</a></td>
+                            <td><a href="../gemv_c64/sonium/64x64/report/index.html">gemv_c64/sonium/64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../gemv_f32/report/index.html">gemv_f32</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../gemv_f32/openblas/report/index.html">openblas</a></th>
+                            <th><a href="../gemv_f32/oxiblas/report/index.html">oxiblas</a></th>
+                            <th><a href="../gemv_f32/sonium/report/index.html">sonium</a></th>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f32/1024x1024/report/index.html">1024x1024</a></th>
+                            <td><a href="../gemv_f32/openblas/1024x1024/report/index.html">gemv_f32/openblas/1024x1024</a></td>
+                            <td><a href="../gemv_f32/oxiblas/1024x1024/report/index.html">gemv_f32/oxiblas/1024x1024</a></td>
+                            <td><a href="../gemv_f32/sonium/1024x1024/report/index.html">gemv_f32/sonium/1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f32/256x256/report/index.html">256x256</a></th>
+                            <td><a href="../gemv_f32/openblas/256x256/report/index.html">gemv_f32/openblas/256x256</a></td>
+                            <td><a href="../gemv_f32/oxiblas/256x256/report/index.html">gemv_f32/oxiblas/256x256</a></td>
+                            <td><a href="../gemv_f32/sonium/256x256/report/index.html">gemv_f32/sonium/256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f32/4096x1024/report/index.html">4096x1024</a></th>
+                            <td><a href="../gemv_f32/openblas/4096x1024/report/index.html">gemv_f32/openblas/4096x1024</a></td>
+                            <td><a href="../gemv_f32/oxiblas/4096x1024/report/index.html">gemv_f32/oxiblas/4096x1024</a></td>
+                            <td><a href="../gemv_f32/sonium/4096x1024/report/index.html">gemv_f32/sonium/4096x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f32/64x64/report/index.html">64x64</a></th>
+                            <td><a href="../gemv_f32/openblas/64x64/report/index.html">gemv_f32/openblas/64x64</a></td>
+                            <td><a href="../gemv_f32/oxiblas/64x64/report/index.html">gemv_f32/oxiblas/64x64</a></td>
+                            <td><a href="../gemv_f32/sonium/64x64/report/index.html">gemv_f32/sonium/64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../gemv_f32_trans/report/index.html">gemv_f32_trans</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../gemv_f32_trans/openblas/report/index.html">openblas</a></th>
+                            <th><a href="../gemv_f32_trans/oxiblas/report/index.html">oxiblas</a></th>
+                            <th><a href="../gemv_f32_trans/sonium/report/index.html">sonium</a></th>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f32_trans/1024x1024/report/index.html">1024x1024</a></th>
+                            <td><a href="../gemv_f32_trans/openblas/1024x1024/report/index.html">gemv_f32_trans/openblas/1024x1024</a></td>
+                            <td><a href="../gemv_f32_trans/oxiblas/1024x1024/report/index.html">gemv_f32_trans/oxiblas/1024x1024</a></td>
+                            <td><a href="../gemv_f32_trans/sonium/1024x1024/report/index.html">gemv_f32_trans/sonium/1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f32_trans/256x256/report/index.html">256x256</a></th>
+                            <td><a href="../gemv_f32_trans/openblas/256x256/report/index.html">gemv_f32_trans/openblas/256x256</a></td>
+                            <td><a href="../gemv_f32_trans/oxiblas/256x256/report/index.html">gemv_f32_trans/oxiblas/256x256</a></td>
+                            <td><a href="../gemv_f32_trans/sonium/256x256/report/index.html">gemv_f32_trans/sonium/256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f32_trans/4096x1024/report/index.html">4096x1024</a></th>
+                            <td><a href="../gemv_f32_trans/openblas/4096x1024/report/index.html">gemv_f32_trans/openblas/4096x1024</a></td>
+                            <td><a href="../gemv_f32_trans/oxiblas/4096x1024/report/index.html">gemv_f32_trans/oxiblas/4096x1024</a></td>
+                            <td><a href="../gemv_f32_trans/sonium/4096x1024/report/index.html">gemv_f32_trans/sonium/4096x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f32_trans/64x64/report/index.html">64x64</a></th>
+                            <td><a href="../gemv_f32_trans/openblas/64x64/report/index.html">gemv_f32_trans/openblas/64x64</a></td>
+                            <td><a href="../gemv_f32_trans/oxiblas/64x64/report/index.html">gemv_f32_trans/oxiblas/64x64</a></td>
+                            <td><a href="../gemv_f32_trans/sonium/64x64/report/index.html">gemv_f32_trans/sonium/64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+            <li><a href="../gemv_f64/report/index.html">gemv_f64</a></li>
+            
+            <ul>
+                <li>
+                    <table>
+                        <tr>
+                            <th></th>
+                            <th><a href="../gemv_f64/openblas/report/index.html">openblas</a></th>
+                            <th><a href="../gemv_f64/oxiblas/report/index.html">oxiblas</a></th>
+                            <th><a href="../gemv_f64/sonium/report/index.html">sonium</a></th>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f64/1024x1024/report/index.html">1024x1024</a></th>
+                            <td><a href="../gemv_f64/openblas/1024x1024/report/index.html">gemv_f64/openblas/1024x1024</a></td>
+                            <td><a href="../gemv_f64/oxiblas/1024x1024/report/index.html">gemv_f64/oxiblas/1024x1024</a></td>
+                            <td><a href="../gemv_f64/sonium/1024x1024/report/index.html">gemv_f64/sonium/1024x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f64/256x256/report/index.html">256x256</a></th>
+                            <td><a href="../gemv_f64/openblas/256x256/report/index.html">gemv_f64/openblas/256x256</a></td>
+                            <td><a href="../gemv_f64/oxiblas/256x256/report/index.html">gemv_f64/oxiblas/256x256</a></td>
+                            <td><a href="../gemv_f64/sonium/256x256/report/index.html">gemv_f64/sonium/256x256</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f64/4096x1024/report/index.html">4096x1024</a></th>
+                            <td><a href="../gemv_f64/openblas/4096x1024/report/index.html">gemv_f64/openblas/4096x1024</a></td>
+                            <td><a href="../gemv_f64/oxiblas/4096x1024/report/index.html">gemv_f64/oxiblas/4096x1024</a></td>
+                            <td><a href="../gemv_f64/sonium/4096x1024/report/index.html">gemv_f64/sonium/4096x1024</a></td>
+                        </tr>
+                        <tr>
+                            <th><a href="../gemv_f64/64x64/report/index.html">64x64</a></th>
+                            <td><a href="../gemv_f64/openblas/64x64/report/index.html">gemv_f64/openblas/64x64</a></td>
+                            <td><a href="../gemv_f64/oxiblas/64x64/report/index.html">gemv_f64/oxiblas/64x64</a></td>
+                            <td><a href="../gemv_f64/sonium/64x64/report/index.html">gemv_f64/sonium/64x64</a></td>
+                        </tr>
+                    </table>
+                </li>
+            </ul>
+        </ul>
+    </div>
+    <div id="footer">
+        <p>This report was generated by
+            <a href="https://github.com/criterion-rs/criterion.rs">Criterion.rs</a>, a statistics-driven benchmarking
+            library in Rust.</p>
+    </div>
+</body>
+</html>

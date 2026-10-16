@@ -1,0 +1,1 @@
+{"group_id":"dense_products_f32","function_id":"sonium_gram_gemm","value_str":"16384x64","throughput":{"Elements":134217728},"full_id":"dense_products_f32/sonium_gram_gemm/16384x64","directory_name":"dense_products_f32/sonium_gram_gemm/16384x64","title":"dense_products_f32/sonium_gram_gemm/16384x64"}

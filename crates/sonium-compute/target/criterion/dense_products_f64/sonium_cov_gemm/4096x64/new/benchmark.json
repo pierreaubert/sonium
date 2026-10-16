@@ -1,0 +1,1 @@
+{"group_id":"dense_products_f64","function_id":"sonium_cov_gemm","value_str":"4096x64","throughput":{"Elements":33554432},"full_id":"dense_products_f64/sonium_cov_gemm/4096x64","directory_name":"dense_products_f64/sonium_cov_gemm/4096x64","title":"dense_products_f64/sonium_cov_gemm/4096x64"}

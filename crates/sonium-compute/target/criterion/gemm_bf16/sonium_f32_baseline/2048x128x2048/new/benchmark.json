@@ -1,0 +1,1 @@
+{"group_id":"gemm_bf16","function_id":"sonium_f32_baseline","value_str":"2048x128x2048","throughput":{"Elements":1073741824},"full_id":"gemm_bf16/sonium_f32_baseline/2048x128x2048","directory_name":"gemm_bf16/sonium_f32_baseline/2048x128x2048","title":"gemm_bf16/sonium_f32_baseline/2048x128x2048"}

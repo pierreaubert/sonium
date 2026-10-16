@@ -1,0 +1,1 @@
+{"group_id":"gemv_c32","function_id":"oxiblas","value_str":"1024x1024","throughput":{"Elements":8388608},"full_id":"gemv_c32/oxiblas/1024x1024","directory_name":"gemv_c32/oxiblas/1024x1024","title":"gemv_c32/oxiblas/1024x1024"}

@@ -1,0 +1,1 @@
+{"group_id":"gemm_c32","function_id":"sonium","value_str":"2048x128x2048","throughput":{"Elements":4294967296},"full_id":"gemm_c32/sonium/2048x128x2048","directory_name":"gemm_c32/sonium/2048x128x2048","title":"gemm_c32/sonium/2048x128x2048"}
