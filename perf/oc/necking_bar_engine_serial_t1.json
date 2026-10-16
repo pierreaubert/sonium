@@ -16,10 +16,10 @@
       "side": "engine",
       "flavor": "serial",
       "threads": 1,
-      "wall_s": 163.560076825,
+      "wall_s": 110.743023531,
       "cycles": 1372839,
       "dof": 297,
-      "ns_per_dof_cycle": 401.1448752381775,
+      "ns_per_dof_cycle": 271.60659997349296,
       "peak_rss_bytes": 38797312,
       "correctness_passed": true
     }
