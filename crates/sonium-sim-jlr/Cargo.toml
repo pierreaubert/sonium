@@ -1,0 +1,38 @@
+[package]
+name = "sonium-sim-jlr"
+version = "0.1.0"
+edition = { workspace = true }
+authors = { workspace = true }
+description = "Jet loop reactor single-phase Lattice Boltzmann replication (Melchior et al. 2026)"
+license = { workspace = true }
+repository = { workspace = true }
+keywords = ["lattice-boltzmann", "jet-loop-reactor", "les", "cfd"]
+categories = ["science", "simulation"]
+
+[lib]
+name = "sonium_sim_jlr"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+rayon = { workspace = true }
+clap = { workspace = true }
+cudarc = { workspace = true, optional = true }
+
+[[bin]]
+name = "jlr-run"
+path = "src/bin/jlr_run.rs"
+
+[[bin]]
+name = "jlr-probe"
+path = "src/bin/jlr_probe.rs"
+required-features = ["cuda"]
+
+[[bin]]
+name = "jlr-bench"
+path = "src/bin/jlr_bench.rs"
+
+[features]
+default = []
+cuda = ["dep:cudarc"]

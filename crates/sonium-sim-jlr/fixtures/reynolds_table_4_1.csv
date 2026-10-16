@@ -1,0 +1,4 @@
+specific_power_kw_per_m3,external_flow_m3_per_s,re_nozzle,re_annular_gap,re_draft_tube
+2.243,1.175e-3,1.25e5,1.67e4,6.09e4
+4.038,1.429e-3,1.52e5,2.10e4,7.61e4
+5.833,1.616e-3,1.71e5,2.36e4,8.56e4
