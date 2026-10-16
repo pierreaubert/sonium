@@ -1338,8 +1338,12 @@ mod tests {
         let medium = AmbientMedium::default();
 
         for frequency in [125.0, 500.0, 2_000.0] {
-            let z = layer.surface_impedance(frequency, medium);
-            let alpha = layer.absorption_coefficient(frequency, medium);
+            let z = layer
+                .try_surface_impedance(frequency, medium)
+                .expect("valid fixture input");
+            let alpha = layer
+                .try_absorption_coefficient(frequency, medium)
+                .expect("valid fixture input");
             assert!(z.re > 0.0);
             assert!((0.0..=1.0).contains(&alpha));
         }
@@ -1422,8 +1426,12 @@ mod tests {
         let layer = PorousLayer::delany_bazley(0.08, 10_000.0);
         let medium = AmbientMedium::default();
 
-        let low = layer.absorption_coefficient(125.0, medium);
-        let mid = layer.absorption_coefficient(1_000.0, medium);
+        let low = layer
+            .try_absorption_coefficient(125.0, medium)
+            .expect("valid fixture input");
+        let mid = layer
+            .try_absorption_coefficient(1_000.0, medium)
+            .expect("valid fixture input");
         assert!(
             mid > low,
             "expected mid-band absorption {mid} > low-band {low}"
@@ -1436,8 +1444,12 @@ mod tests {
         let spaced = flush.with_air_gap(0.05);
         let medium = AmbientMedium::default();
 
-        let flush_alpha = flush.absorption_coefficient(250.0, medium);
-        let spaced_alpha = spaced.absorption_coefficient(250.0, medium);
+        let flush_alpha = flush
+            .try_absorption_coefficient(250.0, medium)
+            .expect("valid fixture input");
+        let spaced_alpha = spaced
+            .try_absorption_coefficient(250.0, medium)
+            .expect("valid fixture input");
         assert!((spaced_alpha - flush_alpha).abs() > 0.01);
     }
 

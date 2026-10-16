@@ -2649,6 +2649,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonium-materials"
+version = "0.1.0"
+dependencies = [
+ "num-complex 0.4.6",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+ "toml",
+]
+
+[[package]]
 name = "sonium-mesher"
 version = "0.1.4"
 dependencies = [
@@ -2707,6 +2719,7 @@ dependencies = [
  "sonium-fft",
  "sonium-mesher",
  "sonium-roomsim",
+ "sonium-sim-jlr",
  "sonium-sim-pcfan",
  "sonium-sim-propellers",
  "sonium-sim-room",
@@ -2762,6 +2775,17 @@ dependencies = [
  "wasm-bindgen-rayon",
  "wasm-bindgen-test",
  "web-sys",
+]
+
+[[package]]
+name = "sonium-sim-jlr"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "cudarc",
+ "rayon",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

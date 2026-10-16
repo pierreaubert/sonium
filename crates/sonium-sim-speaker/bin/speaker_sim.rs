@@ -1204,6 +1204,8 @@ mod tests {
         assert!(error.to_string().contains("same non-zero driver count"));
     }
 
+    // Fixture fills the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     #[test]
     fn dynamic_driver_gallery_writes_per_driver_artifacts() {
         let directory = tempfile::tempdir().unwrap();
@@ -1262,6 +1264,8 @@ mod tests {
         }
     }
 
+    // Fixture fills the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     #[test]
     fn dynamic_driver_gallery_skips_drivers_without_impedance_evidence() {
         // All-`None` impedance rows must not fabricate 0-ohm points: no

@@ -981,6 +981,9 @@ where
         2,
     );
     let pin_pressure = pressure_constant_mode_is_free(&divergence_system.block_01, bc_dofs);
+    if std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1") {
+        eprintln!("NS_PROFILE gauge pin_pressure={pin_pressure} n_v={n_v} n_p={n_p}");
+    }
     let mesh_centroid = mesh.nodes.iter().fold([0.0_f64; 3], |mut sum, point| {
         sum[0] += point.x;
         sum[1] += point.y;
@@ -3198,6 +3201,15 @@ fn solve_iterative_cpu(
             let solve_config = sonium_solvers::GmresConfig {
                 max_iterations: config.linear_solver_max_iterations.max(1),
                 tolerance: config.linear_solver_tolerance,
+                // Saddle-point Oseen systems carry small pressure-Schur
+                // eigenvalues that fixed-restart GMRES(30) cannot resolve:
+                // each restart discards the Krylov direction tracking the
+                // near-nullspace, so the solve stalls indefinitely (DFG
+                // 99x18: 5000 restarts without reaching 1e-9). Adaptive
+                // restart doubles the space only while cycles stall, so
+                // easy systems keep the cheap m=30 behavior.
+                min_restart: Some(30),
+                max_restart: Some(240),
                 ..Default::default()
             };
             let setup_start = std::time::Instant::now();
@@ -3214,10 +3226,16 @@ fn solve_iterative_cpu(
             let gmres_elapsed = gmres_start.elapsed();
             if std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1") {
                 eprintln!(
-                    "NS_PROFILE linear ilu_setup_ms={:.1} gmres_ms={:.1} iters={}",
+                    "NS_PROFILE linear ilu_setup_ms={:.1} gmres_ms={:.1} iters={} restarts={} residual={:.3e} converged={} ilu_skipped={} ilu_nonfinite={} ilu_min_pivot={:.3e}",
                     setup_elapsed.as_secs_f64() * 1000.0,
                     gmres_elapsed.as_secs_f64() * 1000.0,
                     result.iterations,
+                    result.restarts,
+                    result.residual,
+                    result.converged,
+                    preconditioner.diagnostics().skipped_pivots,
+                    preconditioner.diagnostics().non_finite_entries,
+                    preconditioner.diagnostics().min_abs_pivot.unwrap_or(f64::NAN),
                 );
             }
             let iterations = result.iterations;

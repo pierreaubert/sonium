@@ -13,7 +13,7 @@ use sonium_bem::core::integration::singular::{
     QuadratureParams, singular_integration_linear_with_params, singular_integration_with_params,
 };
 use sonium_bem::core::types::{
-    BasisOrder, BoundaryCondition, Element, ElementProperty, ElementType, PhysicsParams,
+    BoundaryCondition, Element, ElementProperty, ElementType, PhysicsParams,
 };
 use sonium_solvers::dense::DenseMatrix;
 

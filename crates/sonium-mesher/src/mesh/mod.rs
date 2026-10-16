@@ -2,6 +2,7 @@
 //!
 //! This module provides mesh data structures and generators for 2D and 3D finite element analysis.
 
+pub mod cad_import;
 pub mod generators;
 #[cfg(feature = "mshio")]
 pub mod gmsh;

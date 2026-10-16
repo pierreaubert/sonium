@@ -570,7 +570,8 @@ pub fn rigid_rectangular_cavity_mode_hz(
 }
 
 pub fn hard_circular_duct_cutoff_hz(sound_speed_m_per_s: f64, radius_m: f64) -> f64 {
-    1.841 * sound_speed_m_per_s / (2.0 * PI * radius_m)
+    // First zero of J1' is 1.8411837813; 1.8412 is the shared duct constant.
+    1.8412 * sound_speed_m_per_s / (2.0 * PI * radius_m)
 }
 
 pub fn pulsating_sphere_pressure_rms(

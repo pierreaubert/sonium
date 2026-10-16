@@ -1700,6 +1700,8 @@ fn evaluate_perturbed_geometry_with_held_state(
     })
 }
 
+// Fixture fills the deprecated per-driver vectors alongside the matrix.
+#[allow(deprecated)]
 /// Full-reassembly reference implementation of
 /// [`evaluate_perturbed_geometry_with_held_state`], retained for validation
 /// tests and before/after timing. Rebuilds the complete TBEM system and

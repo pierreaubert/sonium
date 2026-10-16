@@ -102,7 +102,7 @@
         if (figure.kind === "png" || figure.kind === "gif") {
           const image = document.createElement("img"); image.src = figure.filename; image.alt = figure.caption || figure.filename; card.append(image);
         } else if (figure.kind === "svg") {
-          const object = document.createElement("object"); object.data = figure.filename; object.type = "image/svg+xml"; object.title = figure.filename; card.append(object);
+          const image = document.createElement("img"); image.src = figure.filename; image.alt = figure.caption || figure.filename; card.append(image);
         } else {
           const link = document.createElement("a"); link.href = figure.filename; link.textContent = `open ${figure.filename}`; card.append(link);
         }

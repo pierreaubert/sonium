@@ -8808,7 +8808,7 @@ mod tests {
             .with_assembly_method(AssemblyMethod::Tbem)
             .with_solver_method(SolverMethod::Direct);
         let mut cache = BemOperatorCache::new();
-        let first = solver
+        let _first = solver
             .solve_with_cache(&base, &mut cache, BemReusePolicy::default())
             .expect("initial cached solve");
         assert!(cache.is_populated());

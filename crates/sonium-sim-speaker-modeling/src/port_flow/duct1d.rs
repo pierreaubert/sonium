@@ -363,6 +363,47 @@ pub fn duct_inertance_kg_per_m4(
     Ok(inertance)
 }
 
+/// Fidelity tier selected by frequency against the duct cutoff.
+///
+/// The one-dimensional plane-wave tier is used only sufficiently below
+/// the first higher-order cutoff; at and above half the cutoff the
+/// resolved or modal tier is required, because evanescent higher-order
+/// modes still change the local field near discontinuities even when
+/// they carry no far-field power.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PortFidelity {
+    /// One-dimensional transfer-matrix tier (Tier 0/1).
+    OneDimensional,
+    /// Resolved or modal tier (Tier 2).
+    ResolvedModal,
+}
+
+/// Selects the port fidelity for `frequency_hz` against `cutoff_hz`.
+///
+/// Returns [`PortFidelity::OneDimensional`] only when the frequency is
+/// below half the cutoff (plane-wave margin `f_c/f > 2`); otherwise the
+/// resolved/modal tier is required. Both inputs must be finite and
+/// positive; invalid inputs fail closed to the resolved tier by
+/// returning an error from the caller's validation, so this selector
+/// itself documents the threshold in one place.
+///
+/// # Panics
+///
+/// Panics only on a programming error: non-finite or non-positive
+/// inputs are contract violations caught by caller validation.
+#[must_use]
+pub fn select_port_fidelity(frequency_hz: f64, cutoff_hz: f64) -> PortFidelity {
+    assert!(
+        frequency_hz.is_finite() && frequency_hz > 0.0 && cutoff_hz.is_finite() && cutoff_hz > 0.0,
+        "port fidelity inputs must be finite and positive"
+    );
+    if frequency_hz * 2.0 < cutoff_hz {
+        PortFidelity::OneDimensional
+    } else {
+        PortFidelity::ResolvedModal
+    }
+}
+
 /// First higher-order circular-duct cutoff `f_c = 1.8412·c/(2·π·R)` in Hz.
 pub fn cutoff_frequency_hz(medium: AcousticMedium, radius_m: f64) -> Result<f64, PortFlowError> {
     check_medium(medium)?;

@@ -33,10 +33,12 @@ members = [
     "crates/sonium-sim-speaker-modeling",
     "crates/sonium-sim-speaker",
     "crates/sonium-sim-structural-mechanics",
+    "crates/sonium-sim-jlr",
     "crates/sonium-meshlang/crates/meshlang-ast",
     "crates/sonium-meshlang/crates/meshlang-parser",
     "crates/sonium-meshlang/crates/meshlang-compiler",
     "crates/sonium-wasm",
+    "crates/sonium-materials",
 ]
 
 # Native crates only — excludes WASM-only targets
@@ -71,10 +73,12 @@ default-members = [
     "crates/sonium-sim-speaker-modeling",
     "crates/sonium-sim-speaker",
     "crates/sonium-sim-structural-mechanics",
+    "crates/sonium-sim-jlr",
     "crates/sonium-bench",
     "crates/sonium-meshlang/crates/meshlang-ast",
     "crates/sonium-meshlang/crates/meshlang-parser",
     "crates/sonium-meshlang/crates/meshlang-compiler",
+    "crates/sonium-materials",
 ]
 
 [workspace.package]
@@ -115,11 +119,13 @@ sonium-sim-propellers = { path = "crates/sonium-sim-propellers" }
 sonium-sim-speaker-modeling = { path = "crates/sonium-sim-speaker-modeling" }
 sonium-sim-speaker = { path = "crates/sonium-sim-speaker" }
 sonium-sim-structural-mechanics = { path = "crates/sonium-sim-structural-mechanics" }
+sonium-sim-jlr = { path = "crates/sonium-sim-jlr" }
 sonium-bench = { path = "crates/sonium-bench" }
 sonium-roomsim = { path = "crates/sonium-wasm" }
 meshlang-ast = { path = "crates/sonium-meshlang/crates/meshlang-ast" }
 meshlang-parser = { path = "crates/sonium-meshlang/crates/meshlang-parser", default-features = false }
 meshlang-compiler = { path = "crates/sonium-meshlang/crates/meshlang-compiler", default-features = false }
+sonium-materials = { path = "crates/sonium-materials" }
 
 sofa-reader = { version = "0.2", git = "https://github.com/pierreaubert/sofa-reader" }
 hdf5 = "0.8"

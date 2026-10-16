@@ -4,7 +4,7 @@
   "renderer": "sonium-xem deterministic-raster-svg-v1",
   "width_px": 1920,
   "height_px": 1080,
-  "git_sha": "d3593b2bf7f5d0bc5e2cb1f4bc07b73ce9c1930a",
+  "git_sha": "e0dafa853690bc1625a8bbfa1d2498da9f7d6f96",
   "conventions": [
     "Pinned 18,000 RPM two-blade 3 N operating point; actual_backend=CPU; precision=f64; fidelity=PanelGeometrySurrogate",
     "1920x1080 fixed raster canvas, deterministic colour mapping and SVG axes; all rendered fields are scalar presentation data",

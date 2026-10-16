@@ -254,7 +254,7 @@ fn probe_law62() {
         state.stress[0], state.hencky[0]
     );
     // uniaxial lateral solve probe
-    let mut state = Law62State::new(law.prony.len());
+    let state = Law62State::new(law.prony.len());
     let de = 0.002;
     let probe = |dl: f64| {
         law.update_with_rate(&state, &[de, dl, dl, 0.0, 0.0, 0.0], dt)

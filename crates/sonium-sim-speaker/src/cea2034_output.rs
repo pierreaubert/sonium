@@ -739,6 +739,8 @@ mod tests {
         assert!((pts[36][2] - center[2] - 1.0).abs() < 1e-10);
     }
 
+    // Fixture fills the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     #[test]
     fn test_write_cea2034_files() {
         let mut spl = HostMatrix::<f64>::zeros(3, TOTAL_EVAL_POINTS);
@@ -805,6 +807,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // Fixture fills the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     #[test]
     fn test_write_cea2034_files_rejects_wrong_shape_and_non_finite_data() {
         let dir = std::env::temp_dir().join("speaker_cea2034_invalid_test");
@@ -856,6 +860,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // Fixture fills the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     #[test]
     fn test_write_cea2034_files_rejects_malformed_dynamic_driver_evidence() {
         let dir = std::env::temp_dir().join("speaker_cea2034_malformed_driver_test");
@@ -962,6 +968,8 @@ mod tests {
         assert_eq!(weights[v(180)], 0.0);
     }
 
+    // Fixture fills the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     #[cfg(feature = "cli")]
     #[test]
     fn test_listening_window_includes_on_axis() {
@@ -1000,6 +1008,8 @@ mod tests {
         assert_close(metrics.listening_window[0], expected, 1e-12);
     }
 
+    // Fixture fills the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     #[cfg(feature = "cli")]
     #[test]
     fn test_spinorama_metrics_rejects_insufficient_grid_instead_of_returning_nan() {
@@ -1180,6 +1190,8 @@ mod tests {
         assert_eq!(decoded, report);
     }
 
+    // Fixture fills the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     #[cfg(feature = "cli")]
     fn synthetic_spinorama_result() -> SimulationResult {
         let frequencies = vec![

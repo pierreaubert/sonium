@@ -396,6 +396,19 @@ impl AcousticParameters {
                 *absorption_resistance_pa_s_per_m3,
                 Some(*port),
             ),
+            // The lumped nonlinear circuit has no passive-radiator or
+            // bandpass front-chamber branch; fail closed instead of
+            // silently degrading either variant to a sealed box.
+            EnclosureSpec::PassiveRadiator { .. } => {
+                return Err(ModelingError::UnsupportedEnclosure(
+                    "passive radiator in lumped nonlinear study",
+                ));
+            }
+            EnclosureSpec::Bandpass { .. } => {
+                return Err(ModelingError::UnsupportedEnclosure(
+                    "bandpass in lumped nonlinear study",
+                ));
+            }
         };
         let conductance = [leakage, absorption]
             .into_iter()

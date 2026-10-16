@@ -1005,99 +1005,99 @@ fn near_singular_dense_and_sparse_lu_report_finite_residual() {
             .fold(0.0, f64::max);
         assert!(residual <= 1.0e-10, "near-singular residual={residual}");
     }
+}
 
-    fn seeded_complex_hpd_matrix(seed: u64) -> Vec<Vec<Complex64>> {
-        let n = 5;
-        let mut state = seed;
-        let mut next = || {
-            state = state
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1_442_695_040_888_963_407);
-            ((state >> 11) as f64 / (1_u64 << 53) as f64) * 2.0 - 1.0
-        };
-        let mut lower = vec![vec![Complex64::new(0.0, 0.0); n]; n];
-        for (row, entries) in lower.iter_mut().enumerate() {
-            for entry in entries.iter_mut().take(row + 1) {
-                *entry = Complex64::new(0.15 * next(), 0.15 * next());
-            }
-            entries[row] += Complex64::new(1.5 + 0.25 * next().abs(), 0.0);
+fn seeded_complex_hpd_matrix(seed: u64) -> Vec<Vec<Complex64>> {
+    let n = 5;
+    let mut state = seed;
+    let mut next = || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((state >> 11) as f64 / (1_u64 << 53) as f64) * 2.0 - 1.0
+    };
+    let mut lower = vec![vec![Complex64::new(0.0, 0.0); n]; n];
+    for (row, entries) in lower.iter_mut().enumerate() {
+        for entry in entries.iter_mut().take(row + 1) {
+            *entry = Complex64::new(0.15 * next(), 0.15 * next());
         }
-        let mut matrix = vec![vec![Complex64::new(0.0, 0.0); n]; n];
-        for row in 0..n {
-            for column in 0..n {
-                let limit = (row.min(column)) + 1;
-                matrix[row][column] = (0..limit)
-                    .map(|k| lower[row][k] * lower[column][k].conj())
-                    .sum();
-                if row == column {
-                    matrix[row][column] += Complex64::new(0.5, 0.0);
-                }
-            }
-        }
-        matrix
+        entries[row] += Complex64::new(1.5 + 0.25 * next().abs(), 0.0);
     }
-
-    #[test]
-    fn seeded_complex_hpd_factor_solve_matches_dense_sparse() {
-        let mut max_solution_error = 0.0_f64;
-        let mut max_residual = 0.0_f64;
-        for seed in 0..8_u64 {
-            let matrix = seeded_complex_hpd_matrix(0xC0DE_0000_u64.wrapping_add(seed));
-            let expected: Vec<_> = (0..matrix.len())
-                .map(|index| Complex64::new(0.5 + index as f64, -0.25 * index as f64))
-                .collect();
-            let rhs = dense_matvec(&matrix, &expected);
-            let dense = DenseMatrix::from_row_major_vec(
-                matrix.len(),
-                matrix.len(),
-                matrix.iter().flatten().copied().collect(),
-            );
-            let dense_factor = factorize_dense(
-                &dense,
-                &DenseDirectConfig {
-                    matrix_class: MatrixClass::HermitianPositiveDefinite,
-                    method: DenseDirectMethod::Cholesky,
-                    ..Default::default()
-                },
-            )
-            .expect("seeded complex HPD dense factorization");
-            let sparse_factor = factorize_sparse(
-                &csr_from_dense(&matrix),
-                &SparseDirectConfig {
-                    matrix_class: MatrixClass::HermitianPositiveDefinite,
-                    method: SparseDirectMethod::SimplicialCholesky,
-                    ordering: Ordering::Auto,
-                    ..Default::default()
-                },
-                None,
-            )
-            .expect("seeded complex HPD sparse factorization");
-            let dense_solution = dense_factor.solve(&rhs).expect("seeded dense solve");
-            let sparse_solution = sparse_factor.solve(&rhs).expect("seeded sparse solve");
-            max_solution_error = max_solution_error.max(
-                dense_solution
-                    .iter()
-                    .zip(&sparse_solution)
-                    .map(|(dense, sparse)| (*dense - *sparse).norm())
-                    .fold(0.0, f64::max),
-            );
-            max_residual = max_residual.max(
-                dense_matvec(&matrix, &sparse_solution)
-                    .iter()
-                    .zip(&rhs)
-                    .map(|(actual, expected)| (*actual - *expected).norm())
-                    .fold(0.0, f64::max),
-            );
+    let mut matrix = vec![vec![Complex64::new(0.0, 0.0); n]; n];
+    for row in 0..n {
+        for column in 0..n {
+            let limit = (row.min(column)) + 1;
+            matrix[row][column] = (0..limit)
+                .map(|k| lower[row][k] * lower[column][k].conj())
+                .sum();
+            if row == column {
+                matrix[row][column] += Complex64::new(0.5, 0.0);
+            }
         }
-        assert!(
-            max_solution_error <= 1.0e-11,
-            "dense/sparse error={max_solution_error}"
+    }
+    matrix
+}
+
+#[test]
+fn seeded_complex_hpd_factor_solve_matches_dense_sparse() {
+    let mut max_solution_error = 0.0_f64;
+    let mut max_residual = 0.0_f64;
+    for seed in 0..8_u64 {
+        let matrix = seeded_complex_hpd_matrix(0xC0DE_0000_u64.wrapping_add(seed));
+        let expected: Vec<_> = (0..matrix.len())
+            .map(|index| Complex64::new(0.5 + index as f64, -0.25 * index as f64))
+            .collect();
+        let rhs = dense_matvec(&matrix, &expected);
+        let dense = DenseMatrix::from_row_major_vec(
+            matrix.len(),
+            matrix.len(),
+            matrix.iter().flatten().copied().collect(),
         );
-        assert!(
-            max_residual <= 1.0e-11,
-            "seeded HPD residual={max_residual}"
+        let dense_factor = factorize_dense(
+            &dense,
+            &DenseDirectConfig {
+                matrix_class: MatrixClass::HermitianPositiveDefinite,
+                method: DenseDirectMethod::Cholesky,
+                ..Default::default()
+            },
+        )
+        .expect("seeded complex HPD dense factorization");
+        let sparse_factor = factorize_sparse(
+            &csr_from_dense(&matrix),
+            &SparseDirectConfig {
+                matrix_class: MatrixClass::HermitianPositiveDefinite,
+                method: SparseDirectMethod::SimplicialCholesky,
+                ordering: Ordering::Auto,
+                ..Default::default()
+            },
+            None,
+        )
+        .expect("seeded complex HPD sparse factorization");
+        let dense_solution = dense_factor.solve(&rhs).expect("seeded dense solve");
+        let sparse_solution = sparse_factor.solve(&rhs).expect("seeded sparse solve");
+        max_solution_error = max_solution_error.max(
+            dense_solution
+                .iter()
+                .zip(&sparse_solution)
+                .map(|(dense, sparse)| (*dense - *sparse).norm())
+                .fold(0.0, f64::max),
+        );
+        max_residual = max_residual.max(
+            dense_matvec(&matrix, &sparse_solution)
+                .iter()
+                .zip(&rhs)
+                .map(|(actual, expected)| (*actual - *expected).norm())
+                .fold(0.0, f64::max),
         );
     }
+    assert!(
+        max_solution_error <= 1.0e-11,
+        "dense/sparse error={max_solution_error}"
+    );
+    assert!(
+        max_residual <= 1.0e-11,
+        "seeded HPD residual={max_residual}"
+    );
 }
 
 #[test]

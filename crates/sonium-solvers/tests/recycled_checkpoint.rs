@@ -1,3 +1,7 @@
+#![expect(
+    deprecated,
+    reason = "this suite pins the deprecated recycled-GMRES checkpoint contract for API compatibility"
+)]
 use num_complex::{Complex32, Complex64};
 use num_traits::{FromPrimitive, ToPrimitive};
 use sonium_solvers::SolverResultContract;

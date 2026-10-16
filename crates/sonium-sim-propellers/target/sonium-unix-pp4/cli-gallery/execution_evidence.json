@@ -20,7 +20,7 @@
     "host": {
       "compiler": "rustc 1.99.0 (b940084d7 2026-09-28)",
       "os": "linux",
-      "kernel": "6.8.0-142-generic",
+      "kernel": "6.8.0-146-generic",
       "cpu_model": "AMD Ryzen Threadripper PRO 3995WX 64-Cores",
       "microcode": "0x830107c",
       "target": "x86_64-linux",
@@ -35,7 +35,7 @@
     "blade-load-distribution.svg": "9cd8fc2532f0fb9dd4ad32f00bf0dee8c42569e2d4779fb70ea89aba60034ca2",
     "blade_load_distribution.csv": "2a8d89d5d9ae1f86d4d47909c4c3e4a24272418337ab3248bae67534b21eb492",
     "conventional-toroidal-comparison.svg": "2425590556d17dbf4498a7611302b1a5d4cb6f75fe5f6494bfd82fd6eb4212e3",
-    "gallery.json": "46f131ca594a663b26c9696ea15d114a506f3ee11bd270a0442e55e969ff390f",
+    "gallery.json": "e2507e1e9338836850d8599c268e34ce67322e5c6f306168cb6dfb3a5e306f93",
     "optimized-blade-loading.png": "9a0382d92a595d4a12ee08accceb4dbeb427d93b8c08113a6cc8c9cd9b5574f6",
     "optimized_blade.vtu": "c4143cde84d7b615364261e2efcbabe5891399913440f9b0452c154567589ca5",
     "rotation.gif": "b9b7a69bf33ed95bf157216af4685a51a9372d49062faa586f51bbbc14df1478",

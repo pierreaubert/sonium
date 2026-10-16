@@ -1,4 +1,6 @@
-use num_complex::{Complex32, Complex64};
+#[cfg(feature = "cuda")]
+use num_complex::Complex32;
+use num_complex::Complex64;
 use sonium_compute::{Backend, CpuBackend, DevicePreconditioner};
 use sonium_solvers_preconditioners::{
     AdditiveSchwarzPreconditioner, AmgConfig, AmgPreconditioner, AmgSmoother,
@@ -191,7 +193,10 @@ fn backend_amg_exposes_setup_diagnostics() {
     assert_eq!(diagnostics.level_dofs.len(), diagnostics.num_levels);
     assert_eq!(diagnostics.level_nnz.len(), diagnostics.num_levels);
     assert_eq!(diagnostics.finest_nnz, diagnostics.level_nnz[0]);
-    assert_eq!(diagnostics.total_nnz, diagnostics.level_nnz.iter().sum());
+    assert_eq!(
+        diagnostics.total_nnz,
+        diagnostics.level_nnz.iter().sum::<usize>()
+    );
     assert!(diagnostics.grid_complexity >= 1.0);
     assert!(diagnostics.operator_complexity >= 1.0);
     assert!(!diagnostics.has_coarse_direct_solver);

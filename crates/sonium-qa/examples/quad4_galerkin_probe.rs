@@ -20,6 +20,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ]
         .iter()
         .any(|r| !r.is_finite() || *r > 1e-8)
+        || [
+            metrics.coarse_solution_error,
+            metrics.medium_solution_error,
+            metrics.fine_solution_error,
+        ]
+        .iter()
+        .any(|r| !r.is_finite() || *r > 1e-8)
+        || metrics.fine_dofs <= metrics.coarse_dofs
+        || metrics.fine_panels <= metrics.coarse_panels
     {
         return Err("original Quad4 accuracy/convergence/equation budgets not met".into());
     }

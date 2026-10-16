@@ -200,7 +200,7 @@ fn gcro_dr_checkpoint_round_trip_resumes_and_updates_subspace() {
     assert_eq!(restored.num_vectors(), checkpoint.num_vectors());
     assert_eq!(restored.vectors(), checkpoint.vectors());
 
-    let (mut resumed_subspace, resumed) = restored
+    let (resumed_subspace, resumed) = restored
         .resume(&operator, &second_rhs, None, &config())
         .expect("GCRO-DR checkpoint resume");
     assert!(resumed.converged);

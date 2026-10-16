@@ -603,6 +603,8 @@ mod tests {
         );
     }
 
+    // Fixture fills the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     /// Synthetic result for coverage-validation tests (no BEM solve needed).
     fn synthetic_result(n_freqs: usize, n_points: usize) -> SimulationResult {
         SimulationResult {

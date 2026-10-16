@@ -1,5 +1,5 @@
 use num_complex::Complex64;
-use sonium_solvers_core::traits::{AccuracyStatus, SolverFailure, SolverStatus};
+use sonium_solvers_core::traits::{AccuracyStatus, SolverStatus};
 use sonium_solvers_core::traits::{AdjointCapability, Preconditioner};
 use sonium_solvers_direct::{CholeskyOrdering, SparseCholeskyError, SparseCholeskyFactorization};
 use sonium_solvers_sparse::CsrMatrix;

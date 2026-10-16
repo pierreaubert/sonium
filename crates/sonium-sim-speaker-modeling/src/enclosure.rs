@@ -67,6 +67,72 @@ impl PortSpec {
     }
 }
 
+/// Lumped passive-radiator (drone cone) parameters.
+///
+/// The radiator is a mass-compliance-resistance mechanical branch with
+/// no motor. Its acoustic impedance is `Z_m / S^2`, where `Z_m` is the
+/// mechanical impedance `force / velocity` and `S` is the radiator area.
+/// The lumped form holds only while the radiator and cavity stay
+/// acoustically compact; above that regime a resolved model is required.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PassiveRadiatorSpec {
+    /// Radiator diaphragm area in m².
+    pub area_m2: f64,
+    /// Radiator moving mass in kg.
+    pub moving_mass_kg: f64,
+    /// Mechanical compliance in m/N.
+    pub compliance_m_per_n: f64,
+    /// Mechanical resistance in kg/s.
+    pub resistance_kg_per_s: f64,
+}
+
+impl PassiveRadiatorSpec {
+    /// Validates the radiator parameters.
+    pub fn validate(self) -> Result<(), ModelingError> {
+        require_positive("enclosure.passive_radiator.area_m2", self.area_m2)?;
+        require_positive("enclosure.passive_radiator.moving_mass_kg", self.moving_mass_kg)?;
+        require_positive(
+            "enclosure.passive_radiator.compliance_m_per_n",
+            self.compliance_m_per_n,
+        )?;
+        require_nonnegative(
+            "enclosure.passive_radiator.resistance_kg_per_s",
+            self.resistance_kg_per_s,
+        )
+    }
+
+    /// Acoustic impedance `pressure / volume_velocity` in Pa·s/m³.
+    pub fn acoustic_impedance(
+        self,
+        frequency_hz: f64,
+    ) -> Result<Complex64, ModelingError> {
+        self.validate()?;
+        require_positive("frequency_hz", frequency_hz)?;
+        let omega = std::f64::consts::TAU * frequency_hz;
+        let stiffness = 1.0 / self.compliance_m_per_n;
+        let mechanical = Complex64::new(
+            self.resistance_kg_per_s,
+            omega * self.moving_mass_kg - stiffness / omega,
+        );
+        let impedance = mechanical / (self.area_m2 * self.area_m2);
+        require_finite("enclosure.passive_radiator.impedance.re", impedance.re)?;
+        require_finite("enclosure.passive_radiator.impedance.im", impedance.im)?;
+        Ok(impedance)
+    }
+
+    /// Undamped radiator resonance `1/(2π√(M·C))` in Hz.
+    ///
+    /// This is the undamped natural frequency, not the damped response
+    /// peak; the two must never be reported as the same quantity.
+    pub fn resonance_hz(self) -> Result<f64, ModelingError> {
+        self.validate()?;
+        let frequency =
+            1.0 / (std::f64::consts::TAU * (self.moving_mass_kg * self.compliance_m_per_n).sqrt());
+        require_positive("enclosure.passive_radiator.resonance_hz", frequency)?;
+        Ok(frequency)
+    }
+}
+
 /// Rear acoustic loading attached to the diaphragm.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum EnclosureSpec {
@@ -82,6 +148,27 @@ pub enum EnclosureSpec {
     Vented {
         volume_m3: f64,
         port: PortSpec,
+        leakage_resistance_pa_s_per_m3: f64,
+        absorption_resistance_pa_s_per_m3: f64,
+    },
+    /// Sealed box loaded by a passive radiator instead of a port.
+    PassiveRadiator {
+        volume_m3: f64,
+        radiator: PassiveRadiatorSpec,
+        leakage_resistance_pa_s_per_m3: f64,
+        absorption_resistance_pa_s_per_m3: f64,
+    },
+    /// Fourth-order bandpass: sealed rear chamber, ported front chamber.
+    ///
+    /// The rear impedance seen by the diaphragm is the sealed rear
+    /// chamber; the front chamber and its port shape the radiated
+    /// output and are exposed separately, never folded into the rear
+    /// load. Lumped relations hold only while both chambers and the
+    /// front neck stay acoustically compact.
+    Bandpass {
+        rear_volume_m3: f64,
+        front_volume_m3: f64,
+        front_port: PortSpec,
         leakage_resistance_pa_s_per_m3: f64,
         absorption_resistance_pa_s_per_m3: f64,
     },
@@ -101,6 +188,12 @@ impl EnclosureSpec {
                 leakage_resistance_pa_s_per_m3,
                 absorption_resistance_pa_s_per_m3,
                 ..
+            }
+            | Self::PassiveRadiator {
+                volume_m3,
+                leakage_resistance_pa_s_per_m3,
+                absorption_resistance_pa_s_per_m3,
+                ..
             } => {
                 require_positive("enclosure.volume_m3", *volume_m3)?;
                 require_nonnegative(
@@ -114,7 +207,29 @@ impl EnclosureSpec {
                 if let Self::Vented { port, .. } = self {
                     port.validate()?;
                 }
+                if let Self::PassiveRadiator { radiator, .. } = self {
+                    radiator.validate()?;
+                }
                 Ok(())
+            }
+            Self::Bandpass {
+                rear_volume_m3,
+                front_volume_m3,
+                front_port,
+                leakage_resistance_pa_s_per_m3,
+                absorption_resistance_pa_s_per_m3,
+            } => {
+                require_positive("enclosure.bandpass.rear_volume_m3", *rear_volume_m3)?;
+                require_positive("enclosure.bandpass.front_volume_m3", *front_volume_m3)?;
+                require_nonnegative(
+                    "enclosure.leakage_resistance_pa_s_per_m3",
+                    *leakage_resistance_pa_s_per_m3,
+                )?;
+                require_nonnegative(
+                    "enclosure.absorption_resistance_pa_s_per_m3",
+                    *absorption_resistance_pa_s_per_m3,
+                )?;
+                front_port.validate()
             }
         }
     }
@@ -128,7 +243,7 @@ impl EnclosureSpec {
         self.validate()?;
         require_positive("frequency_hz", frequency_hz)?;
         medium.validate()?;
-        let (volume_m3, leakage, absorption, port) = match self {
+        let (volume_m3, leakage, absorption, port, radiator) = match self {
             Self::FreeAir => return Ok(Complex64::new(0.0, 0.0)),
             Self::Sealed {
                 volume_m3,
@@ -138,6 +253,7 @@ impl EnclosureSpec {
                 *volume_m3,
                 *leakage_resistance_pa_s_per_m3,
                 *absorption_resistance_pa_s_per_m3,
+                None,
                 None,
             ),
             Self::Vented {
@@ -150,6 +266,31 @@ impl EnclosureSpec {
                 *leakage_resistance_pa_s_per_m3,
                 *absorption_resistance_pa_s_per_m3,
                 Some(*port),
+                None,
+            ),
+            Self::PassiveRadiator {
+                volume_m3,
+                radiator,
+                leakage_resistance_pa_s_per_m3,
+                absorption_resistance_pa_s_per_m3,
+            } => (
+                *volume_m3,
+                *leakage_resistance_pa_s_per_m3,
+                *absorption_resistance_pa_s_per_m3,
+                None,
+                Some(*radiator),
+            ),
+            Self::Bandpass {
+                rear_volume_m3,
+                leakage_resistance_pa_s_per_m3,
+                absorption_resistance_pa_s_per_m3,
+                ..
+            } => (
+                *rear_volume_m3,
+                *leakage_resistance_pa_s_per_m3,
+                *absorption_resistance_pa_s_per_m3,
+                None,
+                None,
             ),
         };
         let omega = std::f64::consts::TAU * frequency_hz;
@@ -165,6 +306,10 @@ impl EnclosureSpec {
         if let Some(port) = port {
             admittance +=
                 Complex64::new(1.0, 0.0) / port.acoustic_impedance(frequency_hz, medium)?;
+        }
+        if let Some(radiator) = radiator {
+            admittance +=
+                Complex64::new(1.0, 0.0) / radiator.acoustic_impedance(frequency_hz)?;
         }
         require_finite("enclosure.acoustic_admittance.re", admittance.re)?;
         require_finite("enclosure.acoustic_admittance.im", admittance.im)?;
@@ -193,6 +338,89 @@ impl EnclosureSpec {
             * (area / (volume_m3 * effective_length)).sqrt();
         require_positive("enclosure.tuning_frequency_hz", frequency)?;
         Ok(Some(frequency))
+    }
+
+    /// Helmholtz tuning of the bandpass front chamber, if bandpass.
+    ///
+    /// Uses `f = c/(2π)·√(S/(V_front·L_eff))`, valid only while the
+    /// front neck and cavity stay acoustically compact.
+    pub fn front_tuning_frequency_hz(
+        &self,
+        medium: AcousticMedium,
+    ) -> Result<Option<f64>, ModelingError> {
+        self.validate()?;
+        medium.validate()?;
+        let Self::Bandpass { front_volume_m3, front_port, .. } = self else {
+            return Ok(None);
+        };
+        let area = front_port.area_m2()?;
+        let effective_length = front_port.length_m + front_port.end_correction_m;
+        let frequency = medium.sound_speed_m_per_s / std::f64::consts::TAU
+            * (area / (front_volume_m3 * effective_length)).sqrt();
+        require_positive("enclosure.bandpass.front_tuning_frequency_hz", frequency)?;
+        Ok(Some(frequency))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn medium() -> AcousticMedium {
+        AcousticMedium {
+            density_kg_per_m3: 1.204,
+            sound_speed_m_per_s: 343.0,
+            dynamic_viscosity_pa_s: 1.81e-5,
+            thermal_diffusivity_m2_per_s: 2.5e-5,
+        }
+    }
+
+    #[test]
+    fn passive_radiator_resonance_and_passivity() {
+        let radiator = PassiveRadiatorSpec {
+            area_m2: 0.02,
+            moving_mass_kg: 0.05,
+            compliance_m_per_n: 0.001,
+            resistance_kg_per_s: 0.5,
+        };
+        let resonance = radiator.resonance_hz().expect("resonance");
+        assert!((resonance - 22.51).abs() < 0.1);
+        let impedance = radiator.acoustic_impedance(50.0).expect("impedance");
+        assert!(impedance.re >= 0.0, "passive radiator must stay passive");
+        let enclosure = EnclosureSpec::PassiveRadiator {
+            volume_m3: 0.02,
+            radiator,
+            leakage_resistance_pa_s_per_m3: 0.0,
+            absorption_resistance_pa_s_per_m3: 0.0,
+        };
+        let load = enclosure.acoustic_impedance(50.0, medium()).expect("load");
+        assert!(load.re >= 0.0 && load.is_finite());
+    }
+
+    #[test]
+    fn bandpass_rear_load_is_sealed_rear_chamber() {
+        let port = PortSpec {
+            radius_m: 0.03,
+            length_m: 0.1,
+            end_correction_m: 0.02,
+            resistance_pa_s_per_m3: 0.0,
+        };
+        let bandpass = EnclosureSpec::Bandpass {
+            rear_volume_m3: 0.02,
+            front_volume_m3: 0.01,
+            front_port: port,
+            leakage_resistance_pa_s_per_m3: 0.0,
+            absorption_resistance_pa_s_per_m3: 0.0,
+        };
+        let sealed = EnclosureSpec::Sealed {
+            volume_m3: 0.02,
+            leakage_resistance_pa_s_per_m3: 0.0,
+            absorption_resistance_pa_s_per_m3: 0.0,
+        };
+        let actual = bandpass.acoustic_impedance(100.0, medium()).expect("bandpass");
+        let expected = sealed.acoustic_impedance(100.0, medium()).expect("sealed");
+        assert!((actual - expected).norm() < 1e-9);
+        assert!(bandpass.front_tuning_frequency_hz(medium()).expect("tuning").is_some());
     }
 }
 

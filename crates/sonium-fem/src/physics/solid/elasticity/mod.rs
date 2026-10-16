@@ -20,7 +20,12 @@
 mod forms;
 mod materials;
 pub mod torsion;
+pub mod viscoelastic_freq;
 
 pub use forms::*;
 pub use materials::*;
 pub use torsion::*;
+pub use viscoelastic_freq::{
+    ComplexModulusModel, ConstantLossModulus, ModulusPoint, PronyBranch, PronyComplexModulus,
+    TabulatedComplexModulus, ViscoelasticError,
+};

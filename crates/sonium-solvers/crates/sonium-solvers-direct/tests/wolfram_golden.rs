@@ -34,15 +34,12 @@ struct RealSystem {
     x_exact: Vec<String>,
     b: Vec<String>,
     #[serde(default)]
-    y: Vec<String>,
-    #[serde(default)]
     atx: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ComplexSystem {
     a: Vec<Vec<ComplexScalar>>,
-    u: Vec<ComplexScalar>,
     v: Vec<ComplexScalar>,
     hermitian_v: Vec<ComplexScalar>,
 }

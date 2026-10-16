@@ -511,7 +511,7 @@ impl ReferenceModel {
         Some((|| {
             self.validate()?;
             validate_positive("sound_speed_m_per_s", sound_speed_m_per_s)?;
-            Ok(1.841 * sound_speed_m_per_s / (2.0 * std::f64::consts::PI * radius_m))
+            Ok(1.8412 * sound_speed_m_per_s / (2.0 * std::f64::consts::PI * radius_m))
         })())
     }
 
@@ -802,7 +802,7 @@ mod tests {
             .first_higher_mode_cutoff_hz(343.0)
             .expect("duct reference")
             .expect("valid duct and medium");
-        let expected = 1.841 * 343.0 / (2.0 * std::f64::consts::PI * 0.05);
+        let expected = 1.8412 * 343.0 / (2.0 * std::f64::consts::PI * 0.05);
         assert!((cutoff - expected).abs() < 1.0e-12);
     }
 

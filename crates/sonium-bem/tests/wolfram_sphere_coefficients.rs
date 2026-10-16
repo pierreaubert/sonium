@@ -66,8 +66,8 @@ fn wolfram_coefficients(ka: &SphericalCase) -> Vec<Complex64> {
         .zip(ka.j_derivative.iter())
         .zip(ka.y_derivative.iter())
         .take(NUM_TERMS)
-        .map(|(((j, y), jd), yd)| {
-            let (j, y, jd, yd) = (parse_f64(j), parse_f64(y), parse_f64(jd), parse_f64(yd));
+        .map(|(((_, _), jd), yd)| {
+            let (jd, yd) = (parse_f64(jd), parse_f64(yd));
             let hn_prime = Complex64::new(jd, yd);
             assert!(
                 hn_prime.norm() > 0.0,
@@ -104,11 +104,23 @@ fn wolfram_field(
 fn check_ka(ka_name: &str, kr_name: &str, wave_number: f64, radius: f64) {
     let fixture: Fixture = serde_json::from_str(WOLFRAM_FIXTURE).expect("valid Wolfram fixture");
     assert_eq!(fixture.schema, "sonium-wave.special-golden-wolfram.v1");
+    assert_eq!(fixture.precision_digits, 50);
     let ka = case(&fixture, ka_name);
     let kr_case = case(&fixture, kr_name);
-    let coefficients = wolfram_coefficients(ka);
-
+    assert!(
+        (parse_f64(&ka.x) - wave_number * radius).abs() <= 1.0e-12,
+        "ka case {ka_name} carries x={} but the run requests ka={}",
+        ka.x,
+        wave_number * radius
+    );
     let receiver_r = 2.0 * radius;
+    assert!(
+        (parse_f64(&kr_case.x) - wave_number * receiver_r).abs() <= 1.0e-12,
+        "kr case {kr_name} carries x={} but the run requests kr={}",
+        kr_case.x,
+        wave_number * receiver_r
+    );
+    let coefficients = wolfram_coefficients(ka);
     let thetas = [0.0, PI / 3.0, PI / 2.0, PI];
     let reference = sphere_scattering_3d(
         wave_number,

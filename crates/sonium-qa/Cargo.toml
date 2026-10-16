@@ -37,6 +37,7 @@ sonium-sim-speaker = { workspace = true }
 sonium-sim-speaker-modeling = { workspace = true }
 sonium-coupling = { workspace = true }
 sonium-sim-structural-mechanics = { workspace = true }
+sonium-sim-jlr = { workspace = true }
 sonium-fft = { workspace = true }
 sonium-fastmath = { workspace = true }
 sonium-audio = { workspace = true }
@@ -6011,5 +6012,11 @@ required-features = ["qa-binaries"]
 [[bin]]
 name = "qa-funct-python"
 path = "bin/fem_funct_python.rs"
+test = false
+required-features = ["qa-binaries"]
+
+[[bin]]
+name = "qa-jlr-lbm"
+path = "bin/jlr_lbm_validation.rs"
 test = false
 required-features = ["qa-binaries"]

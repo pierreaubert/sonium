@@ -34,9 +34,11 @@ pub mod cabinet_design;
 pub mod calibration;
 pub mod conventions;
 pub mod coupled_objectives;
+pub mod distributed_radiation;
 pub mod driver_model;
 pub mod eddy_current_bias;
 pub mod fem_bem_coupling;
+pub mod job_service;
 pub mod field_export;
 pub mod motor_extraction;
 pub mod motor_topology;
@@ -55,13 +57,21 @@ pub mod structural_acoustic;
 pub mod structural_constraints;
 pub mod uncertainty;
 pub mod waveguide_design;
+pub mod workbench;
 
 pub use acoustic_rom::{
     AcousticRom, AcousticRomConfig, RomError, RomFrequencySolution, StaticCorrection,
 };
 pub use axisymmetric_linear::{
     AxisymmetricLinearConfig, AxisymmetricLinearError, AxisymmetricLinearModel,
-    AxisymmetricLinearSolution, MagneticBiasSolution, PowerBalance, ThieleSmallReference,
+    AxisymmetricLinearSolution, MagneticBiasSolution, PowerBalance, RegionModulus,
+    RegionModulusSpec, SolidRegionStiffness, ThieleSmallReference,
+};
+pub use distributed_radiation::{
+    BaffledApertureConfig, BreakupPeak, DistributedRadiationError, DistributedRadiationResult,
+    InterfaceVelocityTrace, RadiationRegime, axisymmetric_interface_trace,
+    build_baffled_aperture_mesh, evaluate_distributed_radiation, radiation_regime,
+    separate_breakup_peaks, solve_axisymmetric_radiation,
 };
 pub use backend_evidence::{
     CoupledBackendEvidence, SpeakerBackendError, SpeakerCapabilityMatrix, SpeakerCapabilityState,
@@ -190,7 +200,12 @@ pub use uncertainty::{
     SpeakerToleranceSpec, SpeakerUncertaintyCase, UncertaintyError, UncertaintySampling,
     generate_uncertainty_cases,
 };
+pub use job_service::{JobRecord, JobServiceError, JobState};
 pub use waveguide_design::ProductWaveguideDesign;
+pub use workbench::{
+    FidelityLabel, MaterialReference, ProvenanceEnvelope, WORKBENCH_SCHEMA_VERSION,
+    WorkbenchError, WorkbenchProject, WorkbenchStudy, WorkbenchStudyKind,
+};
 
 mod distortion_reference;
 mod enclosure;
@@ -204,8 +219,8 @@ pub use distortion_reference::{
     MeasuredDistortionPoint, correlate_distortion_reference,
 };
 pub use enclosure::{
-    EnclosureSpec, PortSpec, baffled_piston_directivity, baffled_piston_far_field_pressure,
-    sound_pressure_level_db,
+    EnclosureSpec, PassiveRadiatorSpec, PortSpec, baffled_piston_directivity,
+    baffled_piston_far_field_pressure, sound_pressure_level_db,
 };
 pub use large_signal::{
     LargeSignalAcousticLoad, LargeSignalProvenance, LargeSignalResult, LargeSignalSpec,
@@ -265,6 +280,8 @@ pub enum ModelingError {
     QuadratureDidNotConverge { order: usize },
     #[error("aeroacoustic post-processing failed: {0}")]
     ExternalAeroacoustics(String),
+    #[error("enclosure variant is not supported by this study: {0}")]
+    UnsupportedEnclosure(&'static str),
 }
 
 fn require_finite(field: &'static str, value: f64) -> Result<(), ModelingError> {

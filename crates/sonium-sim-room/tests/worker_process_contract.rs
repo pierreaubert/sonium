@@ -97,7 +97,7 @@ fn process_worker_truncated_response_fails_and_process_is_reaped() {
 
 #[test]
 fn process_worker_nonzero_exit_is_reported() {
-    let mut worker = FemWorkerProcess::spawn(&fixture_spec("exit_nonzero"), 0, 1).unwrap();
+    let worker = FemWorkerProcess::spawn(&fixture_spec("exit_nonzero"), 0, 1).unwrap();
     let error = worker.finish().unwrap_err();
     assert!(error.to_string().contains("exited unsuccessfully"));
 }

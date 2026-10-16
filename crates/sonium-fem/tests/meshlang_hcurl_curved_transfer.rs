@@ -6,7 +6,7 @@ use sonium_fem::mesh::{
     MeshTopology, MeshlangTransferError, apply_hcurl_order1_state_transfer,
     transfer_hcurl_order1_state_checked, unit_square_triangles,
 };
-use sonium_fem::spaces::{FunctionSpace, HcurlSpace};
+use sonium_fem::spaces::HcurlSpace;
 use std::collections::BTreeMap;
 
 fn edge_id(index: usize) -> EntityId {

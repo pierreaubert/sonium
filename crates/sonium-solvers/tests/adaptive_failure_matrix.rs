@@ -4,6 +4,10 @@
 //! assertion that a zero operator with a nonzero RHS remains typed and
 //! non-converged instead of publishing a false success or panicking.
 
+#![expect(
+    deprecated,
+    reason = "the failure matrix covers the deprecated recycled-GMRES entry point alongside its replacement"
+)]
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use sonium_solvers::dense::DenseMatrix;

@@ -67,9 +67,9 @@ pub use convergence::{
 };
 pub use duct1d::{
     DUCT1D_DEFAULT_SEGMENTS, Duct1dConfig, Duct1dPoint, DuctEnd, FIRST_HIGHER_MODE_ROOT,
-    INTERIOR_END_CORRECTION_FACTOR, compact_port_impedance_pa_s_per_m3, cutoff_frequency_hz,
-    duct_inertance_kg_per_m4, effective_mouth_radius_m, interior_end_correction_m, solve_duct_1d,
-    tuning_frequency_hz,
+    INTERIOR_END_CORRECTION_FACTOR, PortFidelity, compact_port_impedance_pa_s_per_m3,
+    cutoff_frequency_hz, duct_inertance_kg_per_m4, effective_mouth_radius_m,
+    interior_end_correction_m, select_port_fidelity, solve_duct_1d, tuning_frequency_hz,
 };
 pub use error::PortFlowError;
 pub use evaluate::{

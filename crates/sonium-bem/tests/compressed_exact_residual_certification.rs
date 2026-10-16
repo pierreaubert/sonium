@@ -153,7 +153,7 @@ fn continuous_higher_order_hmatrix_certifies_shared_dof_incidence() {
 
 #[test]
 fn impedance_hmatrix_certifies_exact_admittance_diagonal_terms() {
-    let mut problem = BemProblem {
+    let problem = BemProblem {
         mesh: generate_cubed_sphere_quad_mesh(0.1, 1),
         physics: PhysicsParams::new(120.0, 343.0, 1.21, false),
         incident_field: IncidentField::plane_wave_z(),

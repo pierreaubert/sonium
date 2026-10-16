@@ -9654,6 +9654,8 @@ pub(crate) mod tests {
         );
     }
 
+    // Fixture reads the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     #[test]
     #[ignore = "full typed-driver product solve; run via `just qa-nightly-regressions`"]
     fn typed_driver_is_back_loaded_and_reports_electrical_impedance() {

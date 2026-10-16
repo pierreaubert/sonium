@@ -159,6 +159,132 @@ pub fn recommend_speaker_gap_model(
     }
 }
 
+/// Errors raised while resolving a thermoviscous speaker-gap model.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum ThermoviscousGapError {
+    /// Gap, frequency, or wall state was non-finite or non-positive.
+    #[error("invalid thermoviscous gap input {field}: {detail}")]
+    InvalidInput {
+        /// Offending field name.
+        field: &'static str,
+        /// Human-readable detail.
+        detail: String,
+    },
+}
+
+/// Fully resolved thermoviscous gap state at one frequency.
+///
+/// Exactly one payload is populated, matching [`SpeakerGapModel`]:
+/// the LRF equivalent-fluid coefficients (resolved or lumped narrow gap),
+/// or the thermal boundary-layer admittance. The moving-wall state is
+/// explicit: `moving_wall_velocity_rms` is `Some` only when the caller
+/// supplied a wall velocity phasor (RMS, `exp(+iωt)`), and the resolved
+/// region option means the caller must assemble a boundary-layer-resolving
+/// mesh rather than an equivalent-fluid block.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedThermoviscousGap {
+    /// Selected model tier.
+    pub model: SpeakerGapModel,
+    /// Viscous boundary-layer thickness `δ_v` in metres.
+    pub viscous_delta_m: f64,
+    /// Thermal boundary-layer thickness `δ_t` in metres.
+    pub thermal_delta_m: f64,
+    /// Ratio `gap / max(δ_v, δ_t)`.
+    pub gap_to_layer_ratio: f64,
+    /// LRF complex effective density in kg/m³ (equivalent-fluid tiers).
+    pub lrf_effective_density: Option<Complex64>,
+    /// LRF complex effective bulk modulus in Pa (equivalent-fluid tiers).
+    pub lrf_effective_bulk_modulus_pa: Option<Complex64>,
+    /// Thermal BLI wall admittance (boundary-layer-impedance tier).
+    pub boundary_layer_admittance: Option<Complex64>,
+    /// Moving-wall RMS normal velocity phasor, when explicitly supplied.
+    pub moving_wall_velocity_rms: Option<Complex64>,
+}
+
+impl ResolvedThermoviscousGap {
+    /// Whether the gap wall is an explicitly moving (driven) wall.
+    pub fn is_moving_wall(&self) -> bool {
+        self.moving_wall_velocity_rms.is_some()
+    }
+
+    /// Whether this tier requires an assembled, boundary-layer-resolved
+    /// region instead of an equivalent-fluid or impedance closure.
+    pub fn requires_resolved_region(&self) -> bool {
+        matches!(self.model, SpeakerGapModel::FullThermoviscousRegion)
+    }
+}
+
+/// Resolve the thermoviscous gap model at one frequency.
+///
+/// Uses [`recommend_speaker_gap_model`] for tier selection, then fills the
+/// tier payload from the LRF equivalent-fluid model on a slit of half-width
+/// `gap_m / 2` (the voice-coil gap) or the thermal BLI admittance. The wall
+/// state is never assumed: pass `Some(velocity)` for a moving wall or
+/// `None` for a rigid wall.
+pub fn resolve_thermoviscous_gap(
+    fluid: &crate::physics::acoustics::pressure::FluidProperties,
+    frequency_hz: f64,
+    gap_m: f64,
+    moving_wall_velocity_rms: Option<Complex64>,
+) -> Result<ResolvedThermoviscousGap, ThermoviscousGapError> {
+    if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
+        return Err(ThermoviscousGapError::InvalidInput {
+            field: "frequency_hz",
+            detail: "must be finite and positive".to_string(),
+        });
+    }
+    if !gap_m.is_finite() || gap_m <= 0.0 {
+        return Err(ThermoviscousGapError::InvalidInput {
+            field: "gap_m",
+            detail: "must be finite and positive".to_string(),
+        });
+    }
+    if let Some(velocity) = moving_wall_velocity_rms
+        && !velocity.is_finite()
+    {
+        return Err(ThermoviscousGapError::InvalidInput {
+            field: "moving_wall_velocity_rms",
+            detail: "must be finite".to_string(),
+        });
+    }
+    let omega = 2.0 * std::f64::consts::PI * frequency_hz;
+    let viscous_delta_m = fluid.viscous_bl_thickness(omega);
+    let thermal_delta_m = fluid.thermal_bl_thickness(omega);
+    let model = recommend_speaker_gap_model(gap_m, viscous_delta_m, thermal_delta_m);
+    let layer = viscous_delta_m.max(thermal_delta_m);
+    let (lrf_density, lrf_bulk, bli) = match model {
+        SpeakerGapModel::BoundaryLayerImpedance => (
+            None,
+            None,
+            Some(crate::physics::acoustics::pressure::thermal_wall_admittance(fluid, omega)),
+        ),
+        SpeakerGapModel::FullThermoviscousRegion
+        | SpeakerGapModel::LumpedNarrowGapImpedance => {
+            let equivalent = crate::physics::acoustics::pressure::EquivalentFluid::new(
+                fluid.clone(),
+                crate::physics::acoustics::pressure::CrossSection::Slit {
+                    half_width: 0.5 * gap_m,
+                },
+            );
+            (
+                Some(equivalent.effective_density(omega)),
+                Some(equivalent.effective_bulk_modulus(omega)),
+                None,
+            )
+        }
+    };
+    Ok(ResolvedThermoviscousGap {
+        model,
+        viscous_delta_m,
+        thermal_delta_m,
+        gap_to_layer_ratio: gap_m / layer,
+        lrf_effective_density: lrf_density,
+        lrf_effective_bulk_modulus_pa: lrf_bulk,
+        boundary_layer_admittance: bli,
+        moving_wall_velocity_rms,
+    })
+}
+
 /// Frequency point for coupled electroacoustic sweep assembly.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CoupledSweepPoint {
@@ -378,6 +504,27 @@ mod tests {
         assert!(point.omega() > 600.0);
         assert!(point.k_squared().re > 0.0);
         assert!(point.coupling().structure_to_fluid.re < 0.0);
+    }
+
+    #[test]
+    fn thermoviscous_gap_tiers_carry_matching_payloads() {
+        let fluid = crate::physics::acoustics::pressure::FluidProperties::air_20c();
+        // Narrow gap at audio frequency: LRF equivalent-fluid payload.
+        let narrow = resolve_thermoviscous_gap(&fluid, 1_000.0, 30.0e-6, None).unwrap();
+        assert!(narrow.lrf_effective_density.is_some());
+        assert!(narrow.boundary_layer_admittance.is_none());
+        assert!(!narrow.is_moving_wall());
+        // Wide gap: boundary-layer-impedance payload, explicit moving wall.
+        let wide = resolve_thermoviscous_gap(
+            &fluid,
+            1_000.0,
+            5.0e-3,
+            Some(Complex64::new(0.01, 0.0)),
+        )
+        .unwrap();
+        assert!(wide.is_moving_wall());
+        assert!(resolve_thermoviscous_gap(&fluid, 0.0, 1.0e-3, None).is_err());
+        assert!(resolve_thermoviscous_gap(&fluid, 1_000.0, -1.0, None).is_err());
     }
 
     #[test]

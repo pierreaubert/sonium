@@ -2776,6 +2776,8 @@ mod tests {
             "fake-evaluator:v1;backend=synthetic;coupling=none;rom=none".to_string()
         }
 
+        // Fixture fills the deprecated per-driver vectors alongside the matrix.
+        #[allow(deprecated)]
         fn evaluate(
             &mut self,
             model: &LoudspeakerModel,
@@ -3095,6 +3097,8 @@ mod tests {
         );
     }
 
+    // Fixture fills the deprecated per-driver vectors alongside the matrix.
+    #[allow(deprecated)]
     #[test]
     fn objective_prefers_flatter_on_axis_and_pir_curves() {
         let frequencies = vec![1_500.0, 2_000.0, 3_000.0, 5_000.0];

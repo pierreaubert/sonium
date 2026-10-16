@@ -76,7 +76,7 @@ fn quadratic_trace_reproduces_an_affine_field_continuously() {
 
     let first = &mesh.elements[0];
     let second = &mesh.elements[1];
-    let trace = |element: &Element, element_index: usize, s: f64, t: f64| {
+    let trace = |_element: &Element, element_index: usize, s: f64, t: f64| {
         let basis = basis_values(
             ElementType::Tri3,
             sonium_bem::core::types::BasisOrder::Quadratic,

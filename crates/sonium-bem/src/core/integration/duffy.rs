@@ -3779,7 +3779,7 @@ mod tests {
             3,
             vec![1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
         );
-        let (point, normal, jacobian, _) = tri_geometry(&triangle_coords, 0.2, 0.3);
+        let (point, _, jacobian, _) = tri_geometry(&triangle_coords, 0.2, 0.3);
         assert!(
             mapped
                 .point

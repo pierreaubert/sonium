@@ -703,8 +703,11 @@ where
     let mut total_iterations = 0;
     let mut restarts = 0;
 
-    // Pre-allocate to max_restart capacity if adaptive restart is enabled
-    let alloc_m = config.max_restart.unwrap_or(m);
+    // Allocate for the current restart only; the adaptive-growth arm below
+    // resizes every structure on demand. Pre-allocating max_restart upfront
+    // would multiply memory by max/restart for every adaptive solve even
+    // when the first cycle already converges.
+    let alloc_m = m;
     let mut v = FlatBasis::new(alloc_m + 1, n);
 
     let mut h: sonium_solvers_core::dense::DenseMatrix<T> =

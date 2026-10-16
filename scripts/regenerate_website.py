@@ -46,6 +46,15 @@ def main():
             raise RuntimeError(f'WASM_BINDGEN must point to wasm-bindgen {version}')
         tool = ROOT / 'target/demo-tools/bin/wasm-bindgen'
         if not tool.exists() or not matches(tool):
+            # ROOT/target is a symlink into the shared mbx cache, whose GC
+            # may have removed the link target. A dangling link makes every
+            # create_dir_all through it fail with EEXIST (mkdir sees the
+            # link itself), so recreate the cache dir first — an empty
+            # cache dir rebuilds itself. exist_ok covers racing installs.
+            link = ROOT / 'target'
+            if link.is_symlink() and not link.exists():
+                Path(os.readlink(link)).mkdir(parents=True, exist_ok=True)
+            tool.parents[1].mkdir(parents=True, exist_ok=True)
             run(CARGO, 'install', 'wasm-bindgen-cli', '--version', version, '--locked', '--force', '--root', tool.parents[1])
         bindgen = str(tool)
     env['WASM_BINDGEN'] = bindgen

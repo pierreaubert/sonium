@@ -49,7 +49,6 @@ struct RealNamedCase {
 #[derive(Debug, Deserialize)]
 struct RealCase {
     n: usize,
-    matrix: Vec<Vec<String>>,
     input: Vec<String>,
     output: Vec<String>,
 }

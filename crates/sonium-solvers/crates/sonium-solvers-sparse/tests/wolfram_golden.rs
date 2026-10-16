@@ -31,7 +31,6 @@ struct RealAction {
 #[derive(Debug, Deserialize)]
 struct ComplexAction {
     a: Vec<Vec<ComplexScalar>>,
-    u: Vec<ComplexScalar>,
     v: Vec<ComplexScalar>,
     hv: Vec<ComplexScalar>,
     hermitian_v: Vec<ComplexScalar>,

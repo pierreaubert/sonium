@@ -64,7 +64,6 @@ use super::compute::compute_boundary_coefficients;
 #[cfg(test)]
 use super::compute::evaluate_solution_at_point_interpolated;
 use super::compute::find_containing_element_parallel;
-use super::consts;
 use super::consts::ABSORPTION_REFERENCE_FREQ;
 use super::consts::AIR_DENSITY;
 use super::consts::BICGSTAB_FALLBACK_MAX_ITERATIONS;
@@ -108,7 +107,6 @@ use super::resolved_boundary::ResolvedBoundary;
 use super::run::run_fem_full_report;
 use super::run::run_fem_symmetric_report;
 use super::run::run_fem_with_mesh;
-use super::shifted_laplacian_shift;
 use super::shifted_laplacian_shift::ShiftedLaplacianShift;
 use super::shifted_laplacian_shift::fallback_preconditioner_shift;
 use super::solve::solve_frequency_system;
@@ -128,7 +126,7 @@ use crate::spatial_field::{SpatialFieldProvenance, SpatialFieldReference};
 use anyhow::Result;
 use num_complex::Complex64;
 use rayon::prelude::*;
-use sonium_bem::materials::{AmbientMedium, PorousLayer};
+use sonium_bem::materials::AmbientMedium;
 use sonium_compute::HostMatrix;
 use sonium_fem::basis::{Jacobian, PolynomialDegree, evaluate_shape};
 use sonium_fem::mesh::{ElementType, Mesh, Point};
@@ -136,8 +134,7 @@ use sonium_fem::quadrature::for_mass;
 use sonium_mesher::RoomSurfaceMeshing;
 use sonium_solvers::iterative::GcroDrSubspace;
 use sonium_solvers::{
-    AmgSmoother, CsrMatrix, GmresConfig, IlutConfig, IlutPreconditioner, LinearOperator,
-    Preconditioner,
+    AmgSmoother, CsrMatrix, GmresConfig, IlutConfig, IlutPreconditioner, Preconditioner,
 };
 use sonium_xem::{Point3D, RoomGeometry, RoomSimulation, Source, SymmetryConfig, detect_symmetry};
 
@@ -294,7 +291,6 @@ fn assemble_rhs_parallel(
     rhs
 }
 
-use super::*;
 use sonium_xem::{
     BoundaryConfig, ComplexDirectivityGrid, CrossoverFilter, Directivity, DirectivityGrid,
     RectangularRoom, SurfaceConfig,

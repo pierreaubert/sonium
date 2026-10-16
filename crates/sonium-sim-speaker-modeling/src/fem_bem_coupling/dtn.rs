@@ -256,16 +256,40 @@ pub struct DtnMap {
 impl DtnMap {
     /// Apply the map: `p̄ = D v`.
     pub fn apply(&self, velocity: &[Complex64]) -> Vec<Complex64> {
-        let n = self.n;
-        let mut out = vec![Complex64::new(0.0, 0.0); n];
-        for (i, out_i) in out.iter_mut().enumerate() {
-            let mut acc = Complex64::new(0.0, 0.0);
-            for (j, &v_j) in velocity.iter().enumerate() {
-                acc += self.matrix[i * n + j] * v_j;
-            }
-            *out_i = acc;
-        }
+        let mut out = vec![Complex64::new(0.0, 0.0); self.n];
+        self.apply_into(velocity, &mut out);
         out
+    }
+
+    /// No-allocation map application into a caller-owned buffer (hot path).
+    ///
+    /// Rows are independent, so large maps are evaluated with Rayon lanes;
+    /// `velocity` and `out` must both have length `n` (checked in debug
+    /// builds, truncated in release builds by the row slicing).
+    pub fn apply_into(&self, velocity: &[Complex64], out: &mut [Complex64]) {
+        use rayon::prelude::*;
+        let n = self.n;
+        debug_assert_eq!(velocity.len(), n);
+        debug_assert_eq!(out.len(), n);
+        if n >= 128 {
+            out.par_iter_mut().enumerate().for_each(|(i, out_i)| {
+                let row = &self.matrix[i * n..(i + 1) * n];
+                *out_i = row
+                    .iter()
+                    .zip(velocity.iter())
+                    .map(|(d, v)| *d * *v)
+                    .sum();
+            });
+        } else {
+            for (i, out_i) in out.iter_mut().enumerate() {
+                let row = &self.matrix[i * n..(i + 1) * n];
+                *out_i = row
+                    .iter()
+                    .zip(velocity.iter())
+                    .map(|(d, v)| *d * *v)
+                    .sum();
+            }
+        }
     }
 
     /// Time-averaged power crossing the aperture into the exterior,

@@ -7,7 +7,6 @@ use sonium_roomeq::cea2034::{
 #[derive(Debug, Deserialize)]
 struct CeaFixture {
     source: String,
-    frequencies_hz: Vec<f64>,
     spl_db: Vec<Vec<f64>>,
     groups: Vec<Vec<usize>>,
     weights: Vec<f64>,

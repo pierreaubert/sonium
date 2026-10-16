@@ -15,7 +15,7 @@ use num_complex::Complex64;
 use rayon::prelude::*;
 use sonium_fem::assembly::{
     RegionAssemblyError, RegionMap, TripletMatrix, assemble_axi_boundary_mass,
-    assemble_bilinear_by_region, assemble_linear_where,
+    assemble_bilinear_by_region, assemble_bilinear_where, assemble_linear_where,
 };
 use sonium_fem::basis::PolynomialDegree;
 use sonium_fem::boundary::generic::{FemSystem, apply_homogeneous_dirichlet};
@@ -33,6 +33,10 @@ use sonium_fem::physics::solid::axisymmetric::{
     AxisymmetricElasticityForm, AxisymmetricVectorMassForm,
 };
 use sonium_fem::physics::solid::elasticity::IsotropicMaterial;
+use sonium_fem::physics::solid::elasticity::viscoelastic_freq::{
+    ComplexModulusModel, ConstantLossModulus, ModulusPoint, PronyBranch, PronyComplexModulus,
+    TabulatedComplexModulus,
+};
 use sonium_fem::solver::{SolverConfig, SolverError, SolverType, solve_csr};
 use sonium_fem::spaces::{FunctionSpace, H1Space, VectorH1Space};
 use std::f64::consts::PI;
@@ -85,6 +89,103 @@ pub fn moving_assembly_material(marker: i32) -> Option<IsotropicMaterial> {
     }
 }
 
+/// Frequency-dependent modulus assigned to one moving-assembly region.
+///
+/// Enabling any region modulus replaces the legacy global Rayleigh
+/// viscous damping (`η/ω_ref · K`) with per-region structural complex
+/// stiffness `K_r · E*_r(f)/E_ref,r` in the solid block. Regions without
+/// an explicit entry use a constant-loss modulus at the global
+/// structural loss factor, which matches the legacy model at the
+/// damping reference frequency.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RegionModulusSpec {
+    /// Constant complex modulus `E·(1 + i·η)`.
+    Constant {
+        /// Loss factor `η ≥ 0`.
+        loss_factor: f64,
+    },
+    /// Tabulated `(frequency Hz, storage Pa, loss Pa)` points.
+    ///
+    /// Evaluation is log-frequency interpolation with no extrapolation:
+    /// frequencies outside the table fail closed.
+    Tabulated {
+        /// At least two strictly increasing frequency points.
+        points: Vec<(f64, f64, f64)>,
+    },
+    /// Prony series around an equilibrium modulus.
+    Prony {
+        /// Equilibrium (long-time) modulus in Pa.
+        equilibrium_pa: f64,
+        /// `(modulus Pa, relaxation time s)` branches.
+        branches: Vec<(f64, f64)>,
+    },
+}
+
+/// One region modulus assignment, keyed by cell marker.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RegionModulus {
+    /// Moving-assembly cell marker (see `MOVING_ASSEMBLY_MARKERS`).
+    pub marker: i32,
+    /// Modulus model for the region.
+    pub spec: RegionModulusSpec,
+}
+
+/// Per-region stiffness triplet with its complex modulus model.
+#[derive(Debug)]
+pub struct SolidRegionStiffness {
+    /// Cell marker of the region.
+    pub marker: i32,
+    /// Elastic stiffness assembled with the region reference modulus.
+    pub stiffness: TripletMatrix<f64>,
+    /// Reference Young's modulus the stiffness was assembled with, in Pa.
+    pub reference_modulus_pa: f64,
+    /// Frequency-dependent complex modulus for the region.
+    pub modulus: Box<dyn ComplexModulusModel>,
+}
+
+fn build_region_modulus(
+    spec: &RegionModulusSpec,
+    material: IsotropicMaterial,
+) -> Result<Box<dyn ComplexModulusModel>, AxisymmetricLinearError> {
+    let invalid = |error: sonium_fem::physics::solid::elasticity::viscoelastic_freq::ViscoelasticError| {
+        AxisymmetricLinearError::InvalidRegionModulus(format!("{error}"))
+    };
+    match spec {
+        RegionModulusSpec::Constant { loss_factor } => Ok(Box::new(
+            ConstantLossModulus::new(material.youngs_modulus, *loss_factor, material.poisson_ratio)
+                .map_err(invalid)?,
+        )),
+        RegionModulusSpec::Tabulated { points } => Ok(Box::new(
+            TabulatedComplexModulus::new(
+                points
+                    .iter()
+                    .map(|&(frequency_hz, storage_pa, loss_pa)| ModulusPoint {
+                        frequency_hz,
+                        storage_pa,
+                        loss_pa,
+                    })
+                    .collect(),
+                material.poisson_ratio,
+            )
+            .map_err(invalid)?,
+        )),
+        RegionModulusSpec::Prony { equilibrium_pa, branches } => Ok(Box::new(
+            PronyComplexModulus::new(
+                *equilibrium_pa,
+                branches
+                    .iter()
+                    .map(|&(modulus_pa, relaxation_time_s)| PronyBranch {
+                        modulus_pa,
+                        relaxation_time_s,
+                    })
+                    .collect(),
+                material.poisson_ratio,
+            )
+            .map_err(invalid)?,
+        )),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AxisymmetricLinearConfig {
     pub magnetic_radial_cells: usize,
@@ -107,6 +208,9 @@ pub struct AxisymmetricLinearConfig {
     /// Radiation loss is supplied independently by the outgoing-wave boundary.
     pub acoustic_loss_factor: f64,
     pub damping_reference_hz: f64,
+    /// Per-region frequency-dependent moduli; empty keeps legacy damping.
+    /// See [`RegionModulusSpec`] for the damping-model switch.
+    pub region_moduli: Vec<RegionModulus>,
     pub iterative_solver: CoupledIterativeConfig,
 }
 
@@ -130,6 +234,7 @@ impl Default for AxisymmetricLinearConfig {
             structural_loss_factor: 0.035,
             acoustic_loss_factor: 0.0,
             damping_reference_hz: 1_000.0,
+            region_moduli: Vec::new(),
             iterative_solver: CoupledIterativeConfig::default(),
         }
     }
@@ -171,6 +276,22 @@ impl AxisymmetricLinearConfig {
                     "loss factors must be finite and non-negative",
                 ));
             }
+        }
+        let mut region_markers = std::collections::HashSet::new();
+        for region in &self.region_moduli {
+            let Some(material) = moving_assembly_material(region.marker) else {
+                return Err(AxisymmetricLinearError::InvalidRegionModulus(format!(
+                    "marker {} is not a moving-assembly region",
+                    region.marker
+                )));
+            };
+            if !region_markers.insert(region.marker) {
+                return Err(AxisymmetricLinearError::InvalidRegionModulus(format!(
+                    "duplicate assignment for marker {}",
+                    region.marker
+                )));
+            }
+            build_region_modulus(&region.spec, material)?;
         }
         self.iterative_solver.validate()?;
         Ok(())
@@ -279,6 +400,11 @@ pub struct AxisymmetricLinearModel {
     pub acoustic_mesh: Mesh,
     pub magnetic_bias: MagneticBiasSolution,
     pub coupled_system: CoupledSystem,
+    /// Per-region stiffness for the complex-stiffness path.
+    ///
+    /// Empty when no region moduli are configured; in that case
+    /// `coupled_system` is used unchanged at every frequency.
+    pub solid_regions: Vec<SolidRegionStiffness>,
     pub thiele_small: ThieleSmallReference,
     structural_constraints: Vec<usize>,
 }
@@ -305,6 +431,39 @@ impl AxisymmetricLinearModel {
             &structural_mesh,
             2,
         )?;
+        // Per-region triplets for the complex-stiffness path. Assembled
+        // only when region moduli are configured, so the legacy model
+        // pays no extra assembly or memory.
+        let mut solid_regions = Vec::new();
+        if !config.region_moduli.is_empty() {
+            for marker in MOVING_ASSEMBLY_MARKERS {
+                let material = moving_assembly_material(marker)
+                    .expect("every moving-assembly marker has an assigned material");
+                let form = AxisymmetricElasticityForm::new(material);
+                let stiffness = assemble_bilinear_where(
+                    &form,
+                    &vector_space,
+                    &vector_space,
+                    &structural_mesh,
+                    2,
+                    |_, element| element.marker == marker,
+                );
+                let spec = config
+                    .region_moduli
+                    .iter()
+                    .find(|region| region.marker == marker)
+                    .map(|region| region.spec.clone())
+                    .unwrap_or(RegionModulusSpec::Constant {
+                        loss_factor: config.structural_loss_factor,
+                    });
+                solid_regions.push(SolidRegionStiffness {
+                    marker,
+                    stiffness,
+                    reference_modulus_pa: material.youngs_modulus,
+                    modulus: build_region_modulus(&spec, material)?,
+                });
+            }
+        }
         let mut mass_forms = RegionMap::new();
         mass_forms.insert(DIAPHRAGM, AxisymmetricVectorMassForm::new(1_150.0));
         mass_forms.insert(COIL_FORMER, AxisymmetricVectorMassForm::new(2_700.0));
@@ -429,9 +588,108 @@ impl AxisymmetricLinearModel {
             acoustic_mesh,
             magnetic_bias,
             coupled_system,
+            solid_regions,
             thiele_small,
             structural_constraints,
         })
+    }
+
+    /// Builds the coupled system at one frequency.
+    ///
+    /// Without region moduli this clones the base system unchanged.
+    /// With region moduli the solid block becomes the per-region
+    /// complex stiffness `Σ_r K_r·E*_r(f)/E_ref,r`, split into the real
+    /// stiffness triplet and the damping triplet `Σ_r K_r·Im/ω` so the
+    /// assembled `K + iωC` block equals the complex stiffness exactly.
+    /// Allocation happens once per frequency on this path only; the
+    /// legacy path never calls it in a hot loop.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a region modulus fails closed at
+    /// `frequency_hz` (for example outside a tabulated range).
+    pub fn coupled_system_at(
+        &self,
+        frequency_hz: f64,
+    ) -> Result<CoupledSystem, AxisymmetricLinearError> {
+        let base = &self.coupled_system;
+        if self.solid_regions.is_empty() {
+            return Ok(CoupledSystem {
+                n_fluid: base.n_fluid,
+                n_solid: base.n_solid,
+                fluid_stiffness: base.fluid_stiffness.clone(),
+                fluid_mass: base.fluid_mass.clone(),
+                fluid_damping: base.fluid_damping.clone(),
+                solid_stiffness: base.solid_stiffness.clone(),
+                solid_mass: base.solid_mass.clone(),
+                solid_damping: base.solid_damping.clone(),
+                coupling: base.coupling.clone(),
+                interface_load: base.interface_load.clone(),
+                electrical: base.electrical.as_ref().map(|electrical| ElectricalSubsystem {
+                    n_dofs: electrical.n_dofs,
+                    resistance: electrical.resistance.clone(),
+                    inductance: electrical.inductance.clone(),
+                    coupling: electrical.coupling.clone(),
+                }),
+            });
+        }
+        if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
+            return Err(AxisymmetricLinearError::InvalidConfiguration(
+                "frequency must be finite and positive",
+            ));
+        }
+        let omega = 2.0 * PI * frequency_hz;
+        let capacity: usize = self.solid_regions.iter().map(|region| region.stiffness.nnz()).sum();
+        let mut solid_stiffness =
+            TripletMatrix::with_capacity(base.solid_stiffness.num_rows, base.solid_stiffness.num_cols, capacity);
+        let mut solid_damping =
+            TripletMatrix::with_capacity(base.solid_damping.num_rows, base.solid_damping.num_cols, capacity);
+        for region in &self.solid_regions {
+            let factor = region
+                .modulus
+                .stiffness_factor(frequency_hz, region.reference_modulus_pa)
+                .map_err(|error| {
+                    AxisymmetricLinearError::InvalidRegionModulus(format!(
+                        "marker {}: {error}",
+                        region.marker
+                    ))
+                })?;
+            let matrix = &region.stiffness;
+            for index in 0..matrix.nnz() {
+                let value = matrix.values[index];
+                solid_stiffness.push(matrix.rows[index], matrix.cols[index], value * factor.re);
+                solid_damping.push(matrix.rows[index], matrix.cols[index], value * factor.im / omega);
+            }
+        }
+        Ok(CoupledSystem {
+            n_fluid: base.n_fluid,
+            n_solid: base.n_solid,
+            fluid_stiffness: base.fluid_stiffness.clone(),
+            fluid_mass: base.fluid_mass.clone(),
+            fluid_damping: base.fluid_damping.clone(),
+            solid_stiffness,
+            solid_mass: base.solid_mass.clone(),
+            solid_damping,
+            coupling: base.coupling.clone(),
+            interface_load: base.interface_load.clone(),
+            electrical: base.electrical.as_ref().map(|electrical| ElectricalSubsystem {
+                n_dofs: electrical.n_dofs,
+                resistance: electrical.resistance.clone(),
+                inductance: electrical.inductance.clone(),
+                coupling: electrical.coupling.clone(),
+            }),
+        })
+    }
+
+    /// Solid damping triplet at one frequency for power accounting.
+    fn solid_damping_at(
+        &self,
+        frequency_hz: f64,
+    ) -> Result<TripletMatrix<f64>, AxisymmetricLinearError> {
+        if self.solid_regions.is_empty() {
+            return Ok(self.coupled_system.solid_damping.clone());
+        }
+        Ok(self.coupled_system_at(frequency_hz)?.solid_damping)
     }
 
     pub fn solve_frequency(
@@ -443,6 +701,17 @@ impl AxisymmetricLinearModel {
             return Err(AxisymmetricLinearError::InvalidConfiguration(
                 "frequency must be positive and voltage must be finite",
             ));
+        }
+        if !self.solid_regions.is_empty() {
+            // Per-frequency system: continuation warm starts do not
+            // carry across different solid blocks, so each point owns
+            // its solver. Tabulated moduli fail closed here.
+            let system = self.coupled_system_at(frequency_hz)?;
+            let mut solver = CoupledFrequencyContinuation::new(
+                &system,
+                self.config.iterative_solver.clone(),
+            )?;
+            return self.solve_with_continuation(frequency_hz, voltage_rms_v, &mut solver);
         }
         let mut solver = CoupledFrequencyContinuation::new(
             &self.coupled_system,
@@ -471,6 +740,13 @@ impl AxisymmetricLinearModel {
             return Err(AxisymmetricLinearError::InvalidConfiguration(
                 "a frequency sweep must contain at least one point",
             ));
+        }
+        if !self.solid_regions.is_empty() {
+            // Per-frequency solid blocks: each point solves independently.
+            return frequencies_hz
+                .iter()
+                .map(|&frequency_hz| self.solve_frequency(frequency_hz, voltage_rms_v))
+                .collect();
         }
         let state_dofs = self.magnetic_mesh.num_nodes()
             + self.structural_mesh.num_nodes().saturating_mul(2)
@@ -512,6 +788,15 @@ impl AxisymmetricLinearModel {
             return Err(AxisymmetricLinearError::InvalidConfiguration(
                 "a frequency sweep must contain at least one point",
             ));
+        }
+        if !self.solid_regions.is_empty() {
+            let mut solutions = Vec::with_capacity(frequencies_hz.len());
+            for (index, &frequency_hz) in frequencies_hz.iter().enumerate() {
+                let solution = self.solve_frequency(frequency_hz, voltage_rms_v)?;
+                on_frequency_complete(index + 1, frequency_hz);
+                solutions.push(solution);
+            }
+            return Ok(solutions);
         }
         let mut solver = CoupledFrequencyContinuation::new(
             &self.coupled_system,
@@ -691,7 +976,7 @@ impl AxisymmetricLinearModel {
         voltage_rms_v: Complex64,
     ) -> Result<AxisymmetricLinearSolution, AxisymmetricLinearError> {
         let mut matrix = self
-            .coupled_system
+            .coupled_system_at(frequency_hz)?
             .assemble_harmonic(self.harmonic_point(frequency_hz)?)?;
         let mut rhs = vec![Complex64::new(0.0, 0.0); self.coupled_system.total_dofs()];
         rhs[self.coupled_system.n_fluid + self.coupled_system.n_solid] = voltage_rms_v;
@@ -1097,7 +1382,17 @@ impl AxisymmetricLinearModel {
             .sum::<f64>();
         let input_w = (voltage * current.conj()).re;
         let copper_loss_w = self.config.coil_resistance_ohm * current.norm_sqr();
-        let mechanical_loss_w = quadratic_power(&self.coupled_system.solid_damping, &velocity);
+        let mechanical_loss_w = quadratic_power(
+            &self.solid_damping_at(omega / (2.0 * PI)).unwrap_or_else(|_| {
+                // Extraction runs only after a successful solve at this
+                // frequency, which already evaluated the same damping;
+                // reaching this fallback would indicate an internal
+                // inconsistency, so mirror the legacy triplet rather
+                // than inventing a loss value.
+                self.coupled_system.solid_damping.clone()
+            }),
+            &velocity,
+        );
         let acoustic_loss_w = -fluid_on_structure_w;
         let acoustic_operator_loss_w =
             quadratic_power(&self.coupled_system.fluid_damping, pressure)
@@ -1756,6 +2051,8 @@ fn complex_is_finite(value: Complex64) -> bool {
 pub enum AxisymmetricLinearError {
     #[error("invalid axisymmetric model: {0}")]
     InvalidConfiguration(&'static str),
+    #[error("invalid region modulus: {0}")]
+    InvalidRegionModulus(String),
     #[error("structural mesh has no distributed voice-coil winding region")]
     MissingMovingCoilRegion,
     #[error("structural mesh has no positive-area structural acoustic interface")]
@@ -1792,6 +2089,42 @@ mod tests {
             ..AxisymmetricLinearConfig::default()
         })
         .unwrap()
+    }
+
+    #[test]
+    fn region_moduli_wire_complex_stiffness_and_fail_closed() {
+        let model = AxisymmetricLinearModel::build(AxisymmetricLinearConfig {
+            magnetic_radial_cells: 8,
+            magnetic_axial_cells: 8,
+            structural_radial_cells: 6,
+            structural_axial_cells: 1,
+            acoustic_axial_cells: 4,
+            region_moduli: vec![RegionModulus {
+                marker: SURROUND,
+                spec: RegionModulusSpec::Tabulated {
+                    points: vec![(50.0, 4.0e6, 1.2e6), (500.0, 6.0e6, 2.4e6), (2_000.0, 9.0e6, 3.6e6)],
+                },
+            }],
+            ..AxisymmetricLinearConfig::default()
+        })
+        .unwrap();
+        assert_eq!(model.solid_regions.len(), MOVING_ASSEMBLY_MARKERS.len());
+        let system = model.coupled_system_at(200.0).unwrap();
+        // Complex stiffness must change the solid block vs the legacy one.
+        let changed = system
+            .solid_stiffness
+            .values
+            .iter()
+            .zip(&model.coupled_system.solid_stiffness.values)
+            .any(|(actual, legacy)| (actual - legacy).abs() > 1.0e-9);
+        assert!(changed, "tabulated surround modulus must change stiffness");
+        let solution = model
+            .solve_frequency(200.0, Complex64::new(1.0, 0.0))
+            .unwrap();
+        assert!(solution.impedance_ohm.is_finite());
+        // Outside the tabulated range the solve fails closed.
+        assert!(model.coupled_system_at(10_000.0).is_err());
+        assert!(model.solve_frequency(10_000.0, Complex64::new(1.0, 0.0)).is_err());
     }
 
     /// Golden-value regression: `build_magnetic_bias` classifies cells with

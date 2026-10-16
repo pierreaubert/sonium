@@ -1,0 +1,25 @@
+[package]
+name = "sonium-materials"
+version = "0.1.0"
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+description = "Versioned pure-Rust material records with provenance, curves, and fail-closed adapters"
+keywords = ["materials", "acoustics", "fem", "provenance"]
+categories = ["science", "simulation"]
+
+[lib]
+name = "sonium_materials"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+num-complex = { workspace = true }
+
+[lints.rust]
+unsafe_code = "deny"
