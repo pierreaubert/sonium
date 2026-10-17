@@ -1,6 +1,6 @@
 [package]
 name = "sonium-solvers-direct"
-version = "0.4.5"
+version = "0.5.0"
 description = "Direct solvers: dense LU/Cholesky, sparse LU/Cholesky, multifrontal BLR"
 edition = { workspace = true }
 authors = { workspace = true }

@@ -1,6 +1,6 @@
 [package]
 name = "sonium-solvers-time-integration"
-version = "0.4.5"
+version = "0.5.0"
 description = "Time integration: Newmark-beta, generalized-alpha, explicit schemes, adjoint checkpointing"
 edition = { workspace = true }
 authors = { workspace = true }

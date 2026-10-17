@@ -1,6 +1,6 @@
 [package]
 name = "sonium-solvers-optimization"
-version = "0.4.5"
+version = "0.5.0"
 description = "Optimization: BFGS, L-BFGS(-B), Nelder-Mead, SQP/SLSQP, MMA, IPM, CMA-ES, BOBYQA"
 edition = { workspace = true }
 authors = { workspace = true }

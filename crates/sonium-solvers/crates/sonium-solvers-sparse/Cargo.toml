@@ -1,6 +1,6 @@
 [package]
 name = "sonium-solvers-sparse"
-version = "0.4.5"
+version = "0.5.0"
 description = "Sparse matrix formats (CSR, BSR, triplet) and SpMV plans for sonium solvers"
 edition = { workspace = true }
 authors = { workspace = true }

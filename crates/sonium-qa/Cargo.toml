@@ -1,6 +1,6 @@
 [package]
 name = "sonium-qa"
-version = "0.1.6"
+version = "0.2.0"
 description = "Quality assurance suite: accuracy validation binaries for sonium"
 edition = { workspace = true }
 authors = { workspace = true }

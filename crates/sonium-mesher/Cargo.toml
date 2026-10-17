@@ -1,6 +1,6 @@
 [package]
 name = "sonium-mesher"
-version = "0.1.4"
+version = "0.2.0"
 description = "Mesh generation and partitioning for FEM/BEM"
 edition = { workspace = true }
 authors = { workspace = true }

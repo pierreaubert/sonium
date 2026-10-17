@@ -3,6 +3,10 @@
 All notable changes to the OpenCourant-parity crates (`sonium-qa`,
 `sonium-fem`, `sonium-compute`, `sonium-bench`). Dates are UTC.
 
+## 2026-10-17 — Coordinated minor release
+
+Bumps: every crate in the `sonium` workspace received a minor version bump (patch reset to zero). Crate changelogs were released or introduced to match, and crates that had no `README.md` gained one. No API break is implied by the coordinated bump itself; per-crate entries carry the substantive notes.
+
 ## 2026-10-13 — Follow-ups: RSS measurement, wolfram flake, QA rerun
 
 No version bumps (harness + QA-only changes).

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+### Changed
+
+- Bumped the package version from 0.1.0 to 0.2.0 as part of the coordinated minor release.
+
 ## 0.1.0 — 2026-10-16
 
 - Initial replication crate for Melchior et al. 2026 (JLR LBM):

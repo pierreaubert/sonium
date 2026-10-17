@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.2.0
 ### Added
 
 - Machine-adaptive frequency-lane gate (`use_frequency_lanes`,

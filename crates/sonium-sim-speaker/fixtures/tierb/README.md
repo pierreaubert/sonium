@@ -105,10 +105,28 @@ uses restart 200 / recycle 50, which converged at every probed
 frequency. Per-frequency H-matrix cost then rises steeply with DOF
 count: 14,052 DOFs (6 kHz mesh) produced no completed frequency within
 31 minutes, and at 25,014 DOFs (8 kHz mesh) only four of 21
-frequencies (229 Hz–2.2 kHz) completed in the first hour, with a
-single 8 kHz solve still incomplete after 46 minutes. Extending the Sonium curves
+frequencies (229 Hz–2.2 kHz) completed in the first hour. A dedicated
+single-frequency 8 kHz run, one lane on the otherwise idle 128-core
+host (~53 cores busy), also produced no completed solve within a
+25-minute cap. The dense CUDA path (RTX PRO 6000, 98 GB) was also
+probed: at 14,052 DOFs it assembles and iterates in ~90 s, but its
+mixed-precision GMRES plateaus at ~8e-4 true residual. Under the
+default Qualification policy the independent CPU reference reassembly
+exceeded 100 GB with unrestricted threads; with
+`RAYON_NUM_THREADS=2` that reference completed, but the crate's f64
+acceptance gate rejected the GPU field at 6 kHz (physical observable
+error 5.995e-2 against a 1e-3 tolerance). At 25,014 DOFs the resident
+CUDA workspace exceeds the device quota (~127 GB wanted).
+Extending the Sonium curves
 to 8 kHz is therefore blocked on H-matrix assembly/iteration
 performance, not on the comparison setup; the dense FGMRES+ILU path is
 not a fallback at these sizes (out-of-memory at 236 GB with nine
 6,494-DOF lanes). Treat any future 8 kHz numbers as new evidence, not
 as an extrapolation of the table above.
+
+## Tier C
+
+The self-measured tier — same physical unit measured and modelled,
+no manufacturer data anywhere in the chain — is specified in
+`../tierc/PROTOCOL.md`. It is the next validation step once a first
+driver unit is available.

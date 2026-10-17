@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.5.0
 ### Fixed
 
 - `runtime::observe_execution_contract` parks its 10 ms overlap window with

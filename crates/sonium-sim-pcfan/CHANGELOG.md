@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.5.0
 ### Fixed — annular FW-H thrust scaling
 
 - `modal_loading_amplitude_pa` now returns the thrust-conserving

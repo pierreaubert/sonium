@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+### Changed
+
+- Bumped the package version from 0.2.1 to 0.3.0 as part of the coordinated minor release.
+
 ## 0.2.0
 
 ### Added

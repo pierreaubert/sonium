@@ -38,6 +38,7 @@ pub mod distributed_radiation;
 pub mod driver_model;
 pub mod eddy_current_bias;
 pub mod fem_bem_coupling;
+pub mod job_runner;
 pub mod job_service;
 pub mod field_export;
 pub mod motor_extraction;

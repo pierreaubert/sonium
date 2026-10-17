@@ -1,6 +1,6 @@
 [package]
 name = "sonium-solvers-nonlinear"
-version = "0.4.5"
+version = "0.5.0"
 description = "Nonlinear solvers: Newton-Raphson (exact/inexact/continuation), Anderson acceleration"
 edition = { workspace = true }
 authors = { workspace = true }

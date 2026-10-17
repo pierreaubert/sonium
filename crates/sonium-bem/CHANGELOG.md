@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.5.0
 ### Added — machine-adaptive parallel gates
 
 - New `core::parallel::ParallelPolicy`: every assembly/matvec/postprocess

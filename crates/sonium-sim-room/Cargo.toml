@@ -1,6 +1,6 @@
 [package]
 name = "sonium-sim-room"
-version = "0.4.4"
+version = "0.5.0"
 edition = { workspace = true }
 authors = { workspace = true }
 description = "Generate room measurement data for RoomEQ testing using FEM, with optional dense BLR TBEM for low frequencies"

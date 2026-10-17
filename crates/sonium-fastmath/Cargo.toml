@@ -1,6 +1,6 @@
 [package]
 name = "sonium-fastmath"
-version = "0.1.0"
+version = "0.2.0"
 edition = { workspace = true }
 authors = { workspace = true }
 description = "Vectorised math primitives (sincos f32/f64) with NEON, AVX2, AVX-512, WASM SIMD, and scalar fallback"

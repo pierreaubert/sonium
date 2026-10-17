@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.2.0
 ### Fixed
 
 - Removed committed r2factor scratch (`src/mesh/tetrahedralize.rs.bak`,

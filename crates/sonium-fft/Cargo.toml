@@ -1,6 +1,6 @@
 [package]
 name = "sonium-fft"
-version = "0.1.0"
+version = "0.2.0"
 description = "Batched complex / real FFT and STFT on top of sonium-compute"
 edition = { workspace = true }
 authors = { workspace = true }

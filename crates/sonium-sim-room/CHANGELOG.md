@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.5.0
 ### Added — machine-adaptive parallel gates
 
 - FEM sweep source fan-out (per-source solves and block-solve RHS

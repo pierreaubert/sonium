@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.7.0
 ### Added
 
 - Campaign candidate parallelism: `FunnelConfig::stage_parallelism` and

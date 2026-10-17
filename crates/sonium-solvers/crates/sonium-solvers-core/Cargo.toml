@@ -1,6 +1,6 @@
 [package]
 name = "sonium-solvers-core"
-version = "0.4.5"
+version = "0.5.0"
 description = "Core traits (ComplexField, LinearOperator, Preconditioner) and dense matrix for sonium solvers"
 edition = { workspace = true }
 authors = { workspace = true }

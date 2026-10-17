@@ -1,6 +1,6 @@
 [package]
 name = "sonium-solvers"
-version = "0.4.6"
+version = "0.5.0"
 description = "High-performance linear solvers for BEM and FEM"
 edition = { workspace = true }
 authors = { workspace = true }

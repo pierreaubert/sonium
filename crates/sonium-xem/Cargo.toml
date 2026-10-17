@@ -1,6 +1,6 @@
 [package]
 name = "sonium-xem"
-version = "0.4.2"
+version = "0.5.0"
 description = "Common types and utilities for BEM/FEM room acoustics simulators"
 edition = { workspace = true }
 authors = { workspace = true }

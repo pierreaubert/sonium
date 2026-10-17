@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.2.0
 ### Added — machine-adaptive parallel gates
 
 - New `cpu::parallelism::use_compute_parallel` gate

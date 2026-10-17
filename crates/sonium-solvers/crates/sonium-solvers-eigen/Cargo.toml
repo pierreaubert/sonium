@@ -1,6 +1,6 @@
 [package]
 name = "sonium-solvers-eigen"
-version = "0.4.5"
+version = "0.5.0"
 description = "Eigenvalue solvers (LOBPCG) and adjoint sensitivities for sonium"
 edition = { workspace = true }
 authors = { workspace = true }

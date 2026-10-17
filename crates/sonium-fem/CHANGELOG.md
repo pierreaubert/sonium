@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.7.0
 ### Added
 
 - Lagged BDF preconditioner setup reuse (`NavierStokesConfig::linear_solver_setup_max_lag_steps`,

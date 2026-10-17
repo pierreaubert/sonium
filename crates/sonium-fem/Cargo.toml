@@ -1,6 +1,6 @@
 [package]
 name = "sonium-fem"
-version = "0.6.1"
+version = "0.7.0"
 description = "Generic multi-physics finite element method library"
 edition = { workspace = true }
 authors = { workspace = true }

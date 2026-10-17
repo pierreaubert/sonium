@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+### Changed
+
+- Bumped the package version from 0.4.6 to 0.5.0 as part of the coordinated minor release.
+
 ## 0.4.5
 
 ### Architecture

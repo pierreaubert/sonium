@@ -30,7 +30,10 @@
 //! at λ/8 for 8 kHz). Solver probes can set `MECHANO23_DENSE=1` to force the
 //! dense FGMRES+ILU path instead of H-matrix assembly, plus
 //! `MECHANO23_TOLERANCE`, `MECHANO23_MAX_LANES`, `MECHANO23_RESTART`,
-//! `MECHANO23_RECYCLE`, and `MECHANO23_ACA_TOLERANCE`.
+//! `MECHANO23_RECYCLE`, `MECHANO23_ACA_TOLERANCE`, and
+//! `MECHANO23_MAX_ITERATIONS`. With the crate's `cuda` feature,
+//! `MECHANO23_CUDA=1` runs the dense CUDA solver instead of the CPU
+//! paths.
 //!
 //! Measured cost (128-core host, October 2026): the 4 kHz grid
 //! (`MECHANO23_FREQ_POINTS=17 MECHANO23_FREQ_END_HZ=4000
@@ -993,6 +996,10 @@ fn main() -> ExampleResult<()> {
         "MECHANO23_ACA_TOLERANCE",
         solver_config.hmatrix_aca_tolerance,
     );
+    solver_config.max_iterations = env_f64(
+        "MECHANO23_MAX_ITERATIONS",
+        solver_config.max_iterations as f64,
+    ) as usize;
     solver_config.restart = env_f64("MECHANO23_RESTART", solver_config.restart as f64) as usize;
     solver_config.recycle_subspace_size = env_f64(
         "MECHANO23_RECYCLE",
@@ -1005,6 +1012,21 @@ fn main() -> ExampleResult<()> {
     {
         solver_config.max_frequency_lanes = Some(lanes);
     }
+    #[cfg(feature = "cuda")]
+    let result = if std::env::var_os("MECHANO23_CUDA").is_some_and(|value| value == "1") {
+        // GPU probe path: dense operator assembled and solved on CUDA,
+        // accepted only through the crate's own residual/field gates.
+        let (result, report) = sonium_sim_speaker::simulation::run_simulation_cuda_with_report(
+            &model,
+            &eval_points,
+            &solver_config,
+        )?;
+        eprintln!("GPU execution report: {report:?}");
+        result
+    } else {
+        run_simulation_with_config(&model, &eval_points, &solver_config)?
+    };
+    #[cfg(not(feature = "cuda"))]
     let result = run_simulation_with_config(&model, &eval_points, &solver_config)?;
     let predicted_metrics = cea2034_output::compute_spinorama_metrics(&result)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;

@@ -1,7 +1,7 @@
 [package]
 name = "sonium-compute"
 autobenches = false
-version = "0.1.7"
+version = "0.2.0"
 description = "Compute backend abstraction (CPU / NVIDIA CUDA / future Metal,Vulkan) with strict device-memory quotas"
 edition = { workspace = true }
 authors = { workspace = true }

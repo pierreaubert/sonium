@@ -1,6 +1,6 @@
 [package]
 name = "sonium-sim-speaker-modeling"
-version = "0.6.0"
+version = "0.7.0"
 edition = { workspace = true }
 authors = { workspace = true }
 description = "COMSOL-style electrovibroacoustic speaker-driver modeling examples on top of Sonium FEM"
@@ -20,6 +20,10 @@ path = "src/bin/whole_speaker.rs"
 [[bin]]
 name = "motor-extract"
 path = "src/bin/motor_extract.rs"
+
+[[bin]]
+name = "workbench-worker"
+path = "src/bin/workbench_worker.rs"
 
 [dependencies]
 sonium-compute = { workspace = true }

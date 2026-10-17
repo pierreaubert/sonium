@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.2.0
 ### Added — solver follow-up harnesses
 
 - `qa-speaker-port-nonlinear`: reduced-3D smoke/development tiers gain a

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.2.0
 ### Added — machine-adaptive parallel gates
 
 - New `parallelism::use_propeller_parallel` gate

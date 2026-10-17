@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.5.0
 ### Fixed
 
 - Binaural rendering applied every source's HRTF gain to the summed ear

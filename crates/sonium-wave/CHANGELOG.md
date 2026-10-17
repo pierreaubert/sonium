@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+## 0.6.0
 ### Added
 
 - `suggested_sphere_terms_for_grid`: grid-aware Mie-series truncation
