@@ -18,6 +18,10 @@ name = "speaker-sim"
 path = "bin/speaker_sim.rs"
 required-features = ["cli"]
 
+[[bin]]
+name = "speaker-product-worker"
+path = "src/bin/speaker_product_worker.rs"
+
 [dependencies]
 # BEM core (assembly, postprocess, types)
 sonium-bem = { workspace = true }
@@ -50,6 +54,7 @@ meshlang-ast = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 
 # Logging
 log = { workspace = true }

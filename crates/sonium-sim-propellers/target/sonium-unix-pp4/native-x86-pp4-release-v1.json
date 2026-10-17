@@ -3,14 +3,14 @@
   "status": "gated",
   "scope": "native Linux x86_64 CPU/f64; Windows/Arm64 waived",
   "host": {
-    "compiler": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
     "os": "linux",
     "kernel": "6.8.0-146-generic",
     "cpu_model": "AMD Ryzen Threadripper PRO 3995WX 64-Cores",
     "microcode": "0x830107c",
     "target": "x86_64-linux",
     "target_features": "avx2,fma,sse4.2",
-    "rayon_threads": 128,
+    "rayon_threads": 8,
     "affinity_policy": "unspecified"
   },
   "execution": {
@@ -31,19 +31,19 @@
     "input_checksum_sha256": "2a568c207dd44ee45f235aed7ba786a7171a7116f75394611132dabb2ad3a0e0",
     "output_checksum_sha256": "e433f3aa029351d42e9d615edb3fca9c1430a7d76ae7b71fa74c57ccc6436f24",
     "host": {
-      "compiler": "rustc 1.99.0 (b940084d7 2026-09-28)",
+      "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
       "os": "linux",
       "kernel": "6.8.0-146-generic",
       "cpu_model": "AMD Ryzen Threadripper PRO 3995WX 64-Cores",
       "microcode": "0x830107c",
       "target": "x86_64-linux",
       "target_features": "avx2,fma,sse4.2",
-      "rayon_threads": 128,
+      "rayon_threads": 8,
       "affinity_policy": "unspecified"
     }
   },
   "deterministic_mode": true,
-  "thread_policy": "RAYON_NUM_THREADS=128",
+  "thread_policy": "RAYON_NUM_THREADS=8",
   "capability": {
     "renderer": "sonium_xem::io::GalleryRenderer",
     "renderer_status": "available",
@@ -67,15 +67,15 @@
     "spectrum_rows": 4,
     "panel_load_rows": 96,
     "vtu_files": 2,
-    "manifest_sha256": "24f4777c9465a78bee14af6fb16a5616aa5fbda446bdc1936fc719ceb56f850e",
+    "manifest_sha256": "68f7542d4d4524ee9ff1297204a19201c0e4004839542b977597915977864d65",
     "artifact_checksums_sha256": {
       "axial-wake-proxy.png": "3bf6fb05b7ab6891095371788508864cf868845fed9f5efe299e20b6d5966723",
       "baseline_blade.vtu": "622d0225a700579dbd7751cd59c641a8ec6d661e351a4f43bcc503d45b929dd7",
       "blade-load-distribution.svg": "1656028c4ce7e80c96e95a47e90a507775a511f3c634e6e4c45a29ae2237f6b3",
       "blade_load_distribution.csv": "4f0a6686ab29b495a717c0578000f39f2348036f8515a6d1963f2a3e8db67511",
       "conventional-toroidal-comparison.svg": "18fbee11384425224d59e474ae21f8f65decd7dc63ac20bbfcdae6c4436656dc",
-      "execution_evidence.json": "aca20ea6e7b251c061b89b6b0c2068898bfb6351de211d8610fe414905a332e8",
-      "gallery.json": "24f4777c9465a78bee14af6fb16a5616aa5fbda446bdc1936fc719ceb56f850e",
+      "execution_evidence.json": "89700ff25f84c1b551468061acc432fb60d1ca69b9b81be088f3313477e13414",
+      "gallery.json": "68f7542d4d4524ee9ff1297204a19201c0e4004839542b977597915977864d65",
       "optimized-blade-loading.png": "80df0c7de8d22f213ae22c612057465f725c70b167e5a13e89b57fd0db85f800",
       "optimized_blade.vtu": "2b61bb0ac30cb90d44fe6c7ebe485590443189ac35c4546183d9e567cf54da42",
       "rotation.gif": "b9b7a69bf33ed95bf157216af4685a51a9372d49062faa586f51bbbc14df1478",

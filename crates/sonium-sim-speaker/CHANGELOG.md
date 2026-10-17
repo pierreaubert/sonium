@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- `speaker-product-worker` binary: executes Workbench Product
+  Radiation jobs through the shared job store (rigid-piston cabinet
+  BEM with lumped driver velocity, CEA-2034 result document).
+
 ## 0.2.0
 ### Added
 

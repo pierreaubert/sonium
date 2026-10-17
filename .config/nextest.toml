@@ -1,3 +1,11 @@
+[profile.default]
+# Outer parallelism: one scheduler slot per logical CPU. Tests reserve slots
+# via the overrides below so light and heavy tests pack together.
+test-threads = "num-cpus"
+
+# Serial monsters: each reserves every slot, so it runs alone. Priority 100
+# starts them first so short tests backfill instead of idling behind a tail
+# straggler.
 [[profile.default.overrides]]
 filter = '''
 test(test_free_field_point_source_tracks_greens_function_across_band)
@@ -8,3 +16,4 @@ test(test_free_field_point_source_tracks_greens_function_across_band)
 | test(transient_runner_publishes_finite_rotating_wall_window)
 '''
 threads-required = "num-test-threads"
+priority = 100

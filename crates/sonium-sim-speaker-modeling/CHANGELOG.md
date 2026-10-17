@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Speaker workflow migration into the unified Workbench: the UI
+  project document gained a speaker section (lumped driver,
+  enclosure, drive, product settings), and the job runner now
+  executes Driver Linear and Large Signal studies plus sealed
+  enclosures. Product Radiation routes to `speaker-product-worker`.
+
 ## 0.7.0
 ### Added
 

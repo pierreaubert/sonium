@@ -41,9 +41,14 @@ test:
 test-all:
     {{cargo}} test --workspace --all-targets
 
+# Broad test coverage. Two knobs control core use: `threads` sets nextest
+# scheduler slots (default: all CPUs); RAYON/OpenBLAS env caps the inner
+# thread pool each test process spawns, so 128 concurrent tests don't each
+# grab 128 threads. Heavies wanting more inner threads: run with e.g.
+# RAYON_NUM_THREADS=64 just ntest.
 [group('test')]
-ntest:
-    {{cargo}} nextest run --release --no-fail-fast --workspace --all --features="cli"
+ntest threads="num-cpus":
+    RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-8}" OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-8}" {{cargo}} nextest run --release --no-fail-fast --workspace --all --features="cli" --test-threads {{threads}}
 
 # Run tests for a specific crate
 [group('test')]

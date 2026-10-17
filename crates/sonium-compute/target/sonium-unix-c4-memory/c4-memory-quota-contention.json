@@ -9,7 +9,7 @@
   "backend": "cpu-reference",
   "cuda_executed": false,
   "cpu_model": "AMD Ryzen Threadripper PRO 3995WX 64-Cores",
-  "compiler": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
   "thread_count": 4,
   "thread_policy": "four-host-threads;turn-gated-retry",
   "cap_bytes": 4096,
