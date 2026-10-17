@@ -1003,16 +1003,28 @@ fn singular_integration_linear_with_params_mode(
             }
         }
 
+        // The legacy subelement fan below stays anchored at the panel
+        // centre for the G, H, and H^T channels and the hypersingular
+        // area term. The hypersingular density-gradient term is
+        // integrated separately on a fan anchored at the singular
+        // source point: higher-order collocation points sit off-centre,
+        // and the Duffy factor (1 + sga) only cancels that stronger
+        // singularity when the fan apex is the source.
+        let centre_apex = match element_type {
+            ElementType::Tri3 => (1.0 / 3.0, 1.0 / 3.0),
+            ElementType::Quad4 => (0.0, 0.0),
+        };
+        let source_apex = panel_local_coordinates(source_point, element_coords, element_type);
+
         // Subelement integration for G, H, H^T kernels
         for isec in 0..nsec2 {
-            let (ssub, tsub, aresub) = match element_type {
+            let (ssub, tsub) = match element_type {
                 ElementType::Tri3 => {
-                    let aresub = 1.0 / 24.0 / nsec2 as f64;
                     let mut ssub = [0.0; 3];
                     let mut tsub = [0.0; 3];
 
-                    ssub[0] = 1.0 / 3.0;
-                    tsub[0] = 1.0 / 3.0;
+                    ssub[0] = centre_apex.0;
+                    tsub[0] = centre_apex.1;
 
                     if isec == 0 {
                         ssub[1] = CSI6[ieg];
@@ -1025,15 +1037,14 @@ fn singular_integration_linear_with_params_mode(
                         tsub[1] = ETA6[ig2];
                         tsub[2] = ETA6[ig1];
                     }
-                    (ssub, tsub, aresub)
+                    (ssub, tsub)
                 }
                 ElementType::Quad4 => {
-                    let aresub = 0.25 / nsec2 as f64;
                     let mut ssub = [0.0; 3];
                     let mut tsub = [0.0; 3];
 
-                    ssub[0] = 0.0;
-                    tsub[0] = 0.0;
+                    ssub[0] = centre_apex.0;
+                    tsub[0] = centre_apex.1;
 
                     if isec == 0 {
                         ssub[1] = CSI8[ieg];
@@ -1046,9 +1057,21 @@ fn singular_integration_linear_with_params_mode(
                         tsub[1] = ETA8[ig2];
                         tsub[2] = ETA8[ig1];
                     }
-                    (ssub, tsub, aresub)
+                    (ssub, tsub)
                 }
             };
+            // Reference-area factor of the affine fan map: with
+            // u = (1 + sga) / 2 the map Jacobian is u * D / 4 where
+            // D is the subtriangle determinant below, and the weight
+            // already carries (1 + sga), leaving D / 8 per section.
+            // The legacy loop repeats the second section
+            // (nsec2 - 1) times, so sections share the historical
+            // 2 / nsec2 split; for a centre apex this reduces to the
+            // historical constants.
+            let aresub = ((ssub[1] - ssub[0]) * (tsub[2] - tsub[0])
+                - (ssub[2] - ssub[0]) * (tsub[1] - tsub[0]))
+                .abs()
+                / (4.0 * nsec2 as f64);
 
             let ngausin = quadrature.subelement_gauss_order;
             let quad_points = gauss_legendre(ngausin);
@@ -1129,8 +1152,6 @@ fn singular_integration_linear_with_params_mode(
                     };
 
                     let basis_values = panel_basis_values(element_type, sgg, tgg, num_basis);
-                    let basis_gradients =
-                        panel_basis_gradients(element_coords, element_type, sgg, tgg, num_basis);
 
                     // Weight by collocation-basis functions
                     for b in 0..num_basis {
@@ -1142,10 +1163,112 @@ fn singular_integration_linear_with_params_mode(
                         };
                         basis_results[b].dg_dn_integral += zhh * n_b;
                         basis_results[b].dg_dnx_integral += zht * n_b;
-                        // Stokes' theorem for a weighted hypersingular
-                        // kernel also differentiates the density. The edge
-                        // term alone is valid only for a constant basis.
-                        let gradient = basis_gradients[b];
+                        basis_results[b].d2g_dnxdny_integral += e_area_contrib * n_b;
+                    }
+                }
+            }
+        }
+
+        // Hypersingular density-gradient (Maue) term on a fan anchored
+        // at the source point. Stokes' theorem for a weighted
+        // hypersingular kernel also differentiates the density; the
+        // edge term alone is valid only for a constant basis.
+        for isec in 0..nsec2 {
+            let (ssub, tsub) = match element_type {
+                ElementType::Tri3 => {
+                    let mut ssub = [0.0; 3];
+                    let mut tsub = [0.0; 3];
+                    ssub[0] = source_apex.0;
+                    tsub[0] = source_apex.1;
+                    if isec == 0 {
+                        ssub[1] = CSI6[ieg];
+                        ssub[2] = CSI6[ig2];
+                        tsub[1] = ETA6[ieg];
+                        tsub[2] = ETA6[ig2];
+                    } else {
+                        ssub[1] = CSI6[ig2];
+                        ssub[2] = CSI6[ig1];
+                        tsub[1] = ETA6[ig2];
+                        tsub[2] = ETA6[ig1];
+                    }
+                    (ssub, tsub)
+                }
+                ElementType::Quad4 => {
+                    let mut ssub = [0.0; 3];
+                    let mut tsub = [0.0; 3];
+                    ssub[0] = source_apex.0;
+                    tsub[0] = source_apex.1;
+                    if isec == 0 {
+                        ssub[1] = CSI8[ieg];
+                        ssub[2] = CSI8[ig2];
+                        tsub[1] = ETA8[ieg];
+                        tsub[2] = ETA8[ig2];
+                    } else {
+                        ssub[1] = CSI8[ig2];
+                        ssub[2] = CSI8[ig1];
+                        tsub[1] = ETA8[ig2];
+                        tsub[2] = ETA8[ig1];
+                    }
+                    (ssub, tsub)
+                }
+            };
+            let aresub = ((ssub[1] - ssub[0]) * (tsub[2] - tsub[0])
+                - (ssub[2] - ssub[0]) * (tsub[1] - tsub[0]))
+                .abs()
+                / (4.0 * nsec2 as f64);
+            let ngausin = quadrature.subelement_gauss_order;
+            let quad_points = gauss_legendre(ngausin);
+            let (gau_coords, gau_weights) = quad_points;
+            for (i, &sga) in gau_coords.iter().enumerate() {
+                for (j, &tga) in gau_coords.iter().enumerate() {
+                    let wei_gau = gau_weights[i] * gau_weights[j];
+                    let sgg = 0.5 * (1.0 - sga) * ssub[0]
+                        + 0.25 * (1.0 + sga) * ((1.0 - tga) * ssub[1] + (1.0 + tga) * ssub[2]);
+                    let tgg = 0.5 * (1.0 - sga) * tsub[0]
+                        + 0.25 * (1.0 + sga) * ((1.0 - tga) * tsub[1] + (1.0 + tga) * tsub[2]);
+                    let (shape_fn, shape_ds, shape_dt, jacobian, el_norm_flat, crd_poi) =
+                        compute_shape_and_jacobian(element_coords, element_type, sgg, tgg);
+                    let (crd_poi, jacobian, el_norm) = if node_normals.is_some() {
+                        quadrature_geometry(
+                            element_coords,
+                            &shape_fn,
+                            &shape_ds,
+                            &shape_dt,
+                            node_normals,
+                        )
+                    } else {
+                        (crd_poi, jacobian, el_norm_flat)
+                    };
+                    let wga = wei_gau * (1.0 + sga) * aresub * jacobian;
+                    let diff_fsp = [
+                        crd_poi[0] - source_point[0],
+                        crd_poi[1] - source_point[1],
+                        crd_poi[2] - source_point[2],
+                    ];
+                    let (unit_r, dis_fsp) = normalize(diff_fsp);
+                    if dis_fsp < 1e-15 {
+                        continue;
+                    }
+                    let re1 = wavruim * dis_fsp;
+                    let re2 = wga / (4.0 * PI * dis_fsp);
+                    let zg = sonium_fastmath::exp_i(re1) * re2;
+                    let dzg = zg * Complex64::new(0.0, physics.harmonic_factor * dis_fsp);
+                    let z1 = Complex64::new(-1.0 / dis_fsp, wavruim);
+                    let zhh_base = zg * z1;
+                    let dzhh_base = dzg * z1 + zg * Complex64::new(0.0, physics.harmonic_factor);
+                    let re1_h =
+                        unit_r[0] * el_norm[0] + unit_r[1] * el_norm[1] + unit_r[2] * el_norm[2];
+                    let normal_dot = source_normal[0] * el_norm[0]
+                        + source_normal[1] * el_norm[1]
+                        + source_normal[2] * el_norm[2];
+                    let differentiated_green = if wavenumber_derivative {
+                        dzhh_base
+                    } else {
+                        zhh_base
+                    };
+                    let basis_gradients =
+                        panel_basis_gradients(element_coords, element_type, sgg, tgg, num_basis);
+                    for (b, gradient) in basis_gradients.iter().enumerate() {
                         let gradient_dot_r =
                             gradient.iter().zip(unit_r).map(|(a, b)| a * b).sum::<f64>();
                         let gradient_dot_source = gradient
@@ -1155,13 +1278,8 @@ fn singular_integration_linear_with_params_mode(
                             .sum::<f64>();
                         let gradient_factor =
                             -normal_dot * gradient_dot_r + re1_h * gradient_dot_source;
-                        let differentiated_green = if wavenumber_derivative {
-                            dzhh_base
-                        } else {
-                            zhh_base
-                        };
                         basis_results[b].d2g_dnxdny_integral +=
-                            e_area_contrib * n_b + differentiated_green * gradient_factor;
+                            differentiated_green * gradient_factor;
                     }
                 }
             }
@@ -1169,6 +1287,76 @@ fn singular_integration_linear_with_params_mode(
     }
 
     LinearIntegrationResult { basis_results }
+}
+
+/// Invert the flat panel map at `source_point`, returning the local
+/// coordinates of the singular point. Falls back to the panel centre
+/// (the historical fan apex) when the map is degenerate or the source
+/// projects outside the panel.
+fn panel_local_coordinates(
+    source_point: &[f64; 3],
+    element_coords: &DenseMatrix<f64>,
+    element_type: ElementType,
+) -> (f64, f64) {
+    let fallback = match element_type {
+        ElementType::Tri3 => (1.0 / 3.0, 1.0 / 3.0),
+        ElementType::Quad4 => (0.0, 0.0),
+    };
+    let solve_tangent_system = |tangent_s: [f64; 3], tangent_t: [f64; 3], rhs: [f64; 3]| {
+        let ss = tangent_s.iter().map(|a| a * a).sum::<f64>();
+        let tt = tangent_t.iter().map(|a| a * a).sum::<f64>();
+        let st = tangent_s
+            .iter()
+            .zip(tangent_t)
+            .map(|(a, b)| a * b)
+            .sum::<f64>();
+        let determinant = ss * tt - st * st;
+        if determinant.abs() < 1e-30 {
+            return None;
+        }
+        let rs = tangent_s
+            .iter()
+            .zip(rhs)
+            .map(|(a, b)| a * b)
+            .sum::<f64>();
+        let rt = tangent_t
+            .iter()
+            .zip(rhs)
+            .map(|(a, b)| a * b)
+            .sum::<f64>();
+        Some(((tt * rs - st * rt) / determinant, (ss * rt - st * rs) / determinant))
+    };
+    let (mut s, mut t) = fallback;
+    for _ in 0..50 {
+        let (_, shape_ds, shape_dt, _, _, position) =
+            compute_shape_and_jacobian(element_coords, element_type, s, t);
+        let residual = [
+            source_point[0] - position[0],
+            source_point[1] - position[1],
+            source_point[2] - position[2],
+        ];
+        if residual.iter().map(|a| a * a).sum::<f64>().sqrt() < 1e-13 {
+            break;
+        }
+        let mut tangent_s = [0.0; 3];
+        let mut tangent_t = [0.0; 3];
+        for node in 0..element_type.num_nodes() {
+            for axis in 0..3 {
+                tangent_s[axis] += shape_ds[node] * element_coords[[node, axis]];
+                tangent_t[axis] += shape_dt[node] * element_coords[[node, axis]];
+            }
+        }
+        let Some((ds, dt)) = solve_tangent_system(tangent_s, tangent_t, residual) else {
+            return fallback;
+        };
+        s += ds;
+        t += dt;
+    }
+    let inside = match element_type {
+        ElementType::Tri3 => s >= -1e-9 && t >= -1e-9 && s + t <= 1.0 + 1e-9,
+        ElementType::Quad4 => s.abs() <= 1.0 + 1e-9 && t.abs() <= 1.0 + 1e-9,
+    };
+    if inside { (s, t) } else { fallback }
 }
 
 fn panel_basis_gradients(
@@ -1210,15 +1398,17 @@ fn panel_basis_gradients(
             let lt = lagrange(t);
             let ds = derivative(s);
             let dt = derivative(t);
+            // Same slot order as `panel_basis_values` (connectivity
+            // vertices, consecutive edge midpoints, center).
             [
-                (2, 2),
-                (0, 2),
                 (0, 0),
                 (2, 0),
-                (1, 2),
-                (0, 1),
+                (2, 2),
+                (0, 2),
                 (1, 0),
                 (2, 1),
+                (1, 2),
+                (0, 1),
                 (1, 1),
             ]
             .into_iter()

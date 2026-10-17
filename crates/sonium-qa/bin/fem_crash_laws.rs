@@ -94,10 +94,12 @@ const ZERO_TOLERANCE: f64 = 5e-14;
 const LEDGER_REL: f64 = 0.01;
 
 /// Loose ledger band for shear/impact tests (documented in the header).
-const LEDGER_LOOSE_REL: f64 = 0.05;
+/// Measured worst ledger deviation is 2.56e-2 (LOI68); gate at ~1.5x.
+const LEDGER_LOOSE_REL: f64 = 0.04;
 
 /// LOI62 formulation band, fraction of series peak (documented above).
-const FORMULATION_REL: f64 = 0.05;
+/// Measured worst judged ratio is 1.6e-2; gate at ~2x.
+const FORMULATION_REL: f64 = 0.03;
 
 /// LOI2 truss formulation band, relative (documented in the header).
 const TRUSS_BAND_REL: f64 = 2e-3;

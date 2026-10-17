@@ -634,7 +634,8 @@ fn run() -> Result<QaResult, String> {
             spatial[2].flux.into_iter().fold(0.0_f64, f64::max),
             0.1,
         ),
-        ("fine_heat_error", spatial[2].heat_error, 0.05),
+        // Measured fine-grid heat error = 2.01e-2; gate at ~2x.
+        ("fine_heat_error", spatial[2].heat_error, 0.04),
         (
             "fine_temporal_error",
             temporal[2]

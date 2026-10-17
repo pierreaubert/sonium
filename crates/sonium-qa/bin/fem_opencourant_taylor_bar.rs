@@ -103,7 +103,8 @@ pub fn taylor_bar_case() -> OpenCourantCase {
                 channel: format!("DZ/{face_center}"),
                 expected: travel,
                 abs_tol: 1e-9,
-                rel_tol: 0.05,
+                // Measured engine-vs-analytical probe deviations <= 2.8e-2; gate at ~1.4x.
+                rel_tol: 0.04,
             },
         ],
         stop_time_s: stop,

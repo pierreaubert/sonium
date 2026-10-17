@@ -83,7 +83,8 @@ fn main() {
             "Clamped circular plate DKT: 6x24 w = {w_coarse:.6e}, 12x48 w = \
              {w_fine:.6e} (err {err_fine:.3e}), closed form {exact:.6e}"
         );
-        assert!(err_fine < 0.05, "center deflection misses closed form");
+        // Measured fine-grid error = 3.42e-3 vs the closed form; gate at ~3x.
+        assert!(err_fine < 0.01, "center deflection misses closed form");
         assert!(
             (w_fine - exact).abs() <= (w_coarse - exact).abs(),
             "refinement must not increase the error"

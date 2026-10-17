@@ -148,7 +148,8 @@ fn shell_twisted_beam_case() -> RadExtendedCase {
                 channel: format!("DZ/{}", mesh.tip_center),
                 expected: TARGET_IN_M,
                 abs_tol: 1e-9,
-                rel_tol: 0.05,
+                // Measured engine-vs-analytical probe deviation = 6.4e-3; gate at ~3x.
+                rel_tol: 0.02,
             },
             RadProbe {
                 label: "root shell THIC".to_string(),

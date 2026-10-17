@@ -268,17 +268,19 @@ pub fn basis_values(element_type: ElementType, basis: BasisOrder, s: f64, t: f64
                 }
                 let ls = lagrange2(s);
                 let lt = lagrange2(t);
-                // Match the Quad4 geometry/connectivity convention:
-                // vertices (+,+),(-,+),(-,-),(+,-), then their edges.
+                // Connectivity convention: vertices (-,-),(+,-),(+,+),
+                // (-,+), then consecutive edge midpoints and the center.
+                // This matches the continuous quadratic DOF map and the
+                // Galerkin `quad4_basis_values` ordering.
                 vec![
-                    ls[2] * lt[2],
-                    ls[0] * lt[2],
                     ls[0] * lt[0],
                     ls[2] * lt[0],
-                    ls[1] * lt[2],
-                    ls[0] * lt[1],
+                    ls[2] * lt[2],
+                    ls[0] * lt[2],
                     ls[1] * lt[0],
                     ls[2] * lt[1],
+                    ls[1] * lt[2],
+                    ls[0] * lt[1],
                     ls[1] * lt[1],
                 ]
             }
@@ -683,14 +685,14 @@ mod tests {
         // edge midpoints and the center. Basis slots must represent those
         // same points under the geometry's local-coordinate convention.
         let local_nodes = [
-            (1.0, 1.0),
-            (-1.0, 1.0),
             (-1.0, -1.0),
             (1.0, -1.0),
-            (0.0, 1.0),
-            (-1.0, 0.0),
+            (1.0, 1.0),
+            (-1.0, 1.0),
             (0.0, -1.0),
             (1.0, 0.0),
+            (0.0, 1.0),
+            (-1.0, 0.0),
             (0.0, 0.0),
         ];
         for (slot, &(s, t)) in local_nodes.iter().enumerate() {

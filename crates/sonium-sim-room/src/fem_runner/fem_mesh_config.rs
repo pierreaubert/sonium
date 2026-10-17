@@ -19,7 +19,9 @@ use super::fem_preconditioner_kind::FemPreconditionerKind;
 use super::recycler_kind::RecyclerKind;
 use super::shifted_laplacian_shift::ShiftedLaplacianShift;
 use sonium_fem::mesh::{BoundaryType, ElementType, Mesh, Point};
-use sonium_xem::{Point3D, RoomGeometry, RoomSimulation, SymmetryConfig, map_to_reduced_domain};
+use sonium_xem::{
+    Point3D, RoomGeometry, RoomSimulation, SymmetryConfig, detect_symmetry, map_to_reduced_domain,
+};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// Volume-source distribution model for the FEM right-hand side.
@@ -323,6 +325,41 @@ pub(super) fn create_room_mesh(
     let ny = ys.len();
     let nz = zs.len();
 
+    // Reflection symmetry of the axis grids about the full-room centre
+    // planes. When a full-span grid is mirror-symmetric, cells on the far
+    // side of the centre use the mirrored body diagonal (see the element
+    // loop), so the whole mesh is invariant under the same reflections the
+    // symmetry-exploiting solver assumes. Reduced (half-domain) grids span
+    // only the near side and keep the base diagonal throughout, matching
+    // the full mesh's near half cell for cell. Non-symmetric grids keep
+    // the uniform diagonal everywhere.
+    let grid_symmetric = |coords: &[f64], length: f64| {
+        coords.len() >= 2
+            && coords
+                .iter()
+                .zip(coords.iter().rev())
+                .all(|(a, b)| (a + b - length).abs() < 1e-9)
+    };
+    // The diagonal may only switch exactly on the centre plane: if a cell
+    // straddled the centre, its two neighbours would induce different
+    // diagonals on their shared face and the P1 mesh would be
+    // non-conforming. Require a grid plane on the centre.
+    let centre_on_grid = |coords: &[f64], length: f64| {
+        coords.iter().any(|&c| (c - 0.5 * length).abs() < 1e-9)
+    };
+    // Mirroring is only meaningful when the physical problem (room,
+    // boundaries, sources) is itself symmetric in that axis; otherwise the
+    // diagonal flip would just change the mesh family arbitrarily.
+    let detected = detect_symmetry(simulation);
+    let x_mirrored = (eff_width - width).abs() < 1e-12
+        && detected.has_x()
+        && grid_symmetric(&xs, width)
+        && centre_on_grid(&xs, width);
+    let y_mirrored = (eff_depth - depth).abs() < 1e-12
+        && detected.has_y()
+        && grid_symmetric(&ys, depth)
+        && centre_on_grid(&ys, depth);
+
     let mut mesh = Mesh::new(3);
     let mut node_ids = vec![None; nx * ny * nz];
 
@@ -350,15 +387,39 @@ pub(super) fn create_room_mesh(
                     (i + 1, j + 1, k + 1),
                 );
 
-                // Use the same body diagonal in every cell. Alternating
-                // reflected patterns mismatches shared Y/Z face diagonals,
+                // Six tets on one body diagonal per cell. The diagonal is
+                // mirrored across the room centre planes when the axis grid
+                // is symmetric there (x_mirrored / y_mirrored), which keeps
+                // shared face diagonals paired on both sides of each centre
+                // plane while making the mesh reflection-invariant. Other
+                // alternating patterns would mismatch shared face diagonals,
                 // leaving unpaired interior triangles in the P1 mesh.
-                mesh.add_element(ElementType::Tetrahedron, vec![v0, v1, v3, v7]);
-                mesh.add_element(ElementType::Tetrahedron, vec![v0, v1, v7, v5]);
-                mesh.add_element(ElementType::Tetrahedron, vec![v0, v5, v7, v4]);
-                mesh.add_element(ElementType::Tetrahedron, vec![v0, v3, v2, v7]);
-                mesh.add_element(ElementType::Tetrahedron, vec![v0, v2, v6, v7]);
-                mesh.add_element(ElementType::Tetrahedron, vec![v0, v6, v4, v7]);
+                let v = [v0, v1, v2, v3, v4, v5, v6, v7];
+                let mirror_x = x_mirrored && center_x > 0.5 * width;
+                let mirror_y = y_mirrored && center_y > 0.5 * depth;
+                let perm: [usize; 8] = match (mirror_x, mirror_y) {
+                    (false, false) => [0, 1, 2, 3, 4, 5, 6, 7],
+                    (true, false) => [1, 0, 3, 2, 5, 4, 7, 6],
+                    (false, true) => [2, 3, 0, 1, 6, 7, 4, 5],
+                    (true, true) => [3, 2, 1, 0, 7, 6, 5, 4],
+                };
+                const BASE_TETS: [[usize; 4]; 6] = [
+                    [0, 1, 3, 7],
+                    [0, 1, 7, 5],
+                    [0, 5, 7, 4],
+                    [0, 3, 2, 7],
+                    [0, 2, 6, 7],
+                    [0, 6, 4, 7],
+                ];
+                for base in BASE_TETS {
+                    let mut tet = base.map(|corner| v[perm[corner]]);
+                    if mirror_x != mirror_y {
+                        // A single reflection flips tet orientation; restore
+                        // positive volume by swapping two corners.
+                        tet.swap(0, 1);
+                    }
+                    mesh.add_element(ElementType::Tetrahedron, tet.to_vec());
+                }
             }
         }
     }

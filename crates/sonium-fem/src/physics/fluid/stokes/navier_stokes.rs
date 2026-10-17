@@ -279,6 +279,16 @@ pub struct NavierStokesConfig {
     /// are lagged for the current segregated step and are not differentiated
     /// by the Newton tangent APIs.
     pub transported_eddy_viscosity_per_element: Option<Vec<f64>>,
+    /// Optional element-local density for the cached BDF momentum
+    /// solve (one value per mesh element). When present, the BDF mass
+    /// and convection blocks are assembled per element with these
+    /// densities instead of the scalar `rho`, which stays the
+    /// reference density for stabilisation and closures. The values
+    /// are lagged for the current segregated step (e.g. interpolated
+    /// from a phase field) and are not differentiated by the Newton
+    /// tangent APIs. `None` (default) preserves the legacy behaviour
+    /// exactly.
+    pub element_density: Option<Vec<f64>>,
     /// Compute backend used for the per-iteration linear solve. `Cpu`
     /// (default) keeps the legacy in-house BLAS-1 + ILU path. `Cuda` and `Metal`
     /// route the linear system through `sonium_compute::Backend` —
@@ -399,6 +409,7 @@ impl Default for NavierStokesConfig {
             turbulence: super::turbulence::TurbulenceModel::Laminar,
             transported_eddy_viscosity: None,
             transported_eddy_viscosity_per_element: None,
+            element_density: None,
             linear_solver_backend: LinearSolverBackend::Auto,
             linear_solver_backend_preconditioner: BackendPreconditionerKind::PolynomialJacobi,
             linear_solver_polynomial_degree: 1,
@@ -490,6 +501,194 @@ fn assemble_transported_viscous_triplet<VSpace: crate::spaces::FunctionSpace>(
     Ok(Some(crate::assembly::assemble_bilinear_per_element(
         &forms, v_space, v_space, mesh, quad_order,
     )))
+}
+
+/// Assemble the element-local mass block for an element-density
+/// field, mirroring the transported-viscosity pattern above. Returns
+/// `Ok(None)` when no field is configured (legacy scalar path).
+fn assemble_density_mass_triplet<VSpace: crate::spaces::FunctionSpace>(
+    mesh: &crate::mesh::Mesh,
+    v_space: &VSpace,
+    config: &NavierStokesConfig,
+    quad_order: usize,
+) -> Result<Option<crate::assembly::TripletMatrix<f64>>, &'static str> {
+    let Some(densities) = config.element_density.as_ref() else {
+        return Ok(None);
+    };
+    if densities.len() != mesh.num_elements() {
+        return Err("element density field has the wrong length");
+    }
+    let forms = densities
+        .iter()
+        .map(|&density| {
+            if !density.is_finite() || density <= 0.0 {
+                return Err("element density must be finite and positive");
+            }
+            Ok(crate::forms::VectorMassForm { coefficient: density })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(crate::assembly::assemble_bilinear_per_element(
+        &forms, v_space, v_space, mesh, quad_order,
+    )))
+}
+
+#[cfg(test)]
+mod element_density_tests {
+    use super::*;
+
+    #[test]
+    fn uniform_element_density_matches_scalar_mass() {
+        let mesh = crate::mesh::unit_square_triangles(2);
+        let v_space = crate::spaces::VectorH1Space::new(crate::basis::PolynomialDegree::P1, 2);
+        let mut config = NavierStokesConfig::default();
+        config.rho = 2.5;
+        config.element_density = Some(vec![config.rho; mesh.num_elements()]);
+
+        let field_mass = assemble_density_mass_triplet(&mesh, &v_space, &config, 2)
+            .expect("valid density field")
+            .expect("density field should select element assembly");
+        let unit_form = crate::forms::VectorMassForm { coefficient: 1.0 };
+        let unit_mass =
+            crate::assembly::assemble_bilinear(&unit_form, &v_space, &v_space, &mesh, 2);
+
+        assert_eq!(field_mass.rows, unit_mass.rows);
+        assert_eq!(field_mass.cols, unit_mass.cols);
+        for (field, unit) in field_mass.values.iter().zip(&unit_mass.values) {
+            assert!((field - config.rho * unit).abs() < 1.0e-12);
+        }
+    }
+
+    fn run_two_density_case(with_element_density: bool) -> bool {
+        run_two_density_case_viscosity(with_element_density, false)
+    }
+
+    fn run_two_density_case_viscosity(
+        with_element_density: bool,
+        with_transported_viscosity: bool,
+    ) -> bool {
+        use crate::boundary::locate_dofs_geometrical;
+        use crate::physics::fluid::stokes::time_stepping::{BdfConfig, BdfState};
+        use crate::physics::fluid::stokes::workspace::BdfWorkspace;
+        use crate::spaces::FunctionSpace;
+
+        let mesh = crate::mesh::generators::rectangular_mesh_triangles(0.0, 1.0, 0.0, 1.0, 8, 8);
+        let v_space = crate::spaces::VectorH1Space::new(crate::basis::PolynomialDegree::P1, 2);
+        let p_space = crate::spaces::H1Space::new(crate::basis::PolynomialDegree::P1);
+        let n_v = v_space.num_global_dofs(&mesh);
+        let n_p = p_space.num_global_dofs(&mesh);
+        let mut config = NavierStokesConfig {
+            mu: 1.0e-3,
+            rho: 1000.0,
+            use_direct_solver: false,
+            linear_solver_max_iterations: 3000,
+            linear_solver_tolerance: 1e-8,
+            linear_solver_cpu_preconditioner:
+                crate::backend_selection::LinearSolverCpuPreconditionerKind::IlutSchur,
+            ..Default::default()
+        };
+        if with_element_density {
+            config.element_density = Some(
+                mesh.elements
+                    .iter()
+                    .map(|element| {
+                        let cx = element
+                            .nodes
+                            .iter()
+                            .map(|&node| mesh.nodes[node].x)
+                            .sum::<f64>()
+                            / element.nodes.len() as f64;
+                        if cx < 0.5 { 1.2 } else { 998.0 }
+                    })
+                    .collect(),
+            );
+        }
+        if with_transported_viscosity {
+            config.mu = 1.8e-5;
+            config.transported_eddy_viscosity_per_element = Some(
+                mesh.elements
+                    .iter()
+                    .map(|element| {
+                        let cx = element
+                            .nodes
+                            .iter()
+                            .map(|&node| mesh.nodes[node].x)
+                            .sum::<f64>()
+                            / element.nodes.len() as f64;
+                        if cx < 0.5 {
+                            0.0
+                        } else {
+                            (1.0e-3 - 1.8e-5) / 1000.0
+                        }
+                    })
+                    .collect(),
+            );
+        }
+        let bc_dofs = locate_dofs_geometrical(&mesh, &v_space, |x, y, _z| {
+            x < 1e-9 || (1.0 - x) < 1e-9 || y < 1e-9 || (1.0 - y) < 1e-9
+        });
+        let bc = |_x: f64, _y: f64, _z: f64| vec![0.0, 0.0];
+        let bdf = BdfConfig::bdf2(0.01, 10);
+        let mut workspace = BdfWorkspace::new(&mesh, &v_space, &p_space);
+        workspace.set_pressure_gauge(0, 0.0);
+        let mut state = BdfState::from_rest(n_v, n_p);
+        for _step in 0..10 {
+            if !solve_bdf_step_cached_with_force(
+                &mesh,
+                &v_space,
+                &p_space,
+                &config,
+                &bdf,
+                &mut state,
+                &bc,
+                &bc_dofs,
+                &[],
+                |_coords: [f64; 3]| vec![0.0, -1.0, 0.0],
+                |_| [[0.0; 3]; 3],
+                &workspace,
+            ) {
+                return false;
+            }
+        }
+        state.velocity.iter().all(|v| v.is_finite() && v.abs() < 10.0)
+    }
+
+    #[test]
+    fn scalar_density_bdf_control_case_runs() {
+        assert!(run_two_density_case(false), "scalar control case failed");
+    }
+
+    #[test]
+    fn element_density_bdf_steps_run_with_density_contrast() {
+        assert!(
+            run_two_density_case(true),
+            "element-density BDF case failed"
+        );
+    }
+
+    #[test]
+    fn element_density_and_transported_viscosity_bdf_steps_run() {
+        assert!(
+            run_two_density_case_viscosity(true, true),
+            "element-density + transported-viscosity BDF case failed"
+        );
+    }
+
+    #[test]
+    fn element_density_validates_shape_and_values() {
+        let mesh = crate::mesh::unit_square_triangles(1);
+        let v_space = crate::spaces::VectorH1Space::new(crate::basis::PolynomialDegree::P1, 2);
+        let mut config = NavierStokesConfig::default();
+        config.element_density = Some(vec![1.0]);
+        assert!(assemble_density_mass_triplet(&mesh, &v_space, &config, 2).is_err());
+        config.element_density = Some(vec![0.0; mesh.num_elements()]);
+        assert!(assemble_density_mass_triplet(&mesh, &v_space, &config, 2).is_err());
+        config.element_density = None;
+        assert!(
+            assemble_density_mass_triplet(&mesh, &v_space, &config, 2)
+                .expect("absent field is valid")
+                .is_none()
+        );
+    }
 }
 
 #[cfg(test)]
@@ -4093,9 +4292,20 @@ where
     // Extrapolated advection velocity, evaluated as the exact P1/P2 finite-
     // element field through the workspace-owned element locator.
     let u_star = extrapolate_velocity(state, bdf.order);
-    let conv_triplet = assemble_bdf_convection(mesh, v_space, workspace, &u_star, config.rho, dim);
+    // Element-local density (optional): per-element mass block and a
+    // matching convection assembly replace the scalar-rho blocks.
+    let density_mass = match assemble_density_mass_triplet(mesh, v_space, config, workspace.quad_order)
+    {
+        Ok(field) => field,
+        Err(_) => return false,
+    };
+    let density_mass_csr = density_mass.as_ref().map(|triplet| triplet.to_csr());
+    let conv_triplet = assemble_bdf_convection(mesh, v_space, workspace, &u_star, config, dim);
 
-    let mass_triplet = &workspace.mass_triplet;
+    let mass_triplet: &crate::assembly::TripletMatrix<f64> = match density_mass.as_ref() {
+        Some(triplet) => triplet,
+        None => &workspace.mass_triplet,
+    };
     let transported_viscous_triplet =
         match assemble_transported_viscous_triplet(mesh, v_space, config, workspace.quad_order) {
             Ok(triplet) => triplet,
@@ -4103,7 +4313,13 @@ where
         };
 
     // Build monolithic system: block (0,0) = ρ a₀/Δt M + mu_step·K_unit + C(u*)
-    let mass_coeff = config.rho * coeffs.a0 / dt;
+    // With an element-density field the mass block already carries
+    // rho per element, so only the BDF coefficient scales it.
+    let mass_coeff = if density_mass.is_some() {
+        coeffs.a0 / dt
+    } else {
+        config.rho * coeffs.a0 / dt
+    };
     // Per-step viscosity scaling for the unit-μ viscous block: the effective
     // viscosity from the turbulence closure, computed from the previous
     // step's peak velocity (explicit lag — same semi-implicit philosophy as
@@ -4122,7 +4338,13 @@ where
     let viscous_scale = if use_transported { 1.0 } else { mu_step };
 
     // RHS: velocity block = ρ/Δt M × (-a₁ u^n - a₂ u^{n-1}) + body_force
-    let rho_over_dt = config.rho / dt;
+    // (with an element-density field, M already carries rho and the
+    // source scale is 1/dt).
+    let rho_over_dt = if density_mass.is_some() {
+        1.0 / dt
+    } else {
+        config.rho / dt
+    };
     let bdf_source: Vec<f64> = state
         .velocity
         .iter()
@@ -4132,7 +4354,10 @@ where
 
     // Multiply BDF source by mass matrix: rhs_v = M × bdf_source. The CSR
     // conversion happens once at workspace setup, not every step.
-    let rhs_v = workspace.mass_csr.matvec(&bdf_source);
+    let rhs_v = match density_mass_csr.as_ref() {
+        Some(csr) => csr.matvec(&bdf_source),
+        None => workspace.mass_csr.matvec(&bdf_source),
+    };
 
     let mut rhs = vec![0.0; n_total];
     for (i, &val) in rhs_v.iter().enumerate() {
@@ -4902,11 +5127,38 @@ fn assemble_bdf_convection<VSpace: crate::spaces::FunctionSpace>(
     v_space: &VSpace,
     workspace: &super::workspace::BdfWorkspace,
     u_star: &[f64],
-    rho: f64,
+    config: &NavierStokesConfig,
     dim: usize,
 ) -> crate::assembly::TripletMatrix<f64> {
     let velocity_field = workspace.element_velocity_topology.field(u_star);
-    let convection = OseenConvectionForm::new(rho, |coords: [f64; 3]| {
+    // Element-local density: one Oseen form per element, all sharing
+    // the extrapolated velocity field. Field validity (length,
+    // positivity) is checked by the caller before this assembly.
+    if let Some(densities) = config.element_density.as_ref() {
+        debug_assert_eq!(densities.len(), mesh.num_elements());
+        // One closure expression, so every form shares one closure
+        // type and can borrow the extrapolated velocity field.
+        let forms: Vec<_> = densities
+            .iter()
+            .map(|&density| {
+                OseenConvectionForm::new(density, |coords: [f64; 3]| {
+                    velocity_field
+                        .velocity_at(coords)
+                        .expect("BDF quadrature point was not located in its velocity mesh")
+                        [..dim]
+                        .to_vec()
+                })
+            })
+            .collect();
+        return crate::assembly::assemble_bilinear_per_element(
+            &forms,
+            v_space,
+            v_space,
+            mesh,
+            workspace.quad_order,
+        );
+    }
+    let convection = OseenConvectionForm::new(config.rho, |coords: [f64; 3]| {
         velocity_field
             .velocity_at(coords)
             .expect("BDF quadrature point was not located in its velocity mesh")[..dim]
@@ -5000,7 +5252,7 @@ pub fn audit_bdf_step<VSpace: crate::spaces::FunctionSpace>(
         v_space,
         workspace,
         &u_star,
-        config.rho,
+        config,
         mesh.dimension,
     );
     let kinetic = |velocity: &[f64]| {
@@ -6595,7 +6847,15 @@ mod tests {
             .map(|dof| affine(v_space.dof_coordinate(&mesh, dof).unwrap())[dof % 2])
             .collect();
 
-        let actual = assemble_bdf_convection(&mesh, &v_space, &workspace, &u_star, 1.0, 2).to_csr();
+        let actual = assemble_bdf_convection(
+            &mesh,
+            &v_space,
+            &workspace,
+            &u_star,
+            &NavierStokesConfig::default(),
+            2,
+        )
+        .to_csr();
         let exact = OseenConvectionForm::new(1.0, |point| affine(point).to_vec());
         let exact = crate::assembly::assemble_bilinear(
             &exact,
@@ -7884,7 +8144,17 @@ mod tests {
         let workspace = BdfWorkspace::new(&mesh, &v_space, &p_space);
         // Deterministic nonzero advecting field so convection values are live.
         let u_star: Vec<f64> = (0..n_v).map(|i| 0.001 * ((i % 7) as f64)).collect();
-        let conv = assemble_bdf_convection(&mesh, &v_space, &workspace, &u_star, 1.2, 2);
+        let conv = assemble_bdf_convection(
+            &mesh,
+            &v_space,
+            &workspace,
+            &u_star,
+            &NavierStokesConfig {
+                rho: 1.2,
+                ..Default::default()
+            },
+            2,
+        );
         let body = crate::assembly::assemble_bilinear(
             &BdfBodyForceJacobianForm {
                 jacobian: |_| [[0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 0.5]],

@@ -4,6 +4,13 @@ All notable changes to `sonium-audio` are documented here.
 
 ## Unreleased
 
+### Fixed
+
+- Performance gate uses the median of 32 callbacks after warm-up, timed
+  by thread CPU time instead of wall time, so scheduler preemption under
+  parallel load no longer reads as a realtime overrun.
+
+
 ## 0.2.0
 
 ### Changed

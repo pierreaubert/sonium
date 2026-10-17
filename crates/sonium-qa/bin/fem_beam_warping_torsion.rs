@@ -198,7 +198,8 @@ fn test_root_bimoment() {
     let fem = root.bimoment_at(&twist, 0.0);
     let error = (fem - expected).abs() / expected.abs();
     println!("root bimoment: FEM={fem:.12e} exact={expected:.12e} rel={error:.2e}");
-    assert!(error < 0.05, "bimoment error {error:.3e}");
+    // Measured rel = 8.63e-4 against the exact bimoment; gate at ~6x.
+    assert!(error < 5.0e-3, "bimoment error {error:.3e}");
 }
 
 fn test_convergence() {

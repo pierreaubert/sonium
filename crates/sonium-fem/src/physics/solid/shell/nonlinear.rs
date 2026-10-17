@@ -340,9 +340,23 @@ impl crate::forms::NonlinearElementForm<f64> for CorotationalShellForm {
             }
         }
 
-        // Elastic virtual work: f_global = (dq/du)^T K q, including the
-        // frame variation (see `project_local_forces`).
-        self.project_local_forces(elem_idx, global_solution, &f_local)
+        // Classic corotational force transform: rotate the local force by
+        // the current frame, block by block. The frame is held fixed during
+        // the variation; its derivative enters only the tangent. Projecting
+        // with the full (dq/du)^T of the naive 1/2 q^T K q energy instead
+        // double-counts the frame spin (q already removes rigid motion) and
+        // measurably degrades the elastica strip benchmark under refinement,
+        // so it is not used here.
+        let mut f_global = vec![0.0; 18];
+        for block in 0..6 {
+            let offset = block * 3;
+            for i in 0..3 {
+                for j in 0..3 {
+                    f_global[offset + i] += rot_def[i * 3 + j] * f_local[offset + j];
+                }
+            }
+        }
+        f_global
     }
 
     fn element_tangent(&self, elem_idx: usize, global_solution: &[f64]) -> Vec<f64> {
@@ -350,10 +364,10 @@ impl crate::forms::NonlinearElementForm<f64> for CorotationalShellForm {
         // current-frame rotation. The previous transformed-material tangent
         // omitted this geometric contribution and was not a Newton tangent.
         //
-        // The residual is now the complete elastic-energy derivative. Its
-        // exact tangent is symmetric; retain this direct numerical derivative
-        // so finite-difference error is visible to independent checks rather
-        // than hiding it with post-hoc symmetrization.
+        // The classic corotational force is not an exact energy gradient, so
+        // the tangent is genuinely nonsymmetric; retain this direct numerical
+        // derivative so finite-difference error is visible to independent
+        // checks rather than hiding it with post-hoc symmetrization.
         let dofs = self.elements[elem_idx].global_dofs();
         let mut tangent = vec![0.0; 18 * 18];
         for (column, &dof) in dofs.iter().enumerate() {
@@ -475,7 +489,12 @@ mod tests {
     }
 
     #[test]
-    fn corotational_forces_match_independent_elastic_energy_derivative() {
+    fn corotational_forces_match_frame_rotated_local_force() {
+        // Classic corotational transform: the global force is the local
+        // K q force rotated by the current frame, with the frame held fixed
+        // during the variation. Build the expectation independently from
+        // the frame basis vectors (columns of the stored rotation) rather
+        // than through the residual's own transform code.
         let (elements, n_dofs) = test_shell_elements();
         let form = CorotationalShellForm::new(elements, n_dofs);
         let mut u = vec![0.0; n_dofs];
@@ -486,49 +505,39 @@ mod tests {
         u[14] = -0.02;
         u[3] = 0.1;
         u[10] = -0.08;
-        let energy = |state: &[f64]| {
-            let rotation =
-                CorotationalShellForm::deformed_rotation(&form.deformed_points(0, state));
-            let d = form.corotated_local_displacement(0, state, &rotation);
-            let k = form.elements[0].stiffness_local_combined();
-            (0..18)
-                .map(|i| {
-                    (0..18)
-                        .map(|j| 0.5 * d[i] * k[i * 18 + j] * d[j])
-                        .sum::<f64>()
-                })
-                .sum::<f64>()
-        };
+        let rotation = CorotationalShellForm::deformed_rotation(&form.deformed_points(0, &u));
+        let d = form.corotated_local_displacement(0, &u, &rotation);
+        let k = form.elements[0].stiffness_local_combined();
+        let mut f_local = [0.0; 18];
+        for i in 0..18 {
+            for j in 0..18 {
+                f_local[i] += 0.5 * (k[i * 18 + j] + k[j * 18 + i]) * d[j];
+            }
+        }
+        // Stored rotation is [ex0, ey0, ez0, ex1, ...]: basis vector j has
+        // components rotation[j], rotation[j + 3], rotation[j + 6].
+        let mut expected = vec![0.0; 18];
+        for block in 0..6 {
+            let offset = block * 3;
+            for component in 0..3 {
+                for j in 0..3 {
+                    expected[offset + component] +=
+                        rotation[j + 3 * component] * f_local[offset + j];
+                }
+            }
+        }
         let force = form.element_residual(0, &u);
-        let derivative = (0..n_dofs)
-            .map(|i| {
-                let mut plus = u.clone();
-                let mut minus = u.clone();
-                let h = 1e-7;
-                plus[i] += h;
-                minus[i] -= h;
-                (energy(&plus) - energy(&minus)) / (2.0 * h)
-            })
-            .collect::<Vec<_>>();
         let error = force
             .iter()
-            .zip(&derivative)
-            .map(|(f, d)| (f - d).powi(2))
+            .zip(&expected)
+            .map(|(f, e)| (f - e).powi(2))
             .sum::<f64>()
             .sqrt()
-            / derivative.iter().map(|d| d * d).sum::<f64>().sqrt();
+            / expected.iter().map(|e| e * e).sum::<f64>().sqrt();
         assert!(
-            error < 2e-7,
-            "elastic virtual-work relative error {error:e}"
+            error < 1e-12,
+            "frame-rotated force relative error {error:e}"
         );
-        let tangent = form.element_tangent(0, &u);
-        let asymmetry = (0..18)
-            .flat_map(|i| (0..18).map(move |j| (i, j)))
-            .map(|(i, j)| (tangent[i * 18 + j] - tangent[j * 18 + i]).powi(2))
-            .sum::<f64>()
-            .sqrt()
-            / tangent.iter().map(|v| v * v).sum::<f64>().sqrt();
-        assert!(asymmetry < 2e-7, "elastic tangent asymmetry {asymmetry:e}");
     }
 
     #[test]

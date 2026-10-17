@@ -75,7 +75,8 @@ pub fn beam_3d_cantilever_case() -> OpenCourantCase {
             channel: format!("DY/{tip_node}"),
             expected,
             abs_tol: 1e-9,
-            rel_tol: 0.05,
+            // Measured engine-vs-analytical probe deviation = 2.6e-2; gate at ~1.5x.
+            rel_tol: 0.04,
         }],
         stop_time_s: 1.0,
         th_period_s: 0.01,

@@ -59,3 +59,4 @@ cuda = [
 [dev-dependencies]
 tempfile = { workspace = true }
 sonium-wave = { workspace = true }
+flate2 = { workspace = true }

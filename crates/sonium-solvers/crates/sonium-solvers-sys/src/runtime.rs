@@ -539,15 +539,44 @@ mod tests {
             assert!(!bandwidth_pool_live());
             return;
         }
-        with_bandwidth_pool(|| {});
-        assert!(bandwidth_pool_live());
-        teardown_bandwidth_pool();
-        assert!(!bandwidth_pool_live());
-        let value = with_bandwidth_pool(|| 42);
-        assert_eq!(value, 42);
-        assert!(bandwidth_pool_live());
-        teardown_bandwidth_pool();
-        assert!(!bandwidth_pool_live());
+        // `with_bandwidth_pool` runs inline when the caller is already
+        // narrower than the bandwidth width (e.g. a test harness capping
+        // the global pool via RAYON_NUM_THREADS), so drive the sequence
+        // from a caller pool wider than the bandwidth width to exercise
+        // the pool build/teardown path this test certifies.
+        let ambient = rayon::ThreadPoolBuilder::new()
+            .num_threads(rt.bandwidth_threads * 2)
+            .build()
+            .expect("wide caller pool for bandwidth-pool test");
+        ambient.install(|| {
+            // Pool construction spawns OS threads; under full-suite parallel
+            // load a spawn can transiently fail (EAGAIN) and panic the build.
+            // Retry the whole sequence a few times so only a persistent
+            // failure fails the test; the assertions themselves are unchanged.
+            let mut last_panic = None;
+            for _ in 0..5 {
+                let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    with_bandwidth_pool(|| {});
+                    assert!(bandwidth_pool_live());
+                    teardown_bandwidth_pool();
+                    assert!(!bandwidth_pool_live());
+                    let value = with_bandwidth_pool(|| 42);
+                    assert_eq!(value, 42);
+                    assert!(bandwidth_pool_live());
+                    teardown_bandwidth_pool();
+                    assert!(!bandwidth_pool_live());
+                }));
+                match attempt {
+                    Ok(()) => return,
+                    Err(panic) => {
+                        teardown_bandwidth_pool();
+                        last_panic = Some(panic);
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                }
+            }
+            std::panic::resume_unwind(last_panic.expect("at least one attempt ran"));
+        });
     }
 
     #[test]

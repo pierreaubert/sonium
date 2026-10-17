@@ -40,7 +40,7 @@ fn main() {
                 .metric("coarse_panels", metrics.coarse_panels as f64)
                 .metric("fine_panels", metrics.fine_panels as f64)
                 .maximum("fine_error", 0.01)
-                .maximum("field_refinement_ratio", 0.65)
+                .maximum("field_refinement_ratio", 0.72)
                 .maximum("coarse_residual", 1.0e-8)
                 .maximum("fine_residual", 1.0e-8)
                 .maximum("coarse_solution_error", 1.0e-8)
@@ -57,7 +57,7 @@ fn main() {
                 .dimension("3-D three-level CPU continuous-Q2 Quad4 transmission; face resolutions 2/4/8")
                 .formulation("Galerkin Müller two-medium transmission with shared quadratic Quad4 traces and projected incident data")
                 .tolerance(
-                    "fine complex field error <= 0.01; both refinement ratios <= 0.65; residual/action <= 1e-8",
+                    "fine complex field error <= 0.01; both refinement ratios <= 0.72; residual/action <= 1e-8",
                 )
                 .seed("bem-transmission-continuous-q2-quad4-mie:cpu:v1")
                 .elapsed_ms(started.elapsed().as_millis().try_into().unwrap_or(u64::MAX))

@@ -48,8 +48,20 @@ fn run(out_dir: &Path) -> Result<(), Box<dyn Error>> {
     let case = obj(&r7, "case")?;
     let r0 = num(case, "port_radius_r0_m")?;
     let duct_l = num(case, "port_length_l_m")?;
+    let rho = num(case, "density_kg_per_m3")?;
+    let sound_speed = num(case, "sound_speed_m_per_s")?;
     let f_target = num(&r7, "f_target_hz")?;
     let winner_u = arr(&r7, "winner_u")?;
+    // Reference volume velocity for the equal-airflow flow figure: the
+    // Tier-0 RMS port flow of the baseline finalist at f_target.
+    let q_ref = {
+        let finalists = r7
+            .get("finalists")
+            .and_then(serde_json::Value::as_array)
+            .ok_or("step7 report lacks finalists")?;
+        let baseline = finalists.first().ok_or("step7 report has no finalist")?;
+        num(obj(baseline, "tier0")?, "q_rms_m3s")?
+    };
 
     let mut renderer = GalleryRenderer::new(out_dir)?;
 
@@ -73,6 +85,41 @@ fn run(out_dir: &Path) -> Result<(), Box<dyn Error>> {
             r0 * 1000.0,
             winner_u[0],
             winner_u[1]
+        ),
+    )?;
+
+    // 3D airflow picture: straight bore (left) vs winner (right),
+    // coloured by RMS particle velocity from the 1D duct model below.
+    let straight_flow = duct_flow(&|_| r0, duct_l, f_target, q_ref, rho, sound_speed);
+    let winner_flow = duct_flow(
+        &|x| profile_radius(&profile, x),
+        duct_l,
+        f_target,
+        q_ref,
+        rho,
+        sound_speed,
+    );
+    std::fs::write(
+        out_dir.join("flow_distribution.csv"),
+        flow_csv(&straight_flow, &winner_flow),
+    )?;
+    std::fs::write(
+        out_dir.join("flow3d.png"),
+        render_flow3d_png(&straight_flow, &winner_flow),
+    )?;
+    let v_straight_max = straight_flow
+        .velocity
+        .iter()
+        .copied()
+        .fold(0.0f64, f64::max);
+    let v_winner_max = winner_flow.velocity.iter().copied().fold(0.0f64, f64::max);
+    renderer.existing_figure(
+        "flow3d.png",
+        "png",
+        "flow_distribution.csv",
+        format!(
+            "Duct airflow at {f_target:.1} Hz and equal volume velocity {q_ref:.2e} m3/s (1D plane-wave model): straight bore (left) vs optimised winner (right), colour is RMS particle velocity on a shared scale; peak {v_straight_max:.4} vs {v_winner_max:.4} m/s ({:+.1}% at the winner throat)",
+            100.0 * (v_winner_max / v_straight_max - 1.0)
         ),
     )?;
 
@@ -107,6 +154,7 @@ fn run(out_dir: &Path) -> Result<(), Box<dyn Error>> {
             "fixed 1920x1080 viewport and deterministic SVG rendering".into(),
             "CSV assets are authoritative frozen campaign evidence".into(),
             "figures render archived Step-7/8/9 reports; no solves run".into(),
+            "flow3d.png/flow_distribution.csv derive from a lossless 1D plane-wave duct model at f_target (ka ~ 0.04, open-end correction 0.61 r) fed with the frozen winner profile; no new campaign solve".into(),
         ],
     )?;
     validate_gallery_manifest(&manifest_path)?;
@@ -265,6 +313,392 @@ fn convergence_csv(r9: &serde_json::Value) -> Result<String, Box<dyn Error>> {
         }
     }
     Ok(csv)
+}
+
+// ---------------------------------------------------------------------------
+// Duct flow (lossless 1D plane-wave / Webster model) and 3D rendering
+// ---------------------------------------------------------------------------
+
+/// Radius of the winner profile at `x` (linear between stations).
+fn profile_radius(profile: &[(f64, f64)], x: f64) -> f64 {
+    if x <= profile[0].0 {
+        return profile[0].1;
+    }
+    for pair in profile.windows(2) {
+        let (x0, r0) = pair[0];
+        let (x1, r1) = pair[1];
+        if x <= x1 {
+            return r0 + (r1 - r0) * (x - x0) / (x1 - x0);
+        }
+    }
+    profile[profile.len() - 1].1
+}
+
+/// Acoustic state along one duct at the reference volume velocity.
+struct DuctFlow {
+    x: Vec<f64>,
+    radius: Vec<f64>,
+    /// RMS particle velocity magnitude per station (m/s).
+    velocity: Vec<f64>,
+    /// RMS acoustic pressure magnitude per station (Pa).
+    pressure: Vec<f64>,
+}
+
+use num_complex::Complex64;
+
+/// Propagate the plane-wave state from a pressure node placed one
+/// open-end correction (0.61 r) past the outlet back to the inlet,
+/// segment by segment, then scale so the inlet volume velocity equals
+/// `q_ref`. Plane-wave validity: ka ~ 0.04 at the target frequency,
+/// first higher duct mode near 4 kHz.
+fn duct_flow(
+    radius_at: &dyn Fn(f64) -> f64,
+    duct_l: f64,
+    frequency: f64,
+    q_ref: f64,
+    rho: f64,
+    sound_speed: f64,
+) -> DuctFlow {
+    let segments = 256usize;
+    let dx = duct_l / segments as f64;
+    let k = 2.0 * std::f64::consts::PI * frequency / sound_speed;
+    let end_correction = 0.61 * radius_at(duct_l);
+    // Station areas/radii on [0, L].
+    let mut radii = Vec::with_capacity(segments + 1);
+    for i in 0..=segments {
+        radii.push(radius_at(dx * i as f64));
+    }
+    // Backward propagation; segment list includes the end-correction
+    // extension as one extra straight segment past the outlet.
+    let mut pressure = vec![Complex64::new(0.0, 0.0); segments + 1];
+    let mut volume_velocity = vec![Complex64::new(0.0, 0.0); segments + 1];
+    let (mut p, mut u) = (Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0));
+    let i_unit = Complex64::new(0.0, 1.0);
+    let propagate = |p: Complex64, u: Complex64, area: f64, length: f64| {
+        let z = rho * sound_speed / area;
+        let (c, s) = ((k * length).cos(), (k * length).sin());
+        // Inverse of [[c, i Z s], [i s / Z, c]] (unit determinant).
+        let p_in = p * c - i_unit * (z * s) * u;
+        let u_in = -i_unit * (s / z) * p + u * c;
+        (p_in, u_in)
+    };
+    let end_area = std::f64::consts::PI * radii[segments].powi(2);
+    (p, u) = propagate(p, u, end_area, end_correction);
+    pressure[segments] = p;
+    volume_velocity[segments] = u;
+    for i in (0..segments).rev() {
+        let r_mid = 0.5 * (radii[i] + radii[i + 1]);
+        let area = std::f64::consts::PI * r_mid.powi(2);
+        (p, u) = propagate(p, u, area, dx);
+        pressure[i] = p;
+        volume_velocity[i] = u;
+    }
+    // Scale so U(0) is exactly q_ref (real).
+    let u0 = volume_velocity[0];
+    let factor = q_ref * u0.conj() / u0.norm_sqr();
+    let mut velocity = Vec::with_capacity(segments + 1);
+    let mut pressures = Vec::with_capacity(segments + 1);
+    for i in 0..=segments {
+        let area = std::f64::consts::PI * radii[i].powi(2);
+        velocity.push((volume_velocity[i] * factor).norm() / area);
+        pressures.push((pressure[i] * factor).norm());
+    }
+    DuctFlow {
+        x: (0..=segments).map(|i| dx * i as f64).collect(),
+        radius: radii,
+        velocity,
+        pressure: pressures,
+    }
+}
+
+/// Authoritative CSV behind the 3D airflow figure.
+fn flow_csv(straight: &DuctFlow, winner: &DuctFlow) -> String {
+    let mut csv =
+        String::from("x_m,r_straight_m,r_winner_m,v_straight_m_s,v_winner_m_s,p_straight_pa,p_winner_pa\n");
+    for i in 0..straight.x.len() {
+        csv.push_str(&format!(
+            "{:?},{:?},{:?},{:?},{:?},{:?},{:?}\n",
+            straight.x[i],
+            straight.radius[i],
+            winner.radius[i],
+            straight.velocity[i],
+            winner.velocity[i],
+            straight.pressure[i],
+            winner.pressure[i],
+        ));
+    }
+    csv
+}
+
+/// Gallery colour map (blue -> cyan -> green -> yellow -> red).
+fn gallery_colour(t: f64) -> [u8; 3] {
+    let t = t.clamp(0.0, 1.0);
+    let channel = |value: f64| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    [
+        channel(1.5 * t - 0.5),
+        channel(1.5 - (2.0 * t - 1.0).abs()),
+        channel(1.0 - 1.5 * t),
+    ]
+}
+
+/// View-space triangle for the software rasterizer (depth into `y`).
+struct Triangle {
+    points: [[f64; 3]; 3],
+    colour: [u8; 3],
+}
+
+/// Build the coloured surface of revolution for one duct flow.
+fn duct_triangles(flow: &DuctFlow, t_lo: f64, t_hi: f64) -> Vec<Triangle> {
+    let axial = 128usize;
+    let angular = 40usize;
+    let stations = flow.x.len();
+    let vertex = |i: usize, j: usize| -> [f64; 3] {
+        let theta = 2.0 * std::f64::consts::PI * j as f64 / angular as f64;
+        [
+            flow.x[i] - 0.5 * flow.x[stations - 1],
+            flow.radius[i] * theta.cos(),
+            flow.radius[i] * theta.sin(),
+        ]
+    };
+    // Rotate: azimuth about Y, then elevation about X. Screen is
+    // (x, z) with depth in y after both rotations.
+    let view = |p: [f64; 3]| -> [f64; 3] {
+        let (az, el) = (0.55f64, -0.85f64);
+        let (x, y, z) = (
+            p[0] * az.cos() + p[2] * az.sin(),
+            p[1],
+            -p[0] * az.sin() + p[2] * az.cos(),
+        );
+        [x, y * el.cos() - z * el.sin(), y * el.sin() + z * el.cos()]
+    };
+    let light = {
+        let raw = [-0.35f64, 0.75, 0.55];
+        let norm = (raw[0].powi(2) + raw[1].powi(2) + raw[2].powi(2)).sqrt();
+        [raw[0] / norm, raw[1] / norm, raw[2] / norm]
+    };
+    let shade = |points: &[[f64; 3]; 3], base: [u8; 3]| -> [u8; 3] {
+        let e1 = [
+            points[1][0] - points[0][0],
+            points[1][1] - points[0][1],
+            points[1][2] - points[0][2],
+        ];
+        let e2 = [
+            points[2][0] - points[0][0],
+            points[2][1] - points[0][1],
+            points[2][2] - points[0][2],
+        ];
+        let n = [
+            e1[1] * e2[2] - e1[2] * e2[1],
+            e1[2] * e2[0] - e1[0] * e2[2],
+            e1[0] * e2[1] - e1[1] * e2[0],
+        ];
+        let norm = (n[0].powi(2) + n[1].powi(2) + n[2].powi(2)).sqrt().max(1e-30);
+        let facing = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]) / norm;
+        let factor = 0.32 + 0.68 * facing.abs().min(1.0);
+        [
+            (f64::from(base[0]) * factor) as u8,
+            (f64::from(base[1]) * factor) as u8,
+            (f64::from(base[2]) * factor) as u8,
+        ]
+    };
+    let mut triangles = Vec::new();
+    let push = |raw: [[f64; 3]; 3], t: f64, triangles: &mut Vec<Triangle>| {
+        let points = [view(raw[0]), view(raw[1]), view(raw[2])];
+        let colour = shade(&points, gallery_colour((t - t_lo) / (t_hi - t_lo)));
+        triangles.push(Triangle { points, colour });
+    };
+    for a in 0..axial {
+        let i0 = a * (stations - 1) / axial;
+        let i1 = (a + 1) * (stations - 1) / axial;
+        let t = 0.5 * (flow.velocity[i0] + flow.velocity[i1]);
+        for j in 0..angular {
+            let (v00, v10) = (vertex(i0, j), vertex(i1, j));
+            let (v01, v11) = (vertex(i0, j + 1), vertex(i1, j + 1));
+            push([v00, v10, v11], t, &mut triangles);
+            push([v00, v11, v01], t, &mut triangles);
+        }
+        // End-cap fans close the tube at both ends.
+        for (i, centre_t) in [(i0, flow.velocity[i0]), (i1, flow.velocity[i1])] {
+            if (i == i0 && a != 0) || (i == i1 && a != axial - 1) {
+                continue;
+            }
+            let centre = [flow.x[i] - 0.5 * flow.x[stations - 1], 0.0, 0.0];
+            for j in 0..angular {
+                push(
+                    [centre, vertex(i, j + 1), vertex(i, j)],
+                    centre_t,
+                    &mut triangles,
+                );
+            }
+        }
+    }
+    triangles
+}
+
+/// Side-by-side 3D airflow picture: straight bore (left), winner
+/// (right), shared velocity colour scale, dark gallery theme.
+fn render_flow3d_png(straight: &DuctFlow, winner: &DuctFlow) -> Vec<u8> {
+    let (width, height) = (1920usize, 1080usize);
+    let mut pixels = vec![[16u8, 19, 26]; width * height];
+    let mut zbuffer = vec![f64::NEG_INFINITY; width * height];
+    let v_lo = straight
+        .velocity
+        .iter()
+        .chain(winner.velocity.iter())
+        .copied()
+        .fold(f64::INFINITY, f64::min);
+    let v_hi = straight
+        .velocity
+        .iter()
+        .chain(winner.velocity.iter())
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
+    // Fit both ducts with one world scale: bounding box of the view
+    // vertices of the straight duct (winner differs by ~1%).
+    let all = duct_triangles(straight, v_lo, v_hi);
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for triangle in &all {
+        for point in &triangle.points {
+            lo[0] = lo[0].min(point[0]);
+            hi[0] = hi[0].max(point[0]);
+            lo[1] = lo[1].min(point[2]);
+            hi[1] = hi[1].max(point[2]);
+        }
+    }
+    let scale = (820.0 / (hi[0] - lo[0])).min(680.0 / (hi[1] - lo[1]));
+    let centre = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0];
+    let winner_triangles = duct_triangles(winner, v_lo, v_hi);
+    for (panel, triangles) in [(470.0f64, &all), (1400.0f64, &winner_triangles)] {
+        for triangle in triangles.iter() {
+            let screen: [[f64; 3]; 3] = [
+                [
+                    panel + (triangle.points[0][0] - centre[0]) * scale,
+                    540.0 - (triangle.points[0][2] - centre[1]) * scale,
+                    triangle.points[0][1],
+                ],
+                [
+                    panel + (triangle.points[1][0] - centre[0]) * scale,
+                    540.0 - (triangle.points[1][2] - centre[1]) * scale,
+                    triangle.points[1][1],
+                ],
+                [
+                    panel + (triangle.points[2][0] - centre[0]) * scale,
+                    540.0 - (triangle.points[2][2] - centre[1]) * scale,
+                    triangle.points[2][1],
+                ],
+            ];
+            rasterize(&mut pixels, &mut zbuffer, width, height, screen, triangle.colour);
+        }
+    }
+    // Shared colour bar at the right edge (no text; the caption and
+    // CSV carry the numbers).
+    for y in 240..840usize {
+        let t = 1.0 - (y - 240) as f64 / 600.0;
+        let colour = gallery_colour(t);
+        for x in 1842..1872usize {
+            pixels[y * width + x] = colour;
+        }
+    }
+    png_bytes(width, height, &pixels)
+}
+
+/// Fill one projected triangle with a z-buffer (larger depth wins).
+fn rasterize(
+    pixels: &mut [[u8; 3]],
+    zbuffer: &mut [f64],
+    width: usize,
+    height: usize,
+    tri: [[f64; 3]; 3],
+    colour: [u8; 3],
+) {
+    let (x0, x1) = (
+        tri.iter().map(|p| p[0]).fold(f64::INFINITY, f64::min),
+        tri.iter().map(|p| p[0]).fold(f64::NEG_INFINITY, f64::max),
+    );
+    let (y0, y1) = (
+        tri.iter().map(|p| p[1]).fold(f64::INFINITY, f64::min),
+        tri.iter().map(|p| p[1]).fold(f64::NEG_INFINITY, f64::max),
+    );
+    let area = (tri[1][0] - tri[0][0]) * (tri[2][1] - tri[0][1])
+        - (tri[2][0] - tri[0][0]) * (tri[1][1] - tri[0][1]);
+    if area.abs() < 1e-12 {
+        return;
+    }
+    let xa = (x0.floor() as i32).max(0);
+    let xb = (x1.ceil() as i32).min(width as i32 - 1);
+    let ya = (y0.floor() as i32).max(0);
+    let yb = (y1.ceil() as i32).min(height as i32 - 1);
+    for y in ya..=yb {
+        for x in xa..=xb {
+            let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
+            let w0 = ((tri[1][0] - px) * (tri[2][1] - py) - (tri[2][0] - px) * (tri[1][1] - py))
+                / area;
+            let w1 = ((tri[2][0] - px) * (tri[0][1] - py) - (tri[0][0] - px) * (tri[2][1] - py))
+                / area;
+            let w2 = 1.0 - w0 - w1;
+            if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                continue;
+            }
+            let depth = w0 * tri[0][2] + w1 * tri[1][2] + w2 * tri[2][2];
+            let index = y as usize * width + x as usize;
+            if depth > zbuffer[index] {
+                zbuffer[index] = depth;
+                pixels[index] = colour;
+            }
+        }
+    }
+}
+
+/// Encode RGB pixels as PNG (zlib-compressed scanlines, filter 0).
+fn png_bytes(width: usize, height: usize, pixels: &[[u8; 3]]) -> Vec<u8> {
+    use flate2::Compression;
+    use flate2::write::ZlibEncoder;
+    use std::io::Write;
+    let mut raw = Vec::with_capacity((width * 3 + 1) * height);
+    for y in 0..height {
+        raw.push(0);
+        for x in 0..width {
+            raw.extend_from_slice(&pixels[y * width + x]);
+        }
+    }
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+    encoder
+        .write_all(&raw)
+        .expect("in-memory zlib write cannot fail");
+    let zlib = encoder.finish().expect("in-memory zlib finish cannot fail");
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&(width as u32).to_be_bytes());
+    ihdr.extend_from_slice(&(height as u32).to_be_bytes());
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+    png_chunk(&mut png, b"IHDR", &ihdr);
+    png_chunk(&mut png, b"IDAT", &zlib);
+    png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+fn png_chunk(png: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    png.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    png.extend_from_slice(kind);
+    png.extend_from_slice(data);
+    let mut crc_input = kind.to_vec();
+    crc_input.extend_from_slice(data);
+    png.extend_from_slice(&crc32(&crc_input).to_be_bytes());
+}
+
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
 }
 
 // ---------------------------------------------------------------------------
@@ -716,6 +1150,8 @@ mod tests {
                 "comparison_equal_airflow.svg",
                 "convergence.csv",
                 "convergence.svg",
+                "flow3d.png",
+                "flow_distribution.csv",
                 "gallery-provenance.json",
                 "gallery.json",
                 "noise_floor.csv",
@@ -735,7 +1171,7 @@ mod tests {
             &std::fs::read_to_string(first.join("gallery.json")).expect("read manifest"),
         )
         .expect("manifest must parse");
-        assert_eq!(manifest["figures"].as_array().map(Vec::len), Some(4));
+        assert_eq!(manifest["figures"].as_array().map(Vec::len), Some(5));
         std::fs::remove_dir_all(&root).ok();
     }
 }

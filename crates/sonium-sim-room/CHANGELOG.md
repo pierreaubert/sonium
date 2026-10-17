@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed
+
+- Room mesher now mirrors the tet body diagonal across the room centre
+  plane when the problem and axis grid are symmetric there, so the full
+  mesh is reflection-invariant and the symmetry-exploiting solver
+  reproduces the full solve (previously diverged at the 200 Hz mode).
+- Concurrent candidate runner now discards outputs of uncommitted
+  tasks when a run is interrupted. Workers publish outputs as solves
+  finish, ahead of the in-order commit, so a candidate that finished
+  just before cancellation kept its slot populated past the
+  checkpoint cursor, which made the cancelled run unresumable and
+  the persists-and-resumes contract test flaky under load.
+
+
 ## 0.5.0
 ### Added — machine-adaptive parallel gates
 

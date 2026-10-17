@@ -84,6 +84,23 @@ fn every_registered_binary_has_a_machine_checkable_output_contract() {
     let fem_3d_contract = fem_3d_runner.contains("SUCCESS")
         && fem_3d_runner.contains("FAILED")
         && fem_3d_runner.contains("process::exit(1)");
+    // The OpenCourant parity binaries delegate publication to the shared
+    // rad gate, which prints SUCCESS/FAILED/SKIPPED and exits accordingly.
+    // Accept that delegation only while the gate itself carries the full
+    // contract, mirroring the FEM 3D runner exception above.
+    let rad_gate_path = manifest_dir().join("src/rad_gate.rs");
+    assert!(
+        rad_gate_path.exists(),
+        "shared rad gate {} is missing: qa-fem-opencourant-* binaries delegate \
+         their SUCCESS/FAILED contract to it, so restore the gate instead of \
+         weakening this contract test",
+        rad_gate_path.display()
+    );
+    let rad_gate = fs::read_to_string(&rad_gate_path)
+        .expect("shared rad gate exists but is unreadable; check file permissions");
+    let rad_gate_contract = rad_gate.contains("SUCCESS")
+        && rad_gate.contains("FAILED")
+        && rad_gate.contains("process::exit(1)");
     for (relative_path, name) in registered_bins() {
         let source = fs::read_to_string(manifest_dir().join(&relative_path))
             .unwrap_or_else(|error| panic!("read {}: {error}", relative_path.display()));
@@ -93,22 +110,46 @@ fn every_registered_binary_has_a_machine_checkable_output_contract() {
         // contract keeps the check strict without duplicating boilerplate in
         // every physics binary.
         let uses_fem_3d_runner = source.contains("sonium_qa::fem_physics_3d::run_");
+        let uses_rad_gate = source.contains("rad::gate::publish_and_exit");
+        // A registered binary may also be a thin wrapper over a sibling
+        // source pulled in with #[path]; the included file then owns the
+        // output contract.
+        let path_included_contract = source
+            .lines()
+            .filter_map(|line| {
+                let start = line.find("#[path = \"")? + "#[path = \"".len();
+                let rest = &line[start..];
+                let end = rest.find('"')?;
+                Some(rest[..end].to_string())
+            })
+            .filter_map(|included| {
+                let included_path = manifest_dir().join(&relative_path).parent()?.join(included);
+                fs::read_to_string(included_path).ok()
+            })
+            .any(|included| {
+                included.contains("SUCCESS")
+                    && included.contains("FAILED")
+                    && included.contains("process::exit(1)")
+            });
+        let delegated_contract = (uses_fem_3d_runner && fem_3d_contract)
+            || (uses_rad_gate && rad_gate_contract)
+            || path_included_contract;
         let is_compile_only_contract = source.contains("Compile-only");
         let has_success = source.contains("SUCCESS")
             || source.contains("QaResult::passed")
             || is_compile_only_contract
-            || (uses_fem_3d_runner && fem_3d_contract);
+            || delegated_contract;
         let has_failed = source.contains("FAILED")
             || source.contains("QaResult::failed")
             || is_compile_only_contract
-            || (uses_fem_3d_runner && fem_3d_contract);
+            || delegated_contract;
         let has_failure_path = source.contains("process::exit(1)")
             || source.contains("ExitCode::FAILURE")
             || source.contains("return Err(")
             || source.contains("assert!(")
             || source.contains("assert_eq!(")
             || is_compile_only_contract
-            || (uses_fem_3d_runner && fem_3d_contract);
+            || delegated_contract;
         if !has_success {
             violations.push(format!("{name}: missing SUCCESS marker"));
         }
@@ -948,6 +989,10 @@ fn qa_sources_do_not_use_generic_five_percent_escape_hatches() {
         let source = fs::read_to_string(manifest_dir().join(&relative_path))
             .unwrap_or_else(|error| panic!("read {}: {error}", relative_path.display()));
         for (line_index, line) in source.lines().enumerate() {
+            // Documentation cannot act as a gate; only code can.
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
             let compact: String = line
                 .chars()
                 .filter(|character| !character.is_whitespace() && *character != '_')
@@ -958,10 +1003,30 @@ fn qa_sources_do_not_use_generic_five_percent_escape_hatches() {
                     .iter()
                     .any(|name| normalized.contains(name))
                     || (normalized.contains("rel") && !normalized.contains("relaxation")));
-            let is_five_percent_comparison = (compact.contains("0.05")
-                && !compact.contains("0.05%"))
-                || compact.contains("<5.0")
-                || compact.contains("<=5.0");
+            // Match the exact 5% literal, not longer decimals that merely
+            // start with it (0.0508186), scientific notation (5.0e-3 is
+            // 0.5%, 5.0e-5 is 0.005%), or a percentage already spelled out.
+            let has_exact_five_percent = compact.match_indices("0.05").any(|(index, _)| {
+                let before_ok = index == 0
+                    || !compact.as_bytes()[index - 1].is_ascii_digit()
+                        && compact.as_bytes()[index - 1] != b'.';
+                let after = &compact[index + 4..];
+                let after_ok = !after
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_digit() || c == 'e' || c == 'E');
+                before_ok && after_ok
+            });
+            let has_bare_five_comparison = ["<5.0", "<=5.0"].iter().any(|needle| {
+                compact.match_indices(needle).any(|(index, _)| {
+                    !compact[index + needle.len()..]
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_digit() || c == 'e' || c == 'E' || c == '.')
+                })
+            });
+            let is_five_percent_comparison =
+                (has_exact_five_percent && !compact.contains("0.05%")) || has_bare_five_comparison;
             if names_an_error && is_five_percent_comparison {
                 violations.push(format!(
                     "{}:{}: `{}`",

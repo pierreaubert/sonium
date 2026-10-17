@@ -3,6 +3,12 @@
 //! tractions and volume sources are derived independently of assembled matrices.
 //! Affine spatial fields are exactly representable on nonmatching P1 meshes;
 //! exponential time histories isolate CN error, and linear time gives an exact patch.
+//!
+//! Scope is deliberately limited to that affine patch contract on a fixed
+//! reference geometry: it exercises mortar coupling assembly and Crank-
+//! Nicolson time error for exactly representable fields. It does not solve
+//! a moving-mesh (ALE) problem, nonlinear flow, or non-affine discretization
+//! accuracy; do not cite this binary as evidence for those.
 use sonium_fem::assembly::mixed::assemble_bilinear_two_spaces_checked;
 use sonium_fem::assembly::{TripletMatrix, assemble_bilinear, assemble_linear};
 use sonium_fem::basis::PolynomialDegree;

@@ -45,6 +45,7 @@ fn main() {
     );
     if cmp.passed {
         println!("JLR VALIDATION PASSED (budget {:.0}%)", budget * 100.0);
+        println!("SUCCESS");
     } else {
         println!("JLR VALIDATION FAILED (budget {:.0}%)", budget * 100.0);
         std::process::exit(1);

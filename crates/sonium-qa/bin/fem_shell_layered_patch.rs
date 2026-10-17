@@ -184,7 +184,8 @@ fn main() {
         let (tip_w, exact) = cantilever_tip(20, d_star[0]);
         let err = (tip_w - exact).abs() / exact.abs();
         println!("Layered strip: tip w = {tip_w:.6e}, beam theory {exact:.6e} (err {err:.3e})");
-        assert!(err < 0.05, "layered strip misses beam theory");
+        // Measured strip error = 3.86e-4 vs beam theory; gate at ~5x.
+        assert!(err < 2.0e-3, "layered strip misses beam theory");
 
         // 3. J2 layered section yields and accumulates plastic strain.
         let layers = vec![Layer {

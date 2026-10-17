@@ -620,11 +620,13 @@ fn run() -> Result<QaResult, String> {
     for (name, v, bound) in [
         ("fine_velocity_error", fine.velocity, 0.005),
         ("fine_potential_error", fine.potential, 0.005),
-        ("fine_pressure_error", fine.pressure, 0.05),
-        ("fine_current_error", fine.current, 0.05),
-        ("fine_lorentz_force_error", fine.force, 0.05),
+        // Measured fine-grid errors: pressure 1.2e-4, current 4.6e-3,
+        // force 7.5e-3, divergence 2.2e-4; gates at ~2-8x measured.
+        ("fine_pressure_error", fine.pressure, 0.001),
+        ("fine_current_error", fine.current, 0.01),
+        ("fine_lorentz_force_error", fine.force, 0.02),
         ("fine_joule_error", fine.joule, 0.01),
-        ("fine_divergence_error", fine.divergence, 0.05),
+        ("fine_divergence_error", fine.divergence, 0.001),
         ("exact_p3_error", exact, 1e-9),
         (
             "fine_temporal_error",

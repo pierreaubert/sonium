@@ -353,28 +353,32 @@ pub fn plasticity_thick_cylinder_case() -> RadExtendedCase {
                 channel: format!("DX/{bore_node}"),
                 expected: lame_displacement(ELASTIC_PROBE_PA, A_M),
                 abs_tol: 1e-12,
-                rel_tol: 0.05,
+                // Measured engine deviation = 1.9e-2; gate at ~1.6x.
+                rel_tol: 0.03,
             },
             RadProbe {
                 label: "outer radial DX at 50 MPa".to_string(),
                 channel: format!("DX/{outer_node}"),
                 expected: lame_displacement(ELASTIC_PROBE_PA, B_M),
                 abs_tol: 1e-12,
-                rel_tol: 0.05,
+                // Measured engine deviation = 4.4e-2; gate at ~1.25x.
+                rel_tol: 0.055,
             },
             RadProbe {
                 label: "bore hoop residual SY".to_string(),
                 channel: bric_channel("SY", bore_brick),
                 expected: bore_hoop_resid,
                 abs_tol: 1e6,
-                rel_tol: 0.05,
+                // Measured engine deviation beyond abs_tol = 3.4e-2; gate at ~1.3x.
+                rel_tol: 0.045,
             },
             RadProbe {
                 label: "outer hoop residual SY".to_string(),
                 channel: bric_channel("SY", outer_brick),
                 expected: outer_hoop_resid,
                 abs_tol: 1e6,
-                rel_tol: 0.05,
+                // Measured engine deviation beyond abs_tol = 1.6e-2; gate at ~1.9x.
+                rel_tol: 0.03,
             },
         ],
         stop_time_s: STOP_TIME_S,

@@ -66,10 +66,10 @@ fn lame_cylinder_converges_under_radial_refinement() {
 fn p1_displacement_formulation_locks_as_nu_approaches_half() {
     // Characterization, not certification: the P1 displacement formulation
     // loses coarse-mesh accuracy near incompressibility (measured ~48x from
-    // nu = 0.3 to nu = 0.4999 on the coarse grid), and the refined locked
-    // system defeats the default CG iteration budget at nu >= 0.495. A
-    // mixed u-p formulation plus a robust solver policy is the documented
-    // follow-up; this test pins the gap.
+    // nu = 0.3 to nu = 0.4999 on the coarse grid). The refined solver now
+    // reaches nu = 0.499 within budget (with locking-dominated errors),
+    // while nu = 0.4999 still defeats it. A mixed u-p formulation is the
+    // documented follow-up; this test pins the remaining gap.
     let coarse = [0.3, 0.49, 0.499, 0.4999].map(|nu| lame_displacement_error(6, nu));
     for pair in coarse.windows(2) {
         assert!(pair[1] > pair[0], "locking must worsen with nu: {coarse:?}");
@@ -85,14 +85,21 @@ fn p1_displacement_formulation_locks_as_nu_approaches_half() {
         "refinement must help at nu = 0.49: {refined_moderate} vs {}",
         coarse[1]
     );
-    // Extreme nu defeats the default solver budget on the refined grid.
-    for nu in [0.495, 0.499, 0.4999] {
-        let outcome = try_lame_displacement_error(24, nu);
+    // Refined solves at nu = 0.495 / 0.499 now converge, but their errors
+    // stay locking-dominated (worse than the refined nu = 0.49 error).
+    for nu in [0.495, 0.499] {
+        let refined = lame_displacement_error(24, nu);
         assert!(
-            matches!(outcome, Err(ref message) if message.contains("StaticNonConvergence")),
-            "expected pinned solver-limit failure at nu = {nu}, got {outcome:?}"
+            refined > refined_moderate,
+            "expected locking-dominated refined error at nu = {nu}: {refined} vs {refined_moderate}"
         );
     }
+    // nu = 0.4999 still defeats the default solver budget on the refined grid.
+    let outcome = try_lame_displacement_error(24, 0.4999);
+    assert!(
+        matches!(outcome, Err(ref message) if message.contains("StaticNonConvergence")),
+        "expected pinned solver-limit failure at nu = 0.4999, got {outcome:?}"
+    );
 }
 
 fn linear_field(x: f64, y: f64, z: f64) -> [f64; 3] {

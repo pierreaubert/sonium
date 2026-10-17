@@ -138,8 +138,9 @@ fn main() {
              target {TARGET_IN_PLANE}), out-of-plane tip = {u_out:.6e} \
              (err {err_out:.3e}, target {TARGET_OUT_OF_PLANE})"
         );
-        assert!(err_in < 0.05, "in-plane deflection misses target");
-        assert!(err_out < 0.05, "out-of-plane deflection misses target");
+        // Measured errors: in-plane 6.33e-3, out-of-plane 7.56e-3; gate at ~2.5x.
+        assert!(err_in < 0.02, "in-plane deflection misses target");
+        assert!(err_out < 0.02, "out-of-plane deflection misses target");
     });
     if result.is_ok() {
         println!("SUCCESS");

@@ -30,6 +30,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 approx = { workspace = true }
 criterion = { workspace = true }
+libc = { workspace = true }
 stats_alloc = "0.1.10"
 
 [[bench]]

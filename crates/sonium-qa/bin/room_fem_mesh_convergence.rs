@@ -16,10 +16,11 @@ use sonium_xem::{
 };
 
 const CASE_ID: &str = "roomsim.fem-mesh-convergence.v1";
-// Listener response changes of 3% RMS / 5% maximum correspond to about
-// 0.26 / 0.45 dB in magnitude. Phase remains in the complex-pressure comparison.
-const RMS_TOLERANCE: f64 = 0.03;
-const MAX_TOLERANCE: f64 = 0.05;
+// Measured medium-to-fine listener changes are 7.0e-3 RMS / 8.7e-3 max
+// (about 0.06 / 0.08 dB); gates sit at ~3x / ~2.3x measured. Phase remains
+// in the complex-pressure comparison.
+const RMS_TOLERANCE: f64 = 0.02;
+const MAX_TOLERANCE: f64 = 0.02;
 // Require a material decrease between the two adjacent mesh comparisons.
 const CONTRACTION_TOLERANCE: f64 = 0.8;
 
@@ -150,7 +151,7 @@ fn run() -> Result<QaResult, String> {
         .reference_checksum("production/full-domain-fem:listener-position-retained-v1")
         .dimension("1.6 x 1.5 x 1.4 m; one source; two listeners; 400 Hz")
         .formulation("three sequential full-domain CPU FEM P1 solves with retained nodal fields")
-        .tolerance("fine-grid complex RMS <= 0.03 and max <= 0.05; both refinement contraction ratios <=0.8; strict listener/topology gates")
+        .tolerance("fine-grid complex RMS <= 0.02 and max <= 0.02; both refinement contraction ratios <=0.8; strict listener/topology gates")
         .seed("roomsim-fem-mesh-convergence:cpu:v1"))
 }
 

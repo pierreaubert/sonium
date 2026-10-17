@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import struct
 import subprocess
@@ -75,6 +76,7 @@ class DemoSpec:
     poster_at: float = 0.6
     signed_field: bool = False
     volume_slices: bool = False
+    rotor_geometry: bool = False
 
 
 DEMOS: dict[str, DemoSpec] = {
@@ -157,6 +159,100 @@ DEMOS: dict[str, DemoSpec] = {
         distance_factor=3.9,
         poster_at=0.97,
     ),
+    "propeller-noise": DemoSpec(
+        slug="propeller-noise",
+        title="Propeller tonal noise",
+        capability="Aeroacoustics (compact loading dipoles, linear wave FEM, sponge free-field)",
+        blurb=(
+            "Three blades at 60 rev/s radiate at the 180 Hz blade-passage "
+            "frequency. Each blade is a compact axial loading dipole; a P1 "
+            "wave solve radiates the tonal field into a sponge-terminated "
+            "free field. Colour is signed acoustic pressure on three "
+            "mid-planes; the grey hub, blades and shaft show the rotor "
+            "itself, windowed clear of the planes."
+        ),
+        field_mode="pressure",
+        signed_field=True,
+        volume_slices=True,
+        rotor_geometry=True,
+        direction="0.3,-0.45,1.0",
+        distance_factor=3.0,
+        poster_at=0.6,
+    ),
+    "thermal-spreading": DemoSpec(
+        slug="thermal-spreading",
+        title="Finned heatsink transient",
+        capability="Heat conduction + natural convection + radiation (P1 FEM, backward Euler)",
+        blurb=(
+            "A chip under the base holds 95 C while the finned aluminium "
+            "heatsink (k = 167 W/mK) warms over 120 s and loses heat from "
+            "every exposed surface by natural convection (h = 8 W/m2K) "
+            "and radiation (emissivity 0.85). Colour is temperature; the "
+            "solve is sonium-fem's thermal conduction forms with "
+            "backward-Euler stepping and per-step Robin coefficients."
+        ),
+        field_mode="temperature",
+        direction="0.6,-1,0.75",
+        distance_factor=3.0,
+        poster_at=0.85,
+    ),
+    "melting-plate": DemoSpec(
+        slug="melting-plate",
+        title="Melting plate",
+        capability="Phase-change heat conduction (apparent heat capacity, P1 FEM, backward Euler)",
+        blurb=(
+            "A 300 mm square aluminium-alloy plate with a 90 mm central "
+            "hole is heated on the hole rim to 950 C. Past the 580-650 C "
+            "melting range the alloy turns liquid and a melt front grows "
+            "outward from the hole; latent heat (380 kJ/kg) is absorbed "
+            "in the mushy zone while exposed faces lose heat by natural "
+            "convection and T^4 radiation. Colour is liquid fraction: "
+            "blue solid, red fully molten. Thermal-only model: the melt "
+            "is tracked, but does not flow or slump."
+        ),
+        field_mode="liquid_fraction",
+        direction="0.45,-0.7,1",
+        distance_factor=3.0,
+        poster_at=0.85,
+    ),
+    "sloshing-tank": DemoSpec(
+        slug="sloshing-tank",
+        title="Sloshing water tank",
+        capability="Two-phase Navier-Stokes + Cahn-Hilliard phase field (BDF2, segregated coupling)",
+        blurb=(
+            "A 2 m tank filled with water to 0.20 m is shaken sideways "
+            "at its first sloshing resonance (0.34 Hz, 100 mm amplitude) "
+            "in the tank frame: fixed walls, oscillating horizontal "
+            "gravity, phase-weighted body force, and a Cahn-Hilliard "
+            "interface advected by the flow, with element-local "
+            "viscosity interpolated from the phase field and "
+            "phase-weighted gravity (inertia keeps the reference "
+            "water density - full air/water inertia contrast is "
+            "unstable at the contact line in this coupling). "
+            "Colour is water volume fraction. Capillarity on the "
+            "momentum is neglected (Bond number ~5e5 at this scale); "
+            "a driven-amplitude sweep accompanies the film."
+        ),
+        field_mode="water_fraction",
+        direction="0.04,-0.06,1",
+        distance_factor=3.4,
+        poster_at=0.82,
+    ),
+    "cylinder-wake": DemoSpec(
+        slug="cylinder-wake",
+        title="Cylinder vortex shedding",
+        capability="Incompressible Navier-Stokes (BDF2, block Schur preconditioner)",
+        blurb=(
+            "Flow at Re = 100 past an immersed cylinder sheds a Karman "
+            "vortex street. Colour is vorticity magnitude; the unsteady "
+            "lift driving the street is the classic Aeolian dipole source. "
+            "Same BDF2 Navier-Stokes path as the Taylor-Green gate."
+        ),
+        field_mode="vorticity",
+        direction="0.04,-0.06,1",
+        distance_factor=3.4,
+        poster_at=0.7,
+    ),
     "crush": DemoSpec(
         slug="crush",
         title="Thin-walled tube crush",
@@ -215,6 +311,36 @@ def simulate(spec: DemoSpec, work: Path) -> Path:
     return out
 
 
+# Rotor constants mirror `propeller_noise` in website_demos.rs: 3 blades
+# at 60 rev/s, tip radius 0.55 m, hub at the domain centre.
+ROTOR_OMEGA = 2.0 * math.pi * 60.0
+ROTOR_BLADES = 3
+ROTOR_RADIUS = 0.55
+
+
+def _append_rotor(points, faces, colours, centre, angle):
+    """Append grey shaft/hub/blade geometry (rotated to `angle`) to a frame."""
+    import pyvista as pv
+
+    parts = [
+        pv.Cylinder(center=tuple(centre), direction=(0, 0, 1), radius=0.035, height=2.4, resolution=24),
+        pv.Cylinder(center=tuple(centre), direction=(0, 0, 1), radius=0.12, height=0.16, resolution=32),
+    ]
+    for blade in range(ROTOR_BLADES):
+        box = pv.Box(bounds=(0.10, ROTOR_RADIUS, -0.07, 0.07, -0.012, 0.012))
+        theta = angle + 2.0 * math.pi * blade / ROTOR_BLADES
+        parts.append(box.rotate_z(math.degrees(theta), point=(0.0, 0.0, 0.0)).translate(tuple(centre)))
+    rotor = parts[0].merge(parts[1:]).triangulate()
+    rotor_points = np.asarray(rotor.points)
+    rotor_faces = np.asarray(rotor.regular_faces)
+    rotor_colours = np.full((len(rotor_points), 3), 150, dtype=np.uint8)
+    offset = len(points)
+    points = np.vstack([points, rotor_points])
+    faces = np.vstack([faces, rotor_faces + offset]) if len(faces) else rotor_faces + offset
+    colours = np.vstack([colours, rotor_colours])
+    return points, faces, colours
+
+
 def convert_slices(spec: DemoSpec, vtu_dir: Path, work: Path, manifest: dict) -> Path:
     """Volume VTU frames -> three orthogonal mid-plane slices as PLYs."""
     import pyvista as pv
@@ -242,6 +368,16 @@ def convert_slices(spec: DemoSpec, vtu_dir: Path, work: Path, manifest: dict) ->
         faces = np.asarray(combined.regular_faces)
         values = np.asarray(combined.point_data[spec.field_mode], dtype=float)
         colours = (gallery_colour(0.5 + 0.5 * values / scale) * 255).astype(np.uint8)
+        if spec.rotor_geometry:
+            # Window the planes clear of the rotor disk so the appended
+            # geometry is not hidden behind (or z-fighting) the slices.
+            centre = np.asarray(center, dtype=float)
+            centroids = points[faces].mean(axis=1)
+            keep = np.linalg.norm(centroids - centre, axis=1) > ROTOR_RADIUS + 0.13
+            faces = faces[keep]
+            points, faces, colours = _append_rotor(
+                points, faces, colours, centre, ROTOR_OMEGA * manifest["times"][index]
+            )
         write_ply(ply_dir / f"frame_{index:04d}.ply", points, faces, colours)
     return ply_dir
 

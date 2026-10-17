@@ -1193,10 +1193,11 @@ fn validate_reduced_3d_energy(
     // production gate (0.04) does not see. Smoke (32 spc) characteristically
     // records ~0.282 (lag-0/lag-5 agree to 10 digits; algebraic bookkeeping
     // exact to 1e-16), matching 0.04 × 252/32 = 0.315, so the production
-    // limit scales linearly with step size (0.05 base for margin). The gate
-    // still trips on solver-scale energy blowups; bookkeeping integrity is
-    // guarded separately by the exact algebraic/interface closures.
-    let max_physical_relative_closure = 0.05 * 252.0 / tier.samples_per_cycle as f64;
+    // limit scales linearly with step size from the 0.04 production base.
+    // The gate still trips on solver-scale energy blowups; bookkeeping
+    // integrity is guarded separately by the exact algebraic/interface
+    // closures.
+    let max_physical_relative_closure = 0.04 * 252.0 / tier.samples_per_cycle as f64;
     if energy.copper_loss_j < -dissipation_tolerance_j
         || energy.mechanical_damping_j < -dissipation_tolerance_j
         || energy.viscous_dissipation_j < -dissipation_tolerance_j

@@ -181,7 +181,8 @@ fn part1_single_ply_paths() {
         "  shear (Puck gradual): initiation {init:.4e} N/m (expect {expected:.4e}), dm = {:.3}",
         dmg.dm
     );
-    assert!(err < 0.05, "shear initiation off: {err:.3e}");
+    // Measured initiation error = 2.0e-2 vs the Puck closed form; gate at 2x.
+    assert!(err < 0.04, "shear initiation off: {err:.3e}");
     assert!(
         dmg.dm > 0.3 && dmg.df < 1e-6,
         "matrix-only gradual damage expected"

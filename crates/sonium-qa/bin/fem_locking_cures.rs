@@ -483,8 +483,9 @@ fn test_cook_membrane() {
     let compressible = cook_tip(8, 1.0 / 3.0, true);
     let compressible_err = (compressible - classical).abs() / classical;
     println!("cook compressible n=8: {compressible:.6e} vs {classical:.6e}");
+    // Measured compressible Cook error = 2.58e-2 vs the classical tip; gate at ~1.5x.
     assert!(
-        compressible_err < 0.05,
+        compressible_err < 0.04,
         "compressible Cook error {compressible_err:.3e}"
     );
     // Near-incompressible locking demo with a fine-mesh self reference.

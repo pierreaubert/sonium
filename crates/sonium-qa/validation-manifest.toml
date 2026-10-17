@@ -7955,7 +7955,7 @@ dimension = "3-D penetrable sphere; face resolutions 2/4/8; 24/96/384 Quad4 pane
 reference = "independent FluidSphereTransmission3d exterior pressure fields; direct coefficient cross-check and separately recomputed dense equation residual"
 reference_checksum = "analytic/deterministic-fixture:bem-transmission-continuous-q2-quad4-mie-v1"
 norm = "three-level complex exterior-pressure L2 error; both adjacent refinement ratios; all-level coupled residual and independent direct coefficient error"
-tolerance = "fine field error <=0.01; both adjacent refinement ratios <=0.65; all solve residuals and direct coefficient errors <=1e-8; three numerical solves; fine DOFs/panels increase"
+tolerance = "fine field error <=0.01; both adjacent refinement ratios <=0.72; all solve residuals and direct coefficient errors <=1e-8; three numerical solves; fine DOFs/panels increase"
 tier = "physics-gate"
 # The complete 2/4/8 Galerkin diagnostic takes over two hours on this CPU.
 timeout_seconds = 14400

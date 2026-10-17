@@ -641,7 +641,8 @@ fn run() -> Result<QaResult, String> {
         ("fine_damage_gradient_error", fine.damage_gradient, 0.1),
         ("fine_displacement_error", fine.displacement, 0.005),
         ("fine_strain_error", fine.strain, 0.1),
-        ("fine_history_error", fine.history, 0.05),
+        // Measured fine-grid history error = 2.38e-2; gate at ~1.7x.
+        ("fine_history_error", fine.history, 0.04),
         ("fine_stress_error", fine.stress, 0.1),
         ("fine_elastic_energy_error", fine.elastic_energy, 0.01),
         ("fine_crack_energy_error", fine.crack_energy, 0.01),

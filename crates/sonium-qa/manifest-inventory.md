@@ -7,14 +7,14 @@ validated cases, not every runnable QA binary.
 
 ## Summary
 
-- Registered Cargo QA binaries: 985
-- Manifest-backed validation cases: 804
+- Registered Cargo QA binaries: 987
+- Manifest-backed validation cases: 805
 
 | Tier | Cases |
 | --- | ---: |
 | accelerator-gate | 8 |
 | contract-gate | 41 |
-| physics-gate | 392 |
+| physics-gate | 393 |
 | reference-only | 100 |
 | smoke | 157 |
 | solver-gate | 106 |
@@ -780,6 +780,7 @@ validated cases, not every runnable QA binary.
 | speaker.piston-directivity-benchmark.v1 | sim-speaker-modeling | `qa-speaker-piston-directivity-benchmark` | physics-gate | baffled-piston Rayleigh surface integral at ka=3,5 over 3 refinement levels against an overkill grid |
 | speaker.port-flow-promotion-contract.v1 | sim-speaker-modeling | `qa-speaker-port-flow-promotion` | smoke | deterministic accepted-trace phasor, residual, continuity, and energy gate |
 | speaker.port-nonlinear-2d.v1 | sim-speaker-modeling | `qa-speaker-port-nonlinear` | physics-gate | plane-Poiseuille gate, lumped-limit gate, and 3-drive nonlinear coupled port runs with energy closure |
+| speaker.port-optim-bounded.v1 | sim-speaker-modeling | `qa-speaker-port-optim` | physics-gate | Tier-0 duct screen + AL-BOBYQA refine, Tier-1 spline-linear re-rank, capped Tier-2 two-profile three-drive leg with equal-airflow rescale |
 | structural.backend-capability-catalogue.v1 | structural-mechanics | `qa-structural-backend-capabilities` | reference-only | CPU-reference capability catalogue with fail-closed CUDA, Metal, and WASM declarations |
 | structural.beam-mesh-convergence.v1 | structural-mechanics | `qa-structural-beam-convergence` | physics-gate | production cantilever solves over five deterministic mesh resolutions |
 | structural.beam-modal-orthogonality.v1 | structural-mechanics | `qa-structural-beam-modal` | physics-gate | production generalized beam eigenproblem with mass-normalized modes |

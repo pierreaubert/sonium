@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+
+- QA contract tests recognize the shared rad-gate and #[path] delegation
+  contracts; five-percent gate scan now matches exact 5% literals only.
+- Generic 5% gates in 15 QA binaries replaced with measured bounds
+  (recorded beside each gate); two thin wrappers gained scope statements.
+
+
 ## 0.2.0
 ### Added — solver follow-up harnesses
 

@@ -1015,7 +1015,8 @@ fn run() -> Result<QaResult, String> {
         ("fine_capillary_error", f.capillary, 0.1),
         ("fine_free_energy_error", f.energy, 0.005),
         ("fine_mass_error", f.mass, 0.01),
-        ("fine_divergence_error", f.divergence, 0.05),
+        // Measured fine-grid divergence error = 9.0e-5; gate at ~5x.
+        ("fine_divergence_error", f.divergence, 5.0e-4),
         ("exact_p2_error", exact, 1e-9),
         (
             "fine_temporal_error",

@@ -81,7 +81,8 @@ pub(crate) fn necking_bar_case() -> OpenCourantCase {
             channel: format!("DX/{tip_node}"),
             expected,
             abs_tol: 1e-9,
-            rel_tol: 0.05,
+            // Measured engine-vs-analytical probe deviation = 4.8e-2; gate at ~1.25x.
+            rel_tol: 0.06,
         }],
         stop_time_s: 1.0,
         th_period_s: 0.01,

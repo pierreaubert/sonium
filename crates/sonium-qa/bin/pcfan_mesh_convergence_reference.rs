@@ -10,8 +10,14 @@ use sonium_sim_pcfan::{
 use std::time::Instant;
 
 const CASE_ID: &str = "pcfan.mesh-convergence-reference.v1";
-// Five percent adjacent response changes replace the former 70% admission.
-const RELATIVE_TOLERANCE: f64 = 0.05;
+// Adjacent-level admission for this refinement study: the sweep increments
+// the cubic grid one cell at a time (4..=8), and a level is admitted only
+// when both response changes against the previous level stay within this
+// limit, on top of the per-level nonlinear-residual, conservation, and
+// metadata gates below. It replaced the former 70% admission. This is a
+// mesh-refinement admission limit, not an error bound against a reference
+// solution, so it must not be reused as an accuracy certification.
+const MAX_ADJACENT_MESH_CHANGE: f64 = 0.05;
 const SOLVE_TOLERANCE: f64 = 1.0e-7;
 const METADATA_TOLERANCE: f64 = 2.0e-12;
 
@@ -61,7 +67,7 @@ fn run() -> Result<Metrics, String> {
         PcFanCfdMeshConvergenceConfig {
             start_cells: 4,
             max_cells: 8,
-            relative_tolerance: RELATIVE_TOLERANCE,
+            relative_tolerance: MAX_ADJACENT_MESH_CHANGE,
             min_levels: 3,
             max_final_residual: SOLVE_TOLERANCE,
         },
@@ -152,8 +158,8 @@ fn run() -> Result<Metrics, String> {
     let final_pressure_relative_change = last
         .pressure_relative_change
         .ok_or_else(|| "final mesh level lacks pressure change metadata".to_string())?;
-    if final_airflow_relative_change > RELATIVE_TOLERANCE
-        || final_pressure_relative_change > RELATIVE_TOLERANCE
+    if final_airflow_relative_change > MAX_ADJACENT_MESH_CHANGE
+        || final_pressure_relative_change > MAX_ADJACENT_MESH_CHANGE
     {
         return Err(format!(
             "final mesh changes exceed admission tolerance: airflow={}, pressure={}",
@@ -226,15 +232,15 @@ fn main() {
                 .minimum("final_pressure_abs_pa", f64::MIN_POSITIVE)
                 .minimum("final_airflow_relative_change", 0.0)
                 .minimum("final_pressure_relative_change", 0.0)
-                .maximum("final_airflow_relative_change", RELATIVE_TOLERANCE)
-                .maximum("final_pressure_relative_change", RELATIVE_TOLERANCE)
+                .maximum("final_airflow_relative_change", MAX_ADJACENT_MESH_CHANGE)
+                .maximum("final_pressure_relative_change", MAX_ADJACENT_MESH_CHANGE)
                 .maximum("max_metadata_relative_error", METADATA_TOLERANCE)
                 .reference_checksum("analytic/invariant:pcfan-mesh-convergence-v1")
                 .input_checksum("pcfan-120mm:incompressible-cfd:cells=4..8:cpu")
                 .formulation(
                     "production immersed-solid CFD mesh-convergence metadata and admission",
                 )
-                .seed("pcfan-mesh-convergence-v1:4..8:relative-tolerance=0.05")
+                .seed("pcfan-mesh-convergence-v1:4..8:adjacent-change-limit=0.05")
                 .elapsed_ms(started.elapsed().as_millis().try_into().unwrap_or(u64::MAX));
             if let Err(error) = record.release_eligible() {
                 record.status = QaStatus::Failed;

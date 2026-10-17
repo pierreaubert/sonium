@@ -796,10 +796,22 @@ where
         on_commit,
     );
 
-    let restored_outputs = Arc::try_unwrap(output_slots)
+    let mut restored_outputs = Arc::try_unwrap(output_slots)
         .map_err(|_| anyhow::anyhow!("candidate output slots still have active workers"))?
         .into_inner()
         .map_err(|_| anyhow::anyhow!("candidate output slot mutex poisoned"))?;
+    if execution.is_err() {
+        // Workers publish outputs as solves finish, ahead of the
+        // in-order commit. On interruption only committed tasks may
+        // retain their output: leaving an uncommitted slot populated
+        // would contradict the checkpoint cursor and make the run
+        // unresumable, so discard every output at or past the cursor.
+        for (task_index, task) in tasks.iter().enumerate() {
+            if task_index >= checkpoint.next_task_index {
+                restored_outputs[task.candidate_index] = None;
+            }
+        }
+    }
     outputs.clone_from_slice(&restored_outputs);
     execution.map_err(anyhow::Error::msg)?;
 

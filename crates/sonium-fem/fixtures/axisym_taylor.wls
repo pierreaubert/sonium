@@ -7,7 +7,7 @@
    nodal mass, characteristic length, critical step, the elastic
    uniaxial-strain response to an impact-rate driver (V = 227 m/s over
    dt = 1 ns), the shock viscosity of that compressive step, the
-   impact-face resultant identity (-Pi R^2 (szz + q)), and the
+   impact-face resultant identity (-Pi R^2 (szz - q)), and the
    single-step J2 radial-return response (linear hardening) to the
    same driver over dt = 1 us. All inputs are exact rationals; roots
    and Pi stay exact until N[..., 50].
@@ -66,9 +66,11 @@ sthEl = lame*ezzEl;
 c0 = 11/10;
 c1 = 5/100;
 bulkQ = rho*charLen*(c0*charLen*rate^2 - c1*sound*rate);
-(* Impact-face (bottom nodes) resultant: -Pi R^2 (szz + q). *)
+(* Impact-face (bottom nodes) resultant: -Pi R^2 (szz - q).
+   The viscous pressure enters the tension-positive stress as
+   sigma - q I, so the shock term subtracts from szz. *)
 faceArea = Pi*radius^2;
-bottomEl = -faceArea*(szzEl + bulkQ);
+bottomEl = -faceArea*(szzEl - bulkQ);
 
 (* Plastic single step: same driver over dt = 1 us. Trial is
    uniaxial strain; radial return is exact for linear hardening:
@@ -86,7 +88,7 @@ scale = flow/vmTr;
 szzPl = pTr + (szzTr - pTr)*scale;
 srrPl = pTr + (srrTr - pTr)*scale;
 sthPl = srrPl;
-bottomPl = -faceArea*(szzPl + bulkQ);
+bottomPl = -faceArea*(szzPl - bulkQ);
 
 golden = <|
   "meta" -> <|
@@ -162,7 +164,7 @@ golden = <|
     |>,
     "bottom_el" -> <|
       "values" -> {dec[bottomEl]},
-      "exact" -> "-Pi R^2 (szz + q)"
+      "exact" -> "-Pi R^2 (szz - q)"
     |>,
     "plastic_szz" -> <|
       "values" -> {dec[szzPl]},
@@ -182,7 +184,7 @@ golden = <|
     |>,
     "bottom_pl" -> <|
       "values" -> {dec[bottomPl]},
-      "exact" -> "-Pi R^2 (szz + q)"
+      "exact" -> "-Pi R^2 (szz - q)"
     |>
   |>,
   "tolerances" -> <|

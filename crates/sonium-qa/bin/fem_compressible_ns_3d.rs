@@ -8,6 +8,10 @@
 //! The spatial driver supplies exact boundary traces at SSPRK3 stage times.
 //! The public solver's temporal test uses fixed traces and self-convergence;
 //! it does not claim time-dependent boundary support in the production API.
+//!
+//! Scope is deliberately limited to those smoke and shear-wave gates: do
+//! not cite this binary as validation of time-dependent boundary handling,
+//! turbulent or high-Mach flow, or production compressible-NS accuracy.
 
 // Rust guideline compliant 2026-02-21
 fn main() {

@@ -734,6 +734,11 @@ review-index:
 # Execute every non-reference manifest case through the same timeout/marker
 # runner used by the normal QA tiers. This makes release evidence an explicit
 # opt-in list rather than an accidental consequence of Cargo target discovery.
+# Two knobs control core use, mirroring `just ntest`: SONIUM_QA_PARALLELISM
+# sets concurrent cases (default scales with the machine); SONIUM_QA_THREADS
+# caps the Rayon/OpenBLAS pool inside each case (default 4, caller env and
+# per-bin policy win). Heavies wanting more inner threads: run with e.g.
+# SONIUM_QA_THREADS=32 SONIUM_QA_PARALLELISM=4 just qa-release-critical.
 [group('qa')]
 qa-release-critical:
     #!/usr/bin/env python3
@@ -744,7 +749,11 @@ qa-release-critical:
     subprocess.run(["just", "qa-manifest"], cwd=root, check=True)
     manifest = tomllib.loads((root / "crates/sonium-qa/validation-manifest.toml").read_text())
     cases = [case for case in manifest["case"] if case["tier"] not in {"reference-only", "accelerator-gate"}]
-    parallelism = int(os.environ.get("SONIUM_QA_PARALLELISM", "4"))
+    # Outer width scales with the machine: min(32, cpus // inner_width).
+    # On 128 cores with the default inner width of 4 below, that is 32
+    # concurrent cases. Override with SONIUM_QA_PARALLELISM.
+    default_parallelism = max(4, min(32, (os.cpu_count() or 4) // 4))
+    parallelism = int(os.environ.get("SONIUM_QA_PARALLELISM", str(default_parallelism)))
     if parallelism < 1:
         raise SystemExit("SONIUM_QA_PARALLELISM must be at least 1")
 
@@ -765,6 +774,12 @@ qa-release-critical:
             # overrides for both stack size and Rayon width.
             case_env.setdefault("RUST_MIN_STACK", "33554432")
             case_env.setdefault("RAYON_NUM_THREADS", "2")
+        # Inner width for every case: without this each binary inherits a
+        # full-machine Rayon/OpenBLAS pool. setdefault keeps explicit caller
+        # env and the per-bin policy above authoritative; SONIUM_QA_THREADS
+        # tunes the rest. Keep outer x inner ~= core count.
+        case_env.setdefault("RAYON_NUM_THREADS", os.environ.get("SONIUM_QA_THREADS", "4"))
+        case_env.setdefault("OPENBLAS_NUM_THREADS", os.environ.get("SONIUM_QA_THREADS", "4"))
         result = subprocess.run(
             command,
             cwd=root,

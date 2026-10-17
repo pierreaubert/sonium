@@ -403,7 +403,7 @@ pub fn build_baffled_aperture_mesh(
     // adjacent bands and the sector wrap uses modulo indices), so no
     // coordinate welding pass is needed.
     let mut nodes: Vec<[f64; 3]> = Vec::new();
-    let mut node = |nodes: &mut Vec<[f64; 3]>, point: [f64; 3]| -> usize {
+    let node = |nodes: &mut Vec<[f64; 3]>, point: [f64; 3]| -> usize {
         nodes.push(point);
         nodes.len() - 1
     };
@@ -502,7 +502,7 @@ pub fn build_baffled_aperture_mesh(
             normal = [-normal[0], -normal[1], -normal[2]];
         }
         let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-        if !(length > 0.0) {
+        if length.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return Err(bem("degenerate aperture element".to_owned()));
         }
         let unit = [normal[0] / length, normal[1] / length, normal[2] / length];

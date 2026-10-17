@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Fixed
+
+- Continuous quadratic Quad4 basis ordering restored to the connectivity
+  convention shared with the continuous DOF map and the Galerkin path;
+  the rotated ordering broke shared-edge traces and Mie convergence.
+- Restored the hypersingular basis-gradient (Maue) term in singular
+  integration with its gradient table permuted to the same connectivity
+  ordering. The term is integrated on a dedicated subelement fan
+  anchored at the singular source point; the G, H, and H^T channels
+  keep the historical centre fan. Without the gradient term the
+  weighted hypersingular kernel returns the sign-flipped value for
+  quadratic densities; with the term but a centre fan, off-centre
+  higher-order collocation points corrupted the self-panel integral
+  (Mie error grew under refinement). Measured: weighted kernel exact
+  to 4e-16 (was exactly -1x exact), TBEM Mie 3.09e-3 -> 2.15e-3 for
+  resolutions 2 -> 3 (was 4.25e-3 -> 3.16e-3 without the term).
+
+
 ## 0.5.0
 ### Added — machine-adaptive parallel gates
 

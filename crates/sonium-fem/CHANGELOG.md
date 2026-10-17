@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+
+- Corotational shell force restored to the classic frame-rotation
+  transform; the (dq/du)^T energy-gradient projection double-counted
+  frame spin and degraded the elastica strip benchmark under refinement.
+- Taylor-bar Wolfram golden regenerated for the dissipative bulk-viscosity
+  sign (sigma - q I): the script identity and impact-face resultants now
+  use (szz - q).
+
+
 ## 0.7.0
 ### Added
 

@@ -106,12 +106,12 @@ const TG_STEPS: usize = 10;
 const TG_INTERIOR_MARGIN: f64 = 0.5;
 /// Taylor-Green interior max-velocity-error gate.
 ///
-/// Calibrated 3x over the measured frozen-boundary floor: the interior
+/// Calibrated ~1.5x over the measured frozen-boundary floor: the interior
 /// error sits at 0.0163-0.0167 across mesh (n=64/128) and dt (0.1/0.05)
 /// variations, so it is the frozen-boundary modeling error, not
 /// discretization, and no refinement will reduce it. The gate clears
 /// that floor with margin while still catching solver regressions.
-const TG_MAX_VELOCITY_ERROR: f64 = 0.05;
+const TG_MAX_VELOCITY_ERROR: f64 = 0.025;
 /// Geometric tolerance for boundary DOF location on the unit cavity.
 const CAVITY_GEOM_TOL: f64 = 1e-10;
 /// Relative residual tolerance for each linearized solve.
