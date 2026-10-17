@@ -7,14 +7,14 @@ validated cases, not every runnable QA binary.
 
 ## Summary
 
-- Registered Cargo QA binaries: 987
-- Manifest-backed validation cases: 805
+- Registered Cargo QA binaries: 989
+- Manifest-backed validation cases: 807
 
 | Tier | Cases |
 | --- | ---: |
 | accelerator-gate | 8 |
 | contract-gate | 41 |
-| physics-gate | 393 |
+| physics-gate | 395 |
 | reference-only | 100 |
 | smoke | 157 |
 | solver-gate | 106 |
@@ -611,6 +611,8 @@ validated cases, not every runnable QA binary.
 | roomsim.treatment-optimization.v1 | sim-room | `qa-room-treatment-optimization` | physics-gate | passive boundary-direction validation, exact discrete-adjoint gradients, deterministic frequency lanes, and area-weighted MMA allocation |
 | roomsim.treatment-projection.v1 | sim-room | `qa-room-treatment-projection` | smoke | normalized compact-support panel interpolation and exact transpose gradient pullback |
 | roomsim.treatment-spatial-constraint.v1 | sim-room | `qa-room-treatment-spatial-constraint` | smoke | position-derived deterministic adjacency, pairwise contrast linearization, and typed validation |
+| sim-jlr.paper-tau-parabolic-inlet-shakedown.v1 | sim-jlr | `qa-jlr-paper-tau-parabolic-inlet` | physics-gate | coarse 4.5 mm D3Q19 LBM shakedown at the paper operating point with Smagorinsky LES, central-moment regularised collision, and a parabolic feed-pipe inlet profile |
+| sim-jlr.paper-tau-regularized-shakedown.v1 | sim-jlr | `qa-jlr-paper-tau-regularized` | physics-gate | coarse 4.5 mm D3Q19 LBM shakedown at the paper operating point with Smagorinsky LES and central-moment regularised collision |
 | solvers.adaptive-failure-matrix.v1 | solver-foundations | `qa-solvers-adaptive-failure-matrix` | solver-gate | independent 2x2 zero-operator fixture; GMRES-DR, GCRO-DR, recycled/deflated GMRES, block FGMRES |
 | solvers.amg-checkpoint.v1 | solver-foundations | `qa-solvers-amg-checkpoint` | solver-gate | independent Complex64 host forward/transpose/Hermitian parity, CPU backend restore/apply parity, byte identity, diagnostics, and strict corruption rejection |
 | solvers.amg-diagonal-adjoint.v1 | solver-foundations | `qa-solvers-amg-diagonal-adjoint` | solver-gate | independent Complex64 diagonal-Jacobi AMG exact-adjoint boundary |

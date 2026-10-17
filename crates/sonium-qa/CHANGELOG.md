@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- `qa-jlr-paper-tau-regularized` and `qa-jlr-paper-tau-parabolic-inlet`
+  (cases `sim-jlr.paper-tau-regularized-shakedown.v1` /
+  `sim-jlr.paper-tau-parabolic-inlet-shakedown.v1`, physics-gate,
+  7,200 s timeouts): the 11,111-step JLR paper-tau shakedowns moved
+  here from `cargo test`.
+
 ### Fixed
 
 - QA contract tests recognize the shared rad-gate and #[path] delegation

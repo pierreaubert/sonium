@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed
+
+- The continuous quadratic Quad4 transmission Mie convergence sweep
+  (~48 min) moved from `cargo test` to the QA tier: the test file is
+  now a packet executed by `qa-bem-transmission-continuous-quadratic-quad4-mie-convergence`
+  (case `bem.transmission-continuous-quadratic-quad4-mie-convergence.v1`).
+
 ### Fixed
 
 - Continuous quadratic Quad4 basis ordering restored to the connectivity

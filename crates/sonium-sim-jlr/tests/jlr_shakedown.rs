@@ -1,18 +1,25 @@
 //! Coarse JLR shakedown regression: the circulation loop must form
 //! and stay finite at a coarse grid before any production run.
+//!
+//! The short run below stays a `#[test]`. The two paper-tau runs
+//! (11,111 LBM steps each) are QA-tier cases instead:
+//! `qa-jlr-paper-tau-regularized` and `qa-jlr-paper-tau-parabolic-inlet`
+//! in sonium-qa call the `run_*` functions in this packet.
 
 // Rust guideline compliant 2026-02-21
 
-use sonium_sim_jlr::case::{CaseConfig, OPERATING_POINTS};
+use sonium_sim_jlr::case::OPERATING_POINTS;
 use sonium_sim_jlr::geometry::JlrGeometry;
 use sonium_sim_jlr::lbm::{Cell, Lattice, LatticeConfig, tau_for_viscosity};
 
-#[test]
-fn coarse_jlr_paper_tau_regularized_stays_finite() {
-    // Paper operating regime: tau = 0.500005 with Smagorinsky LES and
-    // the regularised collision. SRT-BGK without regularisation blows
-    // up from round-off in this geometry (plain-cylinder probe), so
-    // this test pins the stabilised configuration.
+/// Paper-tau regularised shakedown run; returns the peak lattice speed.
+///
+/// Paper operating regime: tau = 0.500005 with Smagorinsky LES and
+/// the regularised collision. SRT-BGK without regularisation blows
+/// up from round-off in this geometry (plain-cylinder probe), so
+/// this run pins the stabilised configuration. Panics on the first
+/// non-finite velocity; callers gate the returned peak speed.
+pub fn run_coarse_jlr_paper_tau_regularized() -> f64 {
     let geom = JlrGeometry::default();
     let dx_mm = 4.5;
     let dt_s = 3.6e-5;
@@ -43,14 +50,18 @@ fn coarse_jlr_paper_tau_regularized_stays_finite() {
     }
     assert!(max_u > 0.005, "jet should be flowing, max |u_lb| = {max_u:.4}");
     assert!(max_u < 0.35, "velocity should stay low-Mach, max |u_lb| = {max_u:.4}");
+    max_u
 }
 
-#[test]
-fn coarse_jlr_paper_tau_parabolic_inlet_stays_finite() {
-    // Same regime as the plug-inlet paper-tau test, but with a
-    // parabolic feed-pipe profile: the plug's one-cell wall shear
-    // layer is where the plug variant first blows up (feed-pipe wall
-    // cell, measured), so this pins the stabilised configuration.
+/// Paper-tau parabolic-inlet shakedown run; returns the peak lattice speed.
+///
+/// Same regime as the plug-inlet paper-tau run, but with a
+/// parabolic feed-pipe profile: the plug's one-cell wall shear
+/// layer is where the plug variant first blows up (feed-pipe wall
+/// cell, measured), so this run pins the stabilised configuration.
+/// Panics on the first non-finite velocity; callers gate the
+/// returned peak speed.
+pub fn run_coarse_jlr_paper_tau_parabolic_inlet() -> f64 {
     let geom = JlrGeometry::default();
     let dx_mm = 4.5;
     let dt_s = 3.6e-5;
@@ -97,6 +108,7 @@ fn coarse_jlr_paper_tau_parabolic_inlet_stays_finite() {
     }
     assert!(max_u > 0.005, "jet should be flowing, max |u_lb| = {max_u:.4}");
     assert!(max_u < 0.35, "velocity should stay low-Mach, max |u_lb| = {max_u:.4}");
+    max_u
 }
 
 #[test]
@@ -142,5 +154,5 @@ fn coarse_jlr_short_run_stays_finite() {
     let (_, u_dt) = lat.macroscopic(centre);
     assert!(u_dt[2] < 0.0, "draft tube flow should be downward, got {}", u_dt[2]);
     let _ = Cell::Fluid;
-    let _ = CaseConfig::default();
+    let _ = sonium_sim_jlr::case::CaseConfig::default();
 }

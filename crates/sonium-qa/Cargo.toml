@@ -6020,3 +6020,15 @@ name = "qa-jlr-lbm"
 path = "bin/jlr_lbm_validation.rs"
 test = false
 required-features = ["qa-binaries"]
+
+[[bin]]
+name = "qa-jlr-paper-tau-regularized"
+path = "bin/jlr_paper_tau_regularized.rs"
+test = false
+required-features = ["qa-binaries"]
+
+[[bin]]
+name = "qa-jlr-paper-tau-parabolic-inlet"
+path = "bin/jlr_paper_tau_parabolic_inlet.rs"
+test = false
+required-features = ["qa-binaries"]

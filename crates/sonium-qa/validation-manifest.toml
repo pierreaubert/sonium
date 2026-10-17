@@ -7963,6 +7963,46 @@ required_hardware = "cpu"
 artifacts = "QA_RESULT JSONL continuous-Q2 Quad4 transmission Mie convergence metrics"
 
 [[case]]
+id = "sim-jlr.paper-tau-regularized-shakedown.v1"
+owner = "sim-jlr"
+crate = "sonium-qa"
+bin = "qa-jlr-paper-tau-regularized"
+entry_point = "run_coarse_jlr_paper_tau_regularized"
+method = "coarse 4.5 mm D3Q19 LBM shakedown at the paper operating point with Smagorinsky LES and central-moment regularised collision"
+scalar = "f64"
+dimension = "3-D JLR geometry voxelised at 4.5 mm; 11,111 steps; plug feed inlet; operating point 1"
+reference = "finite stabilised shakedown: jet forms and stays low-Mach at tau = 0.500005 where SRT-BGK blows up"
+reference_checksum = "analytic/invariant:jlr-paper-tau-regularized-v1"
+norm = "all sampled velocities finite over 11,111 steps; peak lattice speed in (0.005, 0.35)"
+tolerance = "peak lattice speed > 0.005 and < 0.35; no non-finite velocity at any sampled step"
+tier = "physics-gate"
+# The 11,111-step LBM shakedown took ~38 min under full-suite load.
+timeout_seconds = 7200
+required_hardware = "cpu"
+features = ["qa-binaries"]
+artifacts = "QA_RESULT JSONL JLR paper-tau regularised shakedown peak-speed metrics"
+
+[[case]]
+id = "sim-jlr.paper-tau-parabolic-inlet-shakedown.v1"
+owner = "sim-jlr"
+crate = "sonium-qa"
+bin = "qa-jlr-paper-tau-parabolic-inlet"
+entry_point = "run_coarse_jlr_paper_tau_parabolic_inlet"
+method = "coarse 4.5 mm D3Q19 LBM shakedown at the paper operating point with Smagorinsky LES, central-moment regularised collision, and a parabolic feed-pipe inlet profile"
+scalar = "f64"
+dimension = "3-D JLR geometry voxelised at 4.5 mm; 11,111 steps; parabolic feed inlet; operating point 1"
+reference = "finite stabilised shakedown: jet forms and stays low-Mach at tau = 0.500005 where SRT-BGK blows up"
+reference_checksum = "analytic/invariant:jlr-paper-tau-parabolic-inlet-v1"
+norm = "all sampled velocities finite over 11,111 steps; peak lattice speed in (0.005, 0.35)"
+tolerance = "peak lattice speed > 0.005 and < 0.35; no non-finite velocity at any sampled step"
+tier = "physics-gate"
+# The 11,111-step LBM shakedown took ~38 min under full-suite load.
+timeout_seconds = 7200
+required_hardware = "cpu"
+features = ["qa-binaries"]
+artifacts = "QA_RESULT JSONL JLR paper-tau parabolic-inlet shakedown peak-speed metrics"
+
+[[case]]
 id = "bem.axisymmetric-ring-mie-convergence.v1"
 owner = "bem"
 crate = "sonium-qa"

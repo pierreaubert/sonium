@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The two paper-tau shakedown runs (11,111 LBM steps each) moved from
+  `cargo test` to the QA tier: `qa-jlr-paper-tau-regularized` and
+  `qa-jlr-paper-tau-parabolic-inlet` in sonium-qa execute the shared
+  packet. The 2,000-step short shakedown stays a test.
+
 ## 0.2.0
 
 ### Changed

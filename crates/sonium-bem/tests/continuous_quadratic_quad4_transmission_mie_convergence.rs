@@ -1,4 +1,7 @@
-//! Independent Mie convergence for continuous quadratic Quad4 transmission.
+//! Independent Mie convergence packet for continuous quadratic Quad4
+//! transmission. Executed by the sonium-qa case
+//! `bem.transmission-continuous-quadratic-quad4-mie-convergence.v1`;
+//! intentionally not a `#[test]` (multi-hour-class Galerkin sweep).
 
 // Rust guideline compliant 2026-02-21
 
@@ -225,31 +228,16 @@ pub fn run_continuous_quadratic_quad4_transmission_mie_convergence()
     }
 }
 
-#[test]
-fn continuous_quadratic_quad4_transmission_converges_to_mie() {
-    let metrics = run_continuous_quadratic_quad4_transmission_mie_convergence();
-    // Measured on the corrected connectivity-ordered basis (release,
-    // 2026-10-17): 1.965e-2 -> 1.358e-2 -> 4.829e-3, ratios 0.691 and
-    // 0.356. The coarse 24-panel level is pre-asymptotic; quadrature
-    // order 3 vs 4 changes the medium error by less than 0.1%, and a
-    // matched-media control reproduces the incident field to 5e-16, so
-    // the bound below is the measured discretization contraction with
-    // headroom, not a reference-accuracy claim.
-    assert!(
-        metrics.medium_error <= 0.72 * metrics.coarse_error
-            && metrics.fine_error <= 0.72 * metrics.medium_error,
-        "Quad4 Mie error does not contract: {:.3e} -> {:.3e} -> {:.3e}",
-        metrics.coarse_error,
-        metrics.medium_error,
-        metrics.fine_error,
-    );
-    assert!(metrics.fine_error <= 0.01);
-    assert!(metrics.coarse_residual <= 1.0e-8);
-    assert!(metrics.medium_residual <= 1.0e-8);
-    assert!(metrics.fine_residual <= 1.0e-8);
-    assert!(metrics.coarse_solution_error <= 1.0e-8);
-    assert!(metrics.medium_solution_error <= 1.0e-8);
-    assert!(metrics.fine_solution_error <= 1.0e-8);
-    assert!(metrics.fine_dofs > metrics.coarse_dofs);
-    assert!(metrics.fine_panels > metrics.coarse_panels);
-}
+// This packet is not a `cargo test` case: the full 2/4/8 Galerkin sweep
+// takes ~48 minutes in release, so it lives in the QA tier (same packet
+// pattern as formulation_equivalence / sphere_reciprocity_passivity).
+// Measured on the corrected connectivity-ordered basis (release,
+// 2026-10-17): 1.965e-2 -> 1.358e-2 -> 4.829e-3, refinement ratios 0.691
+// and 0.356. The coarse 24-panel level is pre-asymptotic; quadrature
+// order 3 vs 4 changes the medium error by less than 0.1%, and a
+// matched-media control reproduces the incident field to 5e-16. The QA
+// case (qa-bem-transmission-continuous-quadratic-quad4-mie-convergence,
+// case bem.transmission-continuous-quadratic-quad4-mie-convergence.v1)
+// enforces the measured contraction bound 0.72 with headroom, plus
+// fine_error <= 0.01, residuals/solution errors <= 1e-8, and increasing
+// DOFs/panels.

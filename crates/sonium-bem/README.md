@@ -135,7 +135,7 @@ default `cargo test -p sonium-bem` gate unless marked nightly.
 | ka 0.25–0.75 (5-pt sweep) | default sphere discretization, constant panels | Burton–Miller | TBEM, H-matrix, SLFMM, MLFMM | scattered power vs Mie ≤ 12%; backscatter parity vs dense ≤ 5e-4 (`sphere_reciprocity_passivity::bem_sphere_frequency_sweep_matches_mie_v1`) |
 | ka 0.5 | default sphere discretization, constant panels | Burton–Miller | TBEM | scattered power vs Mie ≤ 8%; field pattern vs Mie L2 ≤ 15%, pointwise ≤ 25%; reciprocity ≤ 2% (`sphere_reciprocity_passivity`) |
 | ka 0.5 | default sphere discretization, constant panels | regular + Burton–Miller | H-matrix, SLFMM, MLFMM | scattered power vs Mie ≤ 8%; parity vs dense ≤ 1e-4; reciprocity ≤ 2% (`bem_sphere_backend_formulation_matrix_v1`) |
-| convergence series | refined spheres / Quad4 | Burton–Miller, Galerkin–Müller, transmission | TBEM, Galerkin, higher-order | `continuous_quadratic_mie_convergence`, `galerkin_muller_mie_convergence`, `penetrable_sphere_mie_convergence`, `continuous_quadratic_quad4_transmission_mie_convergence` |
+| convergence series | refined spheres / Quad4 | Burton–Miller, Galerkin–Müller, transmission | TBEM, Galerkin, higher-order | `continuous_quadratic_mie_convergence`, `galerkin_muller_mie_convergence`, `penetrable_sphere_mie_convergence` in the test gate; `continuous_quadratic_quad4_transmission_mie_convergence` in the QA tier (case `bem.transmission-continuous-quadratic-quad4-mie-convergence.v1`, ~48 min sweep) |
 | production resolution | 320-element icosphere and above | Burton–Miller | SLFMM, MLFMM | nightly only (`#[ignore]` slow gates, see TESTING.md); same Mie/power checks at higher cost |
 
 Not yet established: time/memory to equal error against an external BEM
