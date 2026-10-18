@@ -80,6 +80,165 @@ where
     merge_element_triplets(element_triplets, n_test, n_trial, total_entries)
 }
 
+/// Reusable CSR sparsity pattern with an element-to-CSR scatter map.
+///
+/// Building the pattern once (unique `(row, col)` pairs per element,
+/// sorted into CSR order) lets repeated assemblies of different forms
+/// or coefficients skip the triplet materialization and the sort inside
+/// `TripletMatrix::to_csr` entirely: element integration runs in
+/// parallel as before, and the scatter is a direct indexed add per
+/// local entry through the precomputed positions.
+pub struct ElementScatter {
+    n_rows: usize,
+    n_cols: usize,
+    row_ptrs: Vec<usize>,
+    col_indices: Vec<usize>,
+    /// CSR position of every local `(test, trial)` entry, grouped by
+    /// element in the same nested order `assemble_element_bilinear`
+    /// emits local entries.
+    positions: Vec<usize>,
+    /// Start of each element's slice in `positions`.
+    element_offsets: Vec<usize>,
+}
+
+impl ElementScatter {
+    /// Builds the shared sparsity pattern for a test/trial space pair.
+    pub fn build<S>(test_space: &S, trial_space: &S, mesh: &Mesh) -> Self
+    where
+        S: FunctionSpace,
+    {
+        let n_rows = test_space.num_global_dofs(mesh);
+        let n_cols = trial_space.num_global_dofs(mesh);
+        let n_elems = mesh.num_elements();
+
+        let mut element_dofs: Vec<(Vec<usize>, Vec<usize>)> = Vec::with_capacity(n_elems);
+        let mut pairs: Vec<(usize, usize)> = Vec::new();
+        for elem_idx in 0..n_elems {
+            let test_dofs = test_space.local_to_global(mesh, elem_idx);
+            let trial_dofs = trial_space.local_to_global(mesh, elem_idx);
+            for &row in &test_dofs {
+                for &col in &trial_dofs {
+                    pairs.push((row, col));
+                }
+            }
+            element_dofs.push((test_dofs, trial_dofs));
+        }
+        pairs.sort_unstable();
+        pairs.dedup();
+
+        let mut row_ptrs = vec![0usize; n_rows + 1];
+        let mut col_indices = Vec::with_capacity(pairs.len());
+        for &(row, col) in &pairs {
+            row_ptrs[row + 1] += 1;
+            col_indices.push(col);
+        }
+        for row in 0..n_rows {
+            row_ptrs[row + 1] += row_ptrs[row];
+        }
+        debug_assert_eq!(col_indices.len(), pairs.len());
+
+        // Map each element's local entries to CSR positions by binary
+        // search inside the row's column range (columns are sorted).
+        let mut positions = Vec::with_capacity(pairs.len() * 2);
+        let mut element_offsets = Vec::with_capacity(n_elems + 1);
+        for (test_dofs, trial_dofs) in &element_dofs {
+            element_offsets.push(positions.len());
+            for &row in test_dofs {
+                let row_range = row_ptrs[row]..row_ptrs[row + 1];
+                for &col in trial_dofs {
+                    let offset = col_indices[row_range.clone()]
+                        .binary_search(&col)
+                        .expect("element entry missing from sparsity pattern");
+                    positions.push(row_range.start + offset);
+                }
+            }
+        }
+        element_offsets.push(positions.len());
+
+        Self {
+            n_rows,
+            n_cols,
+            row_ptrs,
+            col_indices,
+            positions,
+            element_offsets,
+        }
+    }
+
+    /// Number of structural non-zeros in the shared pattern.
+    pub fn nnz(&self) -> usize {
+        self.col_indices.len()
+    }
+
+    /// Assembles a form directly into CSR through the scatter map.
+    pub fn assemble<T, F, S>(
+        &self,
+        form: &F,
+        test_space: &S,
+        trial_space: &S,
+        mesh: &Mesh,
+        quad_order: usize,
+    ) -> sonium_solvers::CsrMatrix<T>
+    where
+        T: Copy + Default + std::ops::AddAssign + Send + Sync + sonium_solvers::ComplexField,
+        F: BilinearForm<T>,
+        S: FunctionSpace,
+    {
+        let mut matrix = sonium_solvers::CsrMatrix::from_raw_parts(
+            self.n_rows,
+            self.n_cols,
+            self.row_ptrs.clone(),
+            self.col_indices.clone(),
+            vec![T::default(); self.nnz()],
+        );
+        self.assemble_into(form, test_space, trial_space, mesh, quad_order, &mut matrix);
+        matrix
+    }
+
+    /// Assembles into an existing CSR matrix with this pattern.
+    ///
+    /// The output's sparsity buffers are reused untouched; only its
+    /// values are zeroed and re-scattered.
+    ///
+    /// # Panics
+    /// Panics when `out` does not carry this scatter's sparsity pattern.
+    pub fn assemble_into<T, F, S>(
+        &self,
+        form: &F,
+        test_space: &S,
+        trial_space: &S,
+        mesh: &Mesh,
+        quad_order: usize,
+        out: &mut sonium_solvers::CsrMatrix<T>,
+    ) where
+        T: Copy + Default + std::ops::AddAssign + Send + Sync + sonium_solvers::ComplexField,
+        F: BilinearForm<T>,
+        S: FunctionSpace,
+    {
+        assert_eq!(out.num_rows, self.n_rows, "scatter row count mismatch");
+        assert_eq!(out.num_cols, self.n_cols, "scatter column count mismatch");
+        assert_eq!(out.row_ptrs, self.row_ptrs, "scatter row pattern mismatch");
+        assert_eq!(
+            out.col_indices, self.col_indices,
+            "scatter column pattern mismatch"
+        );
+        out.values.fill(T::default());
+
+        let element_triplets: Vec<_> =
+            collect_indexed(mesh.num_elements(), ELEMENTS_PER_THREAD, |elem_idx| {
+                assemble_element_bilinear(form, test_space, trial_space, mesh, elem_idx, quad_order)
+            });
+        for (elem_idx, triplets) in element_triplets.iter().enumerate() {
+            let slice =
+                &self.positions[self.element_offsets[elem_idx]..self.element_offsets[elem_idx + 1]];
+            debug_assert_eq!(slice.len(), triplets.len());
+            for (&position, &(_, _, value)) in slice.iter().zip(triplets.iter()) {
+                out.values[position] += value;
+            }
+        }
+    }
+}
+
 /// Assemble a bilinear form that may vary by element.
 ///
 /// This is the assembly seam for staggered material fields: each element gets
@@ -515,6 +674,30 @@ mod tests {
                 "Row {i} sum = {row_sum}, expected ~0"
             );
         }
+    }
+
+    #[test]
+    fn element_scatter_matches_triplet_assembly_and_reuses_pattern() {
+        let mesh = unit_square_triangles(4);
+        let space = H1Space::new(PolynomialDegree::P1);
+        let scatter = ElementScatter::build(&space, &space, &mesh);
+
+        let direct = scatter.assemble(&LaplacianForm, &space, &space, &mesh, 1);
+        let reference = assemble_bilinear(&LaplacianForm, &space, &space, &mesh, 1).to_csr();
+        assert_eq!(direct.row_ptrs, reference.row_ptrs);
+        assert_eq!(direct.col_indices, reference.col_indices);
+        for (actual, expected) in direct.values.iter().zip(reference.values.iter()) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+
+        // Reassembly with a different form reuses the same pattern.
+        let mass = scatter.assemble(&MassForm, &space, &space, &mesh, 2);
+        let mass_reference = assemble_bilinear(&MassForm, &space, &space, &mesh, 2).to_csr();
+        assert_eq!(mass.row_ptrs, direct.row_ptrs);
+        for (actual, expected) in mass.values.iter().zip(mass_reference.values.iter()) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+        assert_eq!(scatter.nnz(), direct.col_indices.len());
     }
 
     #[test]

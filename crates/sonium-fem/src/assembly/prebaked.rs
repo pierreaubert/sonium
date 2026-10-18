@@ -360,49 +360,95 @@ impl<const N: usize> PrebakedAssembler<N> {
         coeffs: &[Complex64; N],
         boundary_coeffs: &HashMap<usize, Complex64>,
     ) -> CsrMatrix<Complex64> {
-        let nnz = self.nnz();
-
-        let values: Vec<Complex64> = collect_indexed(nnz, POINTWISE_VALUES_PER_THREAD, |i| {
-            let mut val = Complex64::new(0.0, 0.0);
-            for (k, coeff) in coeffs.iter().enumerate() {
-                val += *coeff * self.components[k][i];
-            }
-            for (&tag, &coeff) in boundary_coeffs {
-                if let Some(bv) = self.boundary_components.get(&tag) {
-                    val += coeff * bv[i];
-                }
-            }
-            val
-        });
-
-        CsrMatrix::from_raw_parts(
+        let mut out = CsrMatrix::from_raw_parts(
             self.num_rows,
             self.num_rows,
             self.row_ptrs.clone(),
             self.col_indices.clone(),
-            values,
-        )
+            vec![Complex64::new(0.0, 0.0); self.nnz()],
+        );
+        self.assemble_complex_into(coeffs, boundary_coeffs, &mut out);
+        out
+    }
+
+    /// Assemble with complex coefficients into an existing CSR matrix.
+    ///
+    /// See [`Self::assemble_real_into`] for the buffer-reuse contract.
+    ///
+    /// # Panics
+    /// Panics when `out` does not carry this assembler's sparsity pattern.
+    pub fn assemble_complex_into(
+        &self,
+        coeffs: &[Complex64; N],
+        boundary_coeffs: &HashMap<usize, Complex64>,
+        out: &mut CsrMatrix<Complex64>,
+    ) {
+        assert_eq!(out.num_rows, self.num_rows, "prebaked row count mismatch");
+        assert_eq!(
+            out.num_cols, self.num_rows,
+            "prebaked column count mismatch"
+        );
+        assert_eq!(out.row_ptrs, self.row_ptrs, "prebaked row pattern mismatch");
+        assert_eq!(
+            out.col_indices, self.col_indices,
+            "prebaked column pattern mismatch"
+        );
+        let values: Vec<Complex64> =
+            collect_indexed(self.nnz(), POINTWISE_VALUES_PER_THREAD, |i| {
+                let mut val = Complex64::new(0.0, 0.0);
+                for (k, coeff) in coeffs.iter().enumerate() {
+                    val += *coeff * self.components[k][i];
+                }
+                for (&tag, &coeff) in boundary_coeffs {
+                    if let Some(bv) = self.boundary_components.get(&tag) {
+                        val += coeff * bv[i];
+                    }
+                }
+                val
+            });
+        out.values.copy_from_slice(&values);
     }
 
     /// Assemble with real coefficients: `result[i] = sum_k coeffs[k] * component_k[i]`.
     pub fn assemble_real(&self, coeffs: &[f64; N]) -> CsrMatrix<f64> {
-        let nnz = self.nnz();
+        let mut out = CsrMatrix::from_raw_parts(
+            self.num_rows,
+            self.num_rows,
+            self.row_ptrs.clone(),
+            self.col_indices.clone(),
+            vec![0.0; self.nnz()],
+        );
+        self.assemble_real_into(coeffs, &mut out);
+        out
+    }
 
-        let values: Vec<f64> = collect_indexed(nnz, POINTWISE_VALUES_PER_THREAD, |i| {
+    /// Assemble with real coefficients into an existing CSR matrix.
+    ///
+    /// Frequency sweeps reuse the caller's CSR buffers: the shared
+    /// sparsity (`row_ptrs`/`col_indices`) is neither cloned nor
+    /// reallocated, only the values are recomputed in place.
+    ///
+    /// # Panics
+    /// Panics when `out` does not carry this assembler's sparsity pattern.
+    pub fn assemble_real_into(&self, coeffs: &[f64; N], out: &mut CsrMatrix<f64>) {
+        assert_eq!(out.num_rows, self.num_rows, "prebaked row count mismatch");
+        assert_eq!(
+            out.num_cols, self.num_rows,
+            "prebaked column count mismatch"
+        );
+        assert_eq!(out.row_ptrs, self.row_ptrs, "prebaked row pattern mismatch");
+        assert_eq!(
+            out.col_indices, self.col_indices,
+            "prebaked column pattern mismatch"
+        );
+        let values = collect_indexed(self.nnz(), POINTWISE_VALUES_PER_THREAD, |i| {
             let mut val = 0.0;
             for (k, coeff) in coeffs.iter().enumerate() {
                 val += *coeff * self.components[k][i];
             }
             val
         });
-
-        CsrMatrix::from_raw_parts(
-            self.num_rows,
-            self.num_rows,
-            self.row_ptrs.clone(),
-            self.col_indices.clone(),
-            values,
-        )
+        out.values.copy_from_slice(&values);
     }
 
     /// Apply Dirichlet boundary conditions by zeroing rows AND columns of
@@ -470,6 +516,24 @@ mod tests {
         m.push(2, 2, 1.0);
 
         PrebakedAssembler::from_triplets([k, m], &[])
+    }
+
+    #[test]
+    fn assemble_real_into_reuses_csr_buffers() {
+        let assembler = laplacian_3dof();
+        let mut out = assembler.assemble_real(&[1.0, 0.0]);
+        let row_ptr_addr = out.row_ptrs.as_ptr();
+        let col_addr = out.col_indices.as_ptr();
+        let values_addr = out.values.as_ptr();
+
+        assembler.assemble_real_into(&[1.0, 10.0], &mut out);
+        assert_eq!(out.row_ptrs.as_ptr(), row_ptr_addr);
+        assert_eq!(out.col_indices.as_ptr(), col_addr);
+        assert_eq!(out.values.as_ptr(), values_addr);
+        // K + 10*I on the diagonal.
+        let reference = assembler.assemble_real(&[1.0, 10.0]);
+        assert_eq!(out.values, reference.values);
+        assert_eq!(out.values[0], 11.0);
     }
 
     #[test]

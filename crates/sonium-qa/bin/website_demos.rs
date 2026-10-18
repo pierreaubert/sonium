@@ -157,6 +157,82 @@ fn taylor_green_dirichlet(x: f64, y: f64, time: f64, nu: f64) -> [f64; 2] {
     [u, v]
 }
 
+/// Uniform-grid nearest-node locator for moving-source deposition.
+///
+/// Replaces a full mesh scan per source position (three blades times
+/// hundreds of steps over ~69k nodes) with a hashed cell lookup that
+/// expands cell shells until the nearest candidate is provably found.
+struct NearestLocator {
+    positions: Vec<[f64; 3]>,
+    cell_size: f64,
+    cells: std::collections::HashMap<(i64, i64, i64), Vec<usize>>,
+}
+
+impl NearestLocator {
+    fn new(positions: &[[f64; 3]], cell_size: f64) -> Self {
+        let mut cells: std::collections::HashMap<(i64, i64, i64), Vec<usize>> =
+            std::collections::HashMap::new();
+        let locator = Self {
+            positions: positions.to_vec(),
+            cell_size: cell_size.max(1e-12),
+            cells: std::collections::HashMap::new(),
+        };
+        for (index, position) in positions.iter().enumerate() {
+            cells
+                .entry(locator.cell_of(*position))
+                .or_default()
+                .push(index);
+        }
+        Self { cells, ..locator }
+    }
+
+    fn cell_of(&self, point: [f64; 3]) -> (i64, i64, i64) {
+        (
+            (point[0] / self.cell_size).floor() as i64,
+            (point[1] / self.cell_size).floor() as i64,
+            (point[2] / self.cell_size).floor() as i64,
+        )
+    }
+
+    fn nearest(&self, target: [f64; 3]) -> usize {
+        let center = self.cell_of(target);
+        let distance2 = |index: usize| {
+            let p = self.positions[index];
+            (p[0] - target[0]).powi(2) + (p[1] - target[1]).powi(2) + (p[2] - target[2]).powi(2)
+        };
+        let mut best: Option<usize> = None;
+        let mut shell = 0i64;
+        loop {
+            for dx in -shell..=shell {
+                for dy in -shell..=shell {
+                    for dz in -shell..=shell {
+                        if shell > 0 && dx.abs() != shell && dy.abs() != shell && dz.abs() != shell
+                        {
+                            continue;
+                        }
+                        if let Some(indices) =
+                            self.cells
+                                .get(&(center.0 + dx, center.1 + dy, center.2 + dz))
+                        {
+                            for &index in indices {
+                                if best.is_none_or(|b| distance2(index) < distance2(b)) {
+                                    best = Some(index);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Any unsearched node is at least `shell * cell_size` away.
+            let bound = (shell as f64 * self.cell_size).powi(2);
+            if best.is_some_and(|b| distance2(b) <= bound) || shell > 4096 {
+                return best.unwrap_or(0);
+            }
+            shell += 1;
+        }
+    }
+}
+
 /// One damped explicit wave step: `damping * (2p - prev - dt^2 c^2 K p / m + dt^2 f / m)`.
 ///
 /// The sponge factor is applied once to the whole update; `previous` is
@@ -1574,26 +1650,21 @@ fn plate_modes(out_dir: &Path) -> Result<(), String> {
     use sonium_solvers::{LobpcgConfig, lobpcg_generalized_preconditioned};
     use sonium_solvers_core::traits::{LinearOperator, Preconditioner};
 
-    struct DenseOp {
-        rows: usize,
-        cols: usize,
-        data: Vec<f64>,
+    /// Sparse stiffness action: the plate operator stays in CSR
+    /// instead of expanding to a dense n_free^2 buffer whose matvecs
+    /// cost O(n^2) per LOBPCG iteration.
+    struct CsrOp {
+        csr: sonium_solvers::CsrMatrix<f64>,
     }
-    impl LinearOperator<f64> for DenseOp {
+    impl LinearOperator<f64> for CsrOp {
         fn num_rows(&self) -> usize {
-            self.rows
+            self.csr.num_rows
         }
         fn num_cols(&self) -> usize {
-            self.cols
+            self.csr.num_cols
         }
         fn apply_into(&self, x: &[f64], y: &mut [f64]) {
-            for (row, out) in y.iter_mut().enumerate() {
-                *out = self.data[row * self.cols..(row + 1) * self.cols]
-                    .iter()
-                    .zip(x)
-                    .map(|(a, b)| a * b)
-                    .sum();
-            }
+            self.csr.matvec_into_buf(x, y);
         }
         fn apply_transpose_into(&self, x: &[f64], y: &mut [f64]) {
             // The assembled plate stiffness is symmetric.
@@ -1697,7 +1768,7 @@ fn plate_modes(out_dir: &Path) -> Result<(), String> {
             n_free += 1;
         }
     }
-    let mut k_data = vec![0.0f64; n_free * n_free];
+    let mut k_triplets: Vec<(usize, usize, f64)> = Vec::new();
     for element in &elements {
         let ke = element.stiffness_global();
         let mut gdofs = [0usize; 18];
@@ -1716,10 +1787,11 @@ fn plate_modes(out_dir: &Path) -> Result<(), String> {
                 if fj == usize::MAX {
                     continue;
                 }
-                k_data[fi * n_free + fj] += ke[li * 18 + lj];
+                k_triplets.push((fi, fj, ke[li * 18 + lj]));
             }
         }
     }
+    let k_csr = sonium_solvers::CsrMatrix::from_triplets(n_free, n_free, k_triplets);
     let m_free: Vec<f64> = (0..n_dofs)
         .filter(|&dof| free_index[dof] != usize::MAX)
         .map(|dof| masses[dof])
@@ -1727,20 +1799,15 @@ fn plate_modes(out_dir: &Path) -> Result<(), String> {
     if m_free.iter().any(|&m| m <= 0.0 || !m.is_finite()) {
         return Err("plate mass matrix has a non-positive free mass".into());
     }
-    let k_op = DenseOp {
-        rows: n_free,
-        cols: n_free,
-        data: k_data,
-    };
+    let k_diag = k_csr.diagonal();
+    let k_op = CsrOp { csr: k_csr };
     let m_op = DiagOp {
         diag: m_free.clone(),
     };
     let precond = DiagOp {
-        diag: (0..n_free)
-            .map(|i| {
-                let d = k_op.data[i * n_free + i];
-                if d > 0.0 { 1.0 / d } else { 0.0 }
-            })
+        diag: k_diag
+            .iter()
+            .map(|&d| if d > 0.0 { 1.0 / d } else { 0.0 })
             .collect(),
     };
     let config = LobpcgConfig {
@@ -2337,22 +2404,13 @@ fn propeller_noise(out_dir: &Path) -> Result<(), String> {
         })
         .collect();
 
-    let nearest = |target: [f64; 3]| -> usize {
-        mesh.nodes
-            .iter()
-            .enumerate()
-            .min_by(|(_, a), (_, b)| {
-                let da = (a.x - target[0]).powi(2)
-                    + (a.y - target[1]).powi(2)
-                    + (a.z - target[2]).powi(2);
-                let db = (b.x - target[0]).powi(2)
-                    + (b.y - target[1]).powi(2)
-                    + (b.z - target[2]).powi(2);
-                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map(|(index, _)| index)
-            .unwrap_or(0)
-    };
+    let node_positions: Vec<[f64; 3]> = mesh
+        .nodes
+        .iter()
+        .map(|node| [node.x, node.y, node.z])
+        .collect();
+    let locator = NearestLocator::new(&node_positions, lx / 40.0);
+    let nearest = |target: [f64; 3]| locator.nearest(target);
 
     let h = lx / 40.0;
     let dt = 0.45 * h / (c * 3.0f64.sqrt());
@@ -4734,6 +4792,35 @@ mod audit_regression_tests {
         assert!(require_picard_converged(true, 3).is_ok());
         let error = require_picard_converged(false, 3).unwrap_err();
         assert!(error.contains("Picard"), "got: {error}");
+    }
+
+    #[test]
+    fn nearest_locator_matches_brute_force() {
+        let nodes: Vec<[f64; 3]> = (0..500)
+            .map(|i| {
+                let f = i as f64;
+                [
+                    (f * 0.37).sin() * 2.0,
+                    (f * 0.91).cos() * 2.0,
+                    (f * 0.53).sin(),
+                ]
+            })
+            .collect();
+        let locator = NearestLocator::new(&nodes, 0.5);
+        for i in (0..500).step_by(37) {
+            let target = [nodes[i][0] + 0.13, nodes[i][1] - 0.07, nodes[i][2] + 0.05];
+            let expected = nodes
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| {
+                    let da: f64 = a.iter().zip(target).map(|(x, t)| (x - t).powi(2)).sum();
+                    let db: f64 = b.iter().zip(target).map(|(x, t)| (x - t).powi(2)).sum();
+                    da.partial_cmp(&db).unwrap()
+                })
+                .map(|(index, _)| index)
+                .unwrap();
+            assert_eq!(locator.nearest(target), expected, "target {target:?}");
+        }
     }
 
     #[test]

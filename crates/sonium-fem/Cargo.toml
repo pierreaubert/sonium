@@ -77,6 +77,10 @@ name = "ns_shape_opt"
 required-features = ["cli"]
 
 [[bench]]
+name = "perf_matrix"
+harness = false
+
+[[bench]]
 name = "helmholtz_3d_scaling"
 harness = false
 
