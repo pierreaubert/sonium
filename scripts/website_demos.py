@@ -306,7 +306,7 @@ DEMOS: dict[str, DemoSpec] = {
         ),
         field_mode="mach",
         direction="0.04,-0.06,1",
-        distance_factor=3.4,
+        distance_factor=1.3,
         poster_at=0.7,
     ),
     "crush": DemoSpec(

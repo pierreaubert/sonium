@@ -918,13 +918,13 @@ fn spot_check_3d_inlet_pinch() {
     } else {
         SpotCheck3dDevice::Cpu
     };
-    // Smoke-tier fidelity (transfer sanity, not a convergence claim):
-    // the full-fidelity CPU run is hours-scale on this machine.
+    // Settled fidelity for a direction claim (the 32 spc / 2+2 smoke
+    // tier reversed the 2D result and is not settled enough to judge).
     let fidelity = SpotCheck3dFidelity {
         mesh_size_m: 0.02,
-        samples_per_cycle: 32,
-        discarded_cycles: 2,
-        tail_cycles: 2,
+        samples_per_cycle: 64,
+        discarded_cycles: 4,
+        tail_cycles: 4,
         device,
     };
     // Nightly spot-check envelope tops out at 1 V; 5 V diverged.
