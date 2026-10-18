@@ -382,6 +382,42 @@ def convert_slices(spec: DemoSpec, vtu_dir: Path, work: Path, manifest: dict) ->
     return ply_dir
 
 
+def nodal_vorticity_magnitude(surface) -> np.ndarray:
+    """|dv/dx - du/dy| at surface nodes, area-weighted from P1 triangles.
+
+    Deterministic replacement for pyvista's `compute_derivative`, which
+    intermittently returns a zero field on part of the mesh.
+    """
+    points = np.asarray(surface.points, dtype=float)[:, :2]
+    velocity = np.asarray(surface.point_data["velocity"], dtype=float)[:, :2]
+    faces = np.asarray(surface.regular_faces)
+    p0 = points[faces[:, 0]]
+    e1 = points[faces[:, 1]] - p0
+    e2 = points[faces[:, 2]] - p0
+    det = e1[:, 0] * e2[:, 1] - e2[:, 0] * e1[:, 1]
+    valid = np.abs(det) > 0.0
+    det_safe = np.where(valid, det, 1.0)
+    du = velocity[faces[:, 1]] - velocity[faces[:, 0]]
+    dv = velocity[faces[:, 2]] - velocity[faces[:, 0]]
+
+    def grad(component_diff_1: np.ndarray, component_diff_2: np.ndarray) -> tuple:
+        gx = (e2[:, 1] * component_diff_1 - e1[:, 1] * component_diff_2) / det_safe
+        gy = (-e2[:, 0] * component_diff_1 + e1[:, 0] * component_diff_2) / det_safe
+        return gx, gy
+
+    _, du_dy = grad(du[:, 0], dv[:, 0])
+    dv_dx, _ = grad(du[:, 1], dv[:, 1])
+    cell_vorticity = np.where(valid, dv_dx - du_dy, 0.0)
+    weights = 0.5 * np.abs(det)
+    numerator = np.zeros(len(points))
+    denominator = np.zeros(len(points))
+    for corner in range(3):
+        np.add.at(numerator, faces[:, corner], weights * cell_vorticity)
+        np.add.at(denominator, faces[:, corner], weights)
+    nodal = np.where(denominator > 0.0, numerator / np.maximum(denominator, 1e-300), 0.0)
+    return np.abs(nodal)
+
+
 def convert(spec: DemoSpec, vtu_dir: Path, work: Path) -> Path:
     """VTU frames -> vertex-coloured PLY frames (fixed colour range)."""
     import pyvista as pv
@@ -397,9 +433,8 @@ def convert(spec: DemoSpec, vtu_dir: Path, work: Path) -> Path:
     for name in manifest["frames"]:
         mesh = pv.read(vtu_dir / name)
         if spec.field_mode == "vorticity":
-            derived = mesh.compute_derivative(scalars="velocity", vorticity=True)
-            values = np.asarray(derived.point_data["vorticity"])[:, 2]
-            field_values = np.abs(values)
+            surface0 = mesh.extract_surface().triangulate()
+            field_values = nodal_vorticity_magnitude(surface0)
         else:
             field_values = np.asarray(mesh.point_data[spec.field_mode], dtype=float)
         meshes.append(mesh)
@@ -413,8 +448,7 @@ def convert(spec: DemoSpec, vtu_dir: Path, work: Path) -> Path:
         points = np.asarray(surface.points)
         faces = np.asarray(surface.regular_faces)
         if spec.field_mode == "vorticity":
-            derived = surface.compute_derivative(scalars="velocity", vorticity=True)
-            surface_values = np.abs(np.asarray(derived.point_data["vorticity"])[:, 2])
+            surface_values = nodal_vorticity_magnitude(surface)
         else:
             surface_values = np.asarray(surface.point_data[spec.field_mode], dtype=float)
         if spec.signed_field:

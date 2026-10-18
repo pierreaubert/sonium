@@ -3078,8 +3078,8 @@ fn cylinder_wake(out_dir: &Path) -> Result<(), String> {
         mu: nu,
         rho: 1.0,
         use_direct_solver: false,
-        linear_solver_max_iterations: 3000,
-        linear_solver_tolerance: 1e-8,
+        linear_solver_max_iterations: 8000,
+        linear_solver_tolerance: 1e-6,
         linear_solver_cpu_preconditioner: LinearSolverCpuPreconditionerKind::IlutSchur,
         ..Default::default()
     };
@@ -3144,6 +3144,50 @@ fn cylinder_wake(out_dir: &Path) -> Result<(), String> {
         state.velocity_prev[dof] = state.velocity[dof];
     }
 
+    // Optional restart from a saved per-node velocity field (x, y, u, v
+    // little-endian f64 per mesh node, in mesh-node order), used to resume
+    // a long run whose linear solve failed mid-way without discarding the
+    // frames already on disk. The first resumed step runs BDF1 because
+    // the true previous time level is not in the restart file.
+    let restart_step = std::env::var("SONIUM_CYLINDER_RESTART_BIN")
+        .ok()
+        .map(|bin_path| -> Result<usize, String> {
+            let step: usize = std::env::var("SONIUM_CYLINDER_RESTART_STEP")
+                .map_err(|_| "SONIUM_CYLINDER_RESTART_STEP not set".to_string())?
+                .parse()
+                .map_err(|_| "bad SONIUM_CYLINDER_RESTART_STEP".to_string())?;
+            let raw = std::fs::read(&bin_path)
+                .map_err(|e| format!("restart file {bin_path}: {e}"))?;
+            if raw.len() != 32 * n_nodes {
+                return Err(format!(
+                    "restart file has {} bytes, expected {}",
+                    raw.len(),
+                    32 * n_nodes
+                ));
+            }
+            let mut values = vec![0.0f64; 4 * n_nodes];
+            for (i, chunk) in raw.chunks_exact(8).enumerate() {
+                values[i] = f64::from_le_bytes(chunk.try_into().unwrap());
+            }
+            for pair in 0..n_nodes {
+                let node = dof_pair_node[pair];
+                let (x, y) = (values[4 * node], values[4 * node + 1]);
+                let point = mesh.nodes[node];
+                if (point.x - x).abs() > 1e-9 || (point.y - y).abs() > 1e-9 {
+                    return Err(format!("restart point {node} does not match mesh node"));
+                }
+                state.velocity[2 * pair] = values[4 * node + 2];
+                state.velocity[2 * pair + 1] = values[4 * node + 3];
+            }
+            state.velocity_prev = state.velocity.clone();
+            state.pressure = vec![0.0; n_p];
+            state.time = dt * step as f64;
+            state.step = step;
+            Ok(step)
+        })
+        .transpose()?
+        .unwrap_or(0);
+
     let mut frames = Vec::new();
     let mut times = Vec::new();
     let mut max_speed: f64 = 0.0;
@@ -3167,15 +3211,33 @@ fn cylinder_wake(out_dir: &Path) -> Result<(), String> {
         write_frame(out_dir, &format!("frame_{step:04}"), &simple, &fields)
     };
 
-    frames.push(dump(&state, 0, &mut max_speed)?);
-    times.push(0.0);
-    for step in 0..steps {
+    if restart_step == 0 {
+        frames.push(dump(&state, 0, &mut max_speed)?);
+        times.push(0.0);
+    } else {
+        for s in (0..=restart_step).step_by(10) {
+            frames.push(format!("frame_{s:04}.vtu"));
+            times.push(dt * s as f64);
+        }
+        max_speed = state
+            .velocity
+            .chunks(2)
+            .map(|v| (v[0] * v[0] + v[1] * v[1]).sqrt())
+            .fold(0.0f64, f64::max);
+    }
+    let bdf_first = BdfConfig::bdf1(dt, steps);
+    for step in restart_step..steps {
+        let step_config = if step == restart_step && restart_step > 0 {
+            &bdf_first
+        } else {
+            &bdf
+        };
         if !solve_bdf_step_cached(
             &mesh,
             &v_space,
             &p_space,
             &config,
-            &bdf,
+            step_config,
             &mut state,
             &bc,
             &bc_dofs,
