@@ -161,9 +161,113 @@ impl TurbulenceModel {
     }
 }
 
+/// Smagorinsky subgrid-scale eddy viscosity `ν_t = (C_s Δ)² |S|`.
+///
+/// `strain_magnitude` is `|S| = sqrt(2 S:S)` of the resolved velocity
+/// gradient and `filter_width` the local filter width (usually the
+/// cell size). Returns 0 for non-finite or non-positive inputs, so a
+/// caller can add the result unconditionally. Intended for LES of
+/// transient, shear-driven flow (e.g. a breaking slosh wave) where a
+/// RANS closure's time-averaged state does not exist; the caller is
+/// responsible for phase- or region-weighting the result.
+pub fn smagorinsky_eddy_viscosity(cs: f64, filter_width: f64, strain_magnitude: f64) -> f64 {
+    if !cs.is_finite()
+        || !filter_width.is_finite()
+        || !strain_magnitude.is_finite()
+        || cs <= 0.0
+        || filter_width <= 0.0
+        || strain_magnitude < 0.0
+    {
+        return 0.0;
+    }
+    let width = cs * filter_width;
+    width * width * strain_magnitude
+}
+
+/// WALE subgrid-scale eddy viscosity from a velocity-gradient tensor.
+///
+/// `gradient[i][j]` is `∂u_i/∂x_j`. With `g² = g·g`, the traceless
+/// symmetric part `S^d = ½(g² + g²ᵀ) − ⅓ tr(g²) I`, and the strain
+/// tensor `S = ½(g + gᵀ)`, returns
+/// `(C_w Δ)² (S^d:S^d)^{3/2} / ((S:S)^{5/2} + (S^d:S^d)^{5/4})`.
+/// Unlike the Smagorinsky model this vanishes in laminar shear and
+/// needs no wall-damping function, which suits free-surface LES.
+/// Returns 0 for non-finite inputs or a degenerate gradient.
+pub fn wale_eddy_viscosity(cw: f64, filter_width: f64, gradient: [[f64; 3]; 3]) -> f64 {
+    if !cw.is_finite()
+        || !filter_width.is_finite()
+        || cw <= 0.0
+        || filter_width <= 0.0
+        || gradient.iter().flatten().any(|value| !value.is_finite())
+    {
+        return 0.0;
+    }
+    let mut g2 = [[0.0f64; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            g2[i][j] = (0..3).map(|k| gradient[i][k] * gradient[k][j]).sum();
+        }
+    }
+    let trace_g2 = g2[0][0] + g2[1][1] + g2[2][2];
+    let mut sd_contract = 0.0f64;
+    let mut strain_contract = 0.0f64;
+    for i in 0..3 {
+        for j in 0..3 {
+            let sd = 0.5 * (g2[i][j] + g2[j][i]) - if i == j { trace_g2 / 3.0 } else { 0.0 };
+            let strain = 0.5 * (gradient[i][j] + gradient[j][i]);
+            sd_contract += sd * sd;
+            strain_contract += strain * strain;
+        }
+    }
+    if sd_contract <= 0.0 {
+        return 0.0;
+    }
+    let denominator = strain_contract.powf(2.5) + sd_contract.powf(1.25);
+    if !denominator.is_finite() || denominator <= 0.0 {
+        return 0.0;
+    }
+    let width = cw * filter_width;
+    width * width * sd_contract.powf(1.5) / denominator
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn smagorinsky_scales_with_strain_and_width() {
+        // (0.1 * 0.02)^2 * 50 = 2e-4.
+        let nu_t = smagorinsky_eddy_viscosity(0.1, 0.02, 50.0);
+        assert!((nu_t - 2.0e-4).abs() < 1e-12);
+        assert_eq!(smagorinsky_eddy_viscosity(0.1, 0.02, 0.0), 0.0);
+        assert_eq!(smagorinsky_eddy_viscosity(-0.1, 0.02, 50.0), 0.0);
+        assert_eq!(smagorinsky_eddy_viscosity(0.1, 0.02, f64::NAN), 0.0);
+    }
+
+    #[test]
+    fn wale_vanishes_without_gradient_and_scales_linearly() {
+        assert_eq!(wale_eddy_viscosity(0.5, 0.02, [[0.0; 3]; 3]), 0.0);
+        // Pure laminar shear gives exactly zero (the WALE design
+        // property: no eddy viscosity without strain/rotation mix).
+        let mut laminar_shear = [[0.0f64; 3]; 3];
+        laminar_shear[0][1] = 10.0;
+        assert_eq!(wale_eddy_viscosity(0.5, 0.02, laminar_shear), 0.0);
+        // A mixed strain/rotation gradient activates the model.
+        let mut gradient = [[0.0f64; 3]; 3];
+        gradient[0][1] = 10.0;
+        gradient[1][0] = 5.0;
+        let nu_t = wale_eddy_viscosity(0.5, 0.02, gradient);
+        assert!(nu_t.is_finite() && nu_t > 0.0, "WALE mixed nu_t = {nu_t}");
+        // Doubling the gradient doubles nu_t (degree-one homogeneity).
+        gradient[0][1] = 20.0;
+        gradient[1][0] = 10.0;
+        let doubled = wale_eddy_viscosity(0.5, 0.02, gradient);
+        assert!(
+            (doubled / nu_t - 2.0).abs() < 1e-9,
+            "WALE scaling {} -> {doubled}",
+            nu_t
+        );
+    }
 
     #[test]
     fn laminar_returns_mu_unchanged() {

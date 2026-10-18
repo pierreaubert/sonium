@@ -818,3 +818,130 @@ fn tier2_inlet_pinch_verification() {
     );
     assert!(matched1.metrics.health.passed);
 }
+
+/// Third mesh point (0.0075 m) for the inlet-pinch THD convergence
+/// sequence (0.01 m production mesh, 0.005 m fine mesh already on
+/// record), production time fidelity, 5 V equal airflow.
+#[test]
+#[ignore = "Tier-2 mid-mesh winner check; run explicitly in release mode"]
+fn tier2_interior_winner_mid_mesh() {
+    const WINNER: [f64; 3] = [0.5, 0.0, 0.0];
+    let case = PortOptimReferenceCase::default();
+    let context = Tier2EvalContext::from_reference_case(case.clone())
+        .expect("Tier 2 context")
+        .with_mesh_size_m(0.0075)
+        .expect("mid mesh context");
+    let frequency_hz = case.tier2_drive_frequency_hz().expect("drive frequency");
+    let mut fidelity = PortEvalFidelity::from_reference_case(&case);
+    fidelity.snapshot_interval_steps = 42;
+    let drive = PortEvalDrive {
+        voltage_peak_v: 5.0,
+        frequency_hz,
+        second_tone: None,
+    };
+    let straight = interior_profile(&context, [0.0, 0.0, 0.0]).expect("straight");
+    let winner = interior_profile(&context, WINNER).expect("winner");
+    let straight_metrics = context
+        .evaluate(&straight, &drive, &fidelity)
+        .expect("straight mid run")
+        .metrics;
+    let equal_v = context
+        .evaluate(&winner, &drive, &fidelity)
+        .expect("winner mid run")
+        .metrics;
+    let v_matched = 5.0 * straight_metrics.port_flow_rms_m3s / equal_v.port_flow_rms_m3s;
+    let matched = context
+        .evaluate(
+            &winner,
+            &PortEvalDrive {
+                voltage_peak_v: v_matched,
+                frequency_hz,
+                second_tone: None,
+            },
+            &fidelity,
+        )
+        .expect("winner matched mid run")
+        .metrics;
+    eprintln!(
+        "mid-mesh V=5: straight THD={:.3e} sep={:?} | winner THD={:.3e} ({:+.1}%) sep={:?}",
+        straight_metrics.thd_fraction,
+        straight_metrics.separation_fraction,
+        matched.thd_fraction,
+        100.0 * (matched.thd_fraction / straight_metrics.thd_fraction - 1.0),
+        matched.separation_fraction,
+    );
+    assert!(straight_metrics.health.passed && matched.health.passed);
+    assert!(
+        matched.thd_fraction < straight_metrics.thd_fraction,
+        "inlet-pinch winner must stay better on the mid mesh"
+    );
+}
+
+/// 3D round-geometry spot-check: straight versus the inlet-pinch winner
+/// revolved into the real round port (campaign scale), equal airflow.
+/// This is the transfer check out of the 2D slot surrogate; the device
+/// comes from `PORT_3D_DEVICE` (`cuda` only in cuda-feature builds).
+#[test]
+#[ignore = "3D round spot-check; run explicitly in release mode"]
+fn spot_check_3d_inlet_pinch() {
+    use sonium_sim_speaker_modeling::port_flow::{
+        SpotCheck3dDevice, SpotCheck3dFidelity, run_3d_spot_check, spot_drive_frequency_hz,
+        spotcheck_template,
+    };
+    let case = PortOptimReferenceCase::default();
+    let template = spotcheck_template(&case);
+    let straight = template.straight().expect("straight round profile");
+    let winner = SplinePortProfile::from_normalized_flared(
+        5,
+        case.port_length_l_m,
+        case.port_radius_r0_m,
+        0.6 * case.port_radius_r0_m,
+        1.4 * case.port_radius_r0_m,
+        &[0.0, 0.5, 0.0, 0.0, 0.0],
+        ProfileOptions::default(),
+    )
+    .expect("inlet-pinch round profile");
+    let f_target = tuning_frequency_hz(
+        &straight,
+        case.medium(),
+        &sonium_sim_speaker_modeling::port_flow::Duct1dConfig {
+            n_segments: 128,
+            thermoviscous: false,
+            box_volume_m3: case.box_volume_m3,
+        },
+    )
+    .expect("campaign tuning");
+    let frequency_hz = spot_drive_frequency_hz(f_target).expect("spot drive frequency");
+    let device = if std::env::var("PORT_3D_DEVICE").is_ok_and(|v| v == "cuda") {
+        SpotCheck3dDevice::Cuda
+    } else {
+        SpotCheck3dDevice::Cpu
+    };
+    let fidelity = SpotCheck3dFidelity {
+        mesh_size_m: 0.01,
+        samples_per_cycle: 64,
+        discarded_cycles: 4,
+        tail_cycles: 4,
+        device,
+    };
+    let voltage = 5.0_f64;
+    let straight_run = run_3d_spot_check(&case, &straight, voltage, frequency_hz, &fidelity)
+        .expect("straight 3D run");
+    let equal_v_run =
+        run_3d_spot_check(&case, &winner, voltage, frequency_hz, &fidelity).expect("winner 3D run");
+    let v_matched = voltage * straight_run.port_flow_rms_m3s / equal_v_run.port_flow_rms_m3s;
+    let matched_run = run_3d_spot_check(&case, &winner, v_matched, frequency_hz, &fidelity)
+        .expect("winner matched 3D run");
+    let match_pct = 100.0 * (matched_run.port_flow_rms_m3s / straight_run.port_flow_rms_m3s - 1.0);
+    eprintln!(
+        "3D round ({device:?}) f={frequency_hz:.1} Hz: straight THD={:.3e} nodes={} tets={} | \
+         winner THD={:.3e} ({:+.1}%) match={match_pct:+.2}% cap_err={:.2e}",
+        straight_run.thd_fraction,
+        straight_run.mesh_nodes,
+        straight_run.mesh_tetrahedra,
+        matched_run.thd_fraction,
+        100.0 * (matched_run.thd_fraction / straight_run.thd_fraction - 1.0),
+        matched_run.cap_continuity_relative_error,
+    );
+    assert!(match_pct.abs() < 5.0, "3D airflow match {match_pct}%");
+}

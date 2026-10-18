@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::basis::PolynomialDegree;
 use crate::mesh::{ElementType, Mesh};
 use crate::quadrature::QuadratureRule;
-use crate::spaces::dg::{DGSpace, build_interior_facets, element_diameter};
+use crate::spaces::dg::{DGSpace, InteriorFacet, build_interior_facets, element_diameter};
 use crate::spaces::{BasisTabulation, FunctionSpace};
 
 use super::{ConservativeState, IdealGas, ViscosityModel, hllc_flux, rusanov_flux};
@@ -346,6 +346,10 @@ pub struct CompressibleDgOperator<'a> {
     /// computed once by quadrature. At P1 this reproduces the closed-form
     /// simplex inverse the solver used previously.
     mass_inverses: Vec<Vec<f64>>,
+    /// Interior facet list, built once. The residual and the limiter both
+    /// consumed a fresh `build_interior_facets` (a hash-map pass over the
+    /// whole mesh) on every SSPRK3 stage before this cache existed.
+    interior_facets: Vec<InteriorFacet>,
 }
 
 /// Volume quadrature order for the operator at `degree`.
@@ -436,6 +440,7 @@ impl<'a> CompressibleDgOperator<'a> {
             space,
             config,
             mass_inverses,
+            interior_facets: build_interior_facets(mesh),
         })
     }
 
@@ -596,7 +601,7 @@ impl<'a> CompressibleDgOperator<'a> {
         state: &CompressibleDgState,
         residual: &mut [[f64; 5]],
     ) -> Result<(), CompressibleDgError> {
-        for facet in build_interior_facets(self.mesh) {
+        for facet in &self.interior_facets {
             let plus_centroid = element_centroid(self.mesh, facet.elem_plus);
             let minus_centroid = element_centroid(self.mesh, facet.elem_minus);
             let mut normal = facet.normal;
@@ -873,6 +878,7 @@ impl<'a> CompressibleDgSolver<'a> {
             self.operator.config.troubled_cell_relaxation,
             self.operator.config.troubled_cell_threshold,
             self.operator.config.persson_threshold,
+            &self.operator.interior_facets,
         );
         apply_zhang_shu_positivity(
             state,
@@ -1251,6 +1257,7 @@ fn is_troubled_cell(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_characteristic_vertex_limiter(
     mesh: &Mesh,
     state: &mut CompressibleDgState,
@@ -1258,6 +1265,7 @@ fn apply_characteristic_vertex_limiter(
     relaxation: f64,
     threshold: f64,
     persson_threshold: f64,
+    interior_facets: &[InteriorFacet],
 ) {
     let original = state.clone();
     let averages = (0..mesh.num_elements())
@@ -1269,7 +1277,7 @@ fn apply_characteristic_vertex_limiter(
         None
     };
     let mut neighbors: Vec<Vec<(usize, [f64; 3])>> = vec![Vec::new(); mesh.num_elements()];
-    for facet in build_interior_facets(mesh) {
+    for facet in interior_facets {
         let mut normal = facet.normal;
         if dot3(
             normal,
@@ -1956,12 +1964,12 @@ mod tests {
         )
         .unwrap();
         let before = state.clone();
-        apply_characteristic_vertex_limiter(&mesh, &mut state, gas, 0.5, 0.5, f64::INFINITY);
+        apply_characteristic_vertex_limiter(&mesh, &mut state, gas, 0.5, 0.5, f64::INFINITY, &build_interior_facets(&mesh));
         assert_eq!(state, before, "smooth field must not be limited");
         // With the sensor disabled (infinite threshold) the same field IS
         // flattened somewhere: this is the legacy behaviour being gated.
         let mut legacy = before.clone();
-        apply_characteristic_vertex_limiter(&mesh, &mut legacy, gas, 0.5, f64::INFINITY, f64::INFINITY);
+        apply_characteristic_vertex_limiter(&mesh, &mut legacy, gas, 0.5, f64::INFINITY, f64::INFINITY, &build_interior_facets(&mesh));
         assert_ne!(legacy, before, "legacy limiter should alter the ramp");
     }
 
@@ -1986,7 +1994,7 @@ mod tests {
         )
         .unwrap();
         let before = state.clone();
-        apply_characteristic_vertex_limiter(&mesh, &mut state, gas, 0.05, 0.1, f64::INFINITY);
+        apply_characteristic_vertex_limiter(&mesh, &mut state, gas, 0.05, 0.1, f64::INFINITY, &build_interior_facets(&mesh));
         // Find an element whose centroid is far upstream (smooth) and one
         // adjacent to the jump.
         let mut smooth_changed = false;
@@ -2082,6 +2090,7 @@ mod tests {
             0.05,
             0.03,
             -1.0,
+            &build_interior_facets(&mesh),
         );
         assert_eq!(state, before, "smooth quadratic field must not be limited in PP mode");
     }

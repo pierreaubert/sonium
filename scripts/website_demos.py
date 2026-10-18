@@ -238,6 +238,27 @@ DEMOS: dict[str, DemoSpec] = {
         distance_factor=3.4,
         poster_at=0.82,
     ),
+    "sloshing-turbulent": DemoSpec(
+        slug="sloshing-turbulent",
+        title="Sloshing water tank (turbulent)",
+        capability="Two-phase Navier-Stokes + Cahn-Hilliard with WALE LES, CSF surface tension, compressible air, subgrid bubble parcels (BDF2, adaptive dt)",
+        blurb=(
+            "The sloshing tank driven past breaking onset: 250 mm "
+            "amplitude at the first sloshing resonance. The wave "
+            "steepens, plunges, and entrains air. WALE LES eddy "
+            "viscosity replaces the resolved demo's interface-band "
+            "viscosity; surface tension acts on the momentum; the "
+            "air is weakly compressible so roof impact cushions "
+            "instead of spiking; subgrid bubble parcels track "
+            "entrained air below the interface scale. Colour is "
+            "water volume fraction. Companion to the non-breaking "
+            "sloshing-tank demo at 100 mm."
+        ),
+        field_mode="water_fraction",
+        direction="0.04,-0.06,1",
+        distance_factor=3.4,
+        poster_at=0.82,
+    ),
     "cylinder-wake": DemoSpec(
         slug="cylinder-wake",
         title="Cylinder vortex shedding",

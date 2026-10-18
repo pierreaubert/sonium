@@ -2723,17 +2723,17 @@ pub fn channel_with_cylinder_triangles(
 
 /// NACA 0012 airfoil polygon (unit chord, leading edge at origin, chord
 /// along +x), ordered counter-clockwise starting at the trailing edge.
-/// Uses the original finite-thickness trailing edge (last coefficient
-/// -0.1015, trailing-edge thickness 0.0025 chords, closed by a vertical
-/// segment): a sharp trailing-edge point makes Delaunay offset layers
-/// fan into sliver elements behind the trailing edge, where the
-/// expansion collapses the pressure to the positivity floor. Cosine
-/// spacing resolves the leading edge (radius ≈ 0.0159 chords).
+/// Uses the closed trailing edge (last coefficient -0.1036). A
+/// finite-thickness trailing-edge face (0.0025 chords) was tried and
+/// rejected: its face altitude, not the aerodynamics, set the global
+/// explicit time step. The cosine sampling here only defines the shape
+/// polygon for inside/distance tests; mesh seed stations are graded
+/// separately in the generator.
 pub fn naca0012_polygon(n_per_surface: usize) -> Vec<(f64, f64)> {
     let thickness = |x: f64| -> f64 {
         5.0 * 0.12
             * (0.2969 * x.sqrt() - 0.1260 * x - 0.3516 * x * x + 0.2843 * x * x * x
-                - 0.1015 * x * x * x * x)
+                - 0.1036 * x * x * x * x)
     };
     let n = n_per_surface.max(16);
     let station = |i: usize| -> f64 {
@@ -2745,9 +2745,8 @@ pub fn naca0012_polygon(n_per_surface: usize) -> Vec<(f64, f64)> {
         let x = station(i);
         polygon.push((x, thickness(x)));
     }
-    // Lower surface: leading edge back to trailing edge (the polygon
-    // closes with the vertical trailing-edge segment).
-    for i in 1..=n {
+    // Lower surface: leading edge back to trailing edge.
+    for i in 1..n {
         let x = station(i);
         polygon.push((x, -thickness(x)));
     }
@@ -2834,28 +2833,76 @@ pub fn channel_with_airfoil_triangles(
     let background_h = dx.min(dy);
     let clearance = (2.0 * background_h).min(0.3 * chord);
 
-    // Body polygon in physical coordinates.
-    let n_surface = ((chord / (0.35 * background_h)).ceil() as usize).clamp(60, 400);
-    let polygon: Vec<(f64, f64)> = naca0012_polygon(n_surface)
+    // Body polygon in physical coordinates (fine sampling for accurate
+    // inside/distance tests).
+    let polygon: Vec<(f64, f64)> = naca0012_polygon(200)
         .into_iter()
         .map(|(x, y)| (chord_x + chord * x, chord_y + chord * y))
         .collect();
     let body_centroid = (chord_x + 0.4 * chord, chord_y);
 
-    // Outward vertex normals (averaged edge normals, oriented away from
-    // the body centroid).
-    let vertex_normals: Vec<(f64, f64)> = (0..polygon.len())
-        .map(|i| {
-            let prev = polygon[(i + polygon.len() - 1) % polygon.len()];
-            let next = polygon[(i + 1) % polygon.len()];
-            let (ex, ey) = (next.0 - prev.0, next.1 - prev.1);
-            let mut normal = (ey, -ex);
+    // Graded surface seed stations per surface, marched from the leading
+    // edge with geometrically growing spacing. Cosine sampling of the
+    // shape polygon must NOT be used as the seed set: its leading/trailing
+    // edge spacing is orders of magnitude below the wall-normal layer
+    // distance, which produces aspect-ratio slivers whose minimum
+    // altitude (and hence stable time step) collapses.
+    let thickness_at = |x: f64| -> f64 {
+        5.0 * 0.12
+            * (0.2969 * x.sqrt() - 0.1260 * x - 0.3516 * x * x + 0.2843 * x * x * x
+                - 0.1036 * x * x * x * x)
+    };
+    let ds_le = (0.12 * background_h).max(0.004 * chord);
+    let ds_te = 0.5 * background_h;
+    let mut surface_seeds: Vec<(f64, f64, f64)> = Vec::new(); // (x, y, local spacing)
+    for sign in [1.0f64, -1.0] {
+        let mut x = 0.0f64;
+        let mut ds = ds_le;
+        let mut first = true;
+        loop {
+            if sign < 0.0 && first {
+                // Leading-edge point is shared with the upper surface.
+                first = false;
+                x = (x + ds).min(1.0);
+                ds = (ds * 1.18).min(ds_te);
+                continue;
+            }
+            first = false;
+            surface_seeds.push((
+                chord_x + chord * x,
+                chord_y + sign * chord * thickness_at(x),
+                ds * chord,
+            ));
+            if x >= 1.0 {
+                break;
+            }
+            x = (x + ds).min(1.0);
+            ds = (ds * 1.18).min(ds_te);
+        }
+    }
+
+    // Outward normals at seed stations from the fine polygon: use the
+    // analytic surface tangent of the thickness distribution.
+    let seed_normals: Vec<(f64, f64)> = surface_seeds
+        .iter()
+        .map(|&(x, y, _)| {
+            let xc = ((x - chord_x) / chord).clamp(0.0, 1.0);
+            // d(yt)/dx by central difference on the unit-chord shape.
+            let h = 1.0e-4;
+            let slope = (thickness_at((xc + h).min(1.0)) - thickness_at((xc - h).max(0.0)))
+                / ((xc + h).min(1.0) - (xc - h).max(0.0));
+            let sign = if y >= chord_y { 1.0 } else { -1.0 };
+            // Outward normal is (-slope, sign) on BOTH surfaces: the
+            // lower surface is y = -yt(x), whose outward normal also has
+            // x-component -slope. Using -slope*sign instead points the
+            // lower leading-edge offsets downstream into the body and
+            // breaks the nose symmetry (measured as spurious lift).
+            let mut normal: (f64, f64) = (-slope, sign);
             let length = (normal.0.powi(2) + normal.1.powi(2)).sqrt().max(1.0e-300);
             normal.0 /= length;
             normal.1 /= length;
-            let outward = (polygon[i].0 - body_centroid.0) * normal.0
-                + (polygon[i].1 - body_centroid.1) * normal.1;
-            if outward < 0.0 {
+            let outward = (x - body_centroid.0) * normal.0 + (y - body_centroid.1) * normal.1;
+            if outward < 0.0 && (xc - 0.4).abs() > 0.05 {
                 normal = (-normal.0, -normal.1);
             }
             normal
@@ -2875,12 +2922,15 @@ pub fn channel_with_airfoil_triangles(
             }
         }
     }
-    // Body polygon plus three offset near-body layers.
-    points.extend(polygon.iter().copied());
-    for layer in 1..=3 {
-        let offset = clearance * layer as f64 / 3.0;
-        for (point, normal) in polygon.iter().zip(&vertex_normals) {
-            points.push((point.0 + offset * normal.0, point.1 + offset * normal.1));
+    // Surface seeds plus three offset layers whose distance scales with
+    // the local surface spacing (graded, aspect-ratio aware).
+    for (point, _) in surface_seeds.iter().map(|&(x, y, ds)| ((x, y), ds)) {
+        points.push(point);
+    }
+    for growth in [0.75, 2.0, 4.5] {
+        for ((x, y, ds), normal) in surface_seeds.iter().zip(&seed_normals) {
+            let offset = (ds * growth).min(clearance);
+            points.push((x + offset * normal.0, y + offset * normal.1));
         }
     }
 

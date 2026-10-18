@@ -3133,6 +3133,25 @@ features = ["qa-binaries"]
 artifacts = "stdout metrics"
 
 [[case]]
+id = "fem.compressible-airfoil-naca0012.v1"
+owner = "fem"
+crate = "sonium-qa"
+bin = "qa-fem-compressible-airfoil-naca0012"
+entry_point = "CompressibleDgSolver on channel_with_airfoil_triangles"
+method = "explicit P2-DG compressible Euler (HLLC, Persson-Peraire -3.0) past NACA 0012: AGARD inviscid M0.80 alpha 1.25 gate case and M1.0 alpha 0 headline with lift/drag/moment pressure integration"
+scalar = "f64"
+dimension = "2D triangles"
+reference = "AGARD inviscid NACA 0012 M0.80 alpha 1.25 (Cl band 0.05-0.65 gate, wave-drag band 0.002-0.09 gate); isentropic/Rayleigh stagnation ratios 1.524 / 1.893; zero-incidence lift must vanish"
+reference_checksum = "analytic"
+norm = "lift/drag/moment coefficients, stagnation pressure ratio, maximum local Mach, thermodynamic minima"
+tolerance = "AGARD Cl in [0.05, 0.65], Cd in [0.002, 0.09], max Mach > 1.1, stagnation within 15%; Mach 1 |Cl| <= 0.08, Cd in [0.02, 0.60], stagnation within 18%; positive density/pressure"
+tier = "physics-gate"
+timeout_seconds = 900
+required_hardware = "cpu"
+features = ["qa-binaries"]
+artifacts = "stdout metrics; optional VTU (SONIUM_AIRFOIL_WRITE_VTU=1)"
+
+[[case]]
 id = "fem.compressible-cylinder-mach1.v1"
 owner = "fem"
 crate = "sonium-qa"

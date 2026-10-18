@@ -3004,6 +3004,87 @@ struct SloshStats {
     max_speed: f64,
     /// Water volume fraction at the end (conservation check).
     final_water_fraction: f64,
+    /// Largest gauge pressure at the side-wall probes (Pa,
+    /// turbulent model only).
+    max_wall_pressure_pa: f64,
+    /// Largest gauge pressure at the roof probes (Pa,
+    /// turbulent model only).
+    max_roof_pressure_pa: f64,
+    /// Largest simultaneous subgrid bubble-parcel count
+    /// (turbulent model only).
+    peak_bubble_count: usize,
+    /// Subgrid bubble area at the end, per unit depth (m^2,
+    /// turbulent model only).
+    bubble_area_m2: f64,
+}
+
+/// Physics options separating the resolved (published) sloshing
+/// demo from the turbulent breaking-wave demo. The resolved
+/// defaults reproduce the original demo's arithmetic exactly.
+#[derive(Debug, Clone, Copy)]
+struct SloshModel {
+    /// WALE LES eddy viscosity in the per-element channel,
+    /// replacing the artificial interface-band viscosity.
+    les_wale: bool,
+    /// Balanced-gradient CSF surface-tension body force.
+    surface_tension: bool,
+    /// Bulk Rayleigh drag rate on the light phase (1/s).
+    air_drag_per_s: f64,
+    /// Interface-band numerical viscosity coefficient
+    /// (mu_band = coeff * rho_water * dx at fraction 0.5).
+    interface_band_coeff: f64,
+    /// Weakly compressible (barotropic) air through the
+    /// element-density channel, for roof-impact cushioning.
+    compressible_air: bool,
+    /// Sample wall/roof pressure probes into the stats.
+    pressure_probes: bool,
+    /// Lagrangian subgrid bubble parcels (entrained air below
+    /// the resolved interface scale).
+    bubble_parcels: bool,
+    /// Phase-field interface thickness (m).
+    interface_thickness: f64,
+}
+
+impl SloshModel {
+    /// The published demo: no LES, band viscosity on, dragged
+    /// incompressible air, no parcels.
+    fn resolved() -> Self {
+        Self {
+            les_wale: false,
+            surface_tension: false,
+            air_drag_per_s: 25.0,
+            interface_band_coeff: 0.02,
+            compressible_air: false,
+            pressure_probes: false,
+            bubble_parcels: false,
+            interface_thickness: 0.03,
+        }
+    }
+
+    /// The breaking-wave demo: LES, surface tension, nearly
+    /// free compressible air (drag staged down 25 -> 10 1/s; a
+    /// fully undragged air phase grows the documented spurious
+    /// contact-line jet), probes, and subgrid bubbles.
+    fn turbulent() -> Self {
+        Self {
+            les_wale: true,
+            surface_tension: true,
+            air_drag_per_s: 10.0,
+            interface_band_coeff: 0.005,
+            compressible_air: true,
+            pressure_probes: true,
+            bubble_parcels: true,
+            interface_thickness: 0.025,
+        }
+    }
+}
+
+/// One Lagrangian subgrid bubble parcel (turbulent model).
+#[derive(Debug, Clone, Copy)]
+struct BubbleParcel {
+    x: f64,
+    y: f64,
+    radius: f64,
 }
 
 /// Sloshing water tank core: a 2 m x 0.5 m tank filled to 0.20 m is
@@ -3034,6 +3115,24 @@ fn sloshing_core(
     steps: usize,
     out_dir: Option<&Path>,
 ) -> Result<SloshStats, String> {
+    sloshing_core_model(
+        drive_amplitude,
+        nx,
+        ny,
+        steps,
+        out_dir,
+        &SloshModel::resolved(),
+    )
+}
+
+fn sloshing_core_model(
+    drive_amplitude: f64,
+    nx: usize,
+    ny: usize,
+    steps: usize,
+    out_dir: Option<&Path>,
+    model: &SloshModel,
+) -> Result<SloshStats, String> {
     use sonium_fem::assembly::{TripletMatrix, assemble_bilinear};
     use sonium_fem::mesh::generators::rectangular_mesh_triangles;
     use sonium_fem::physics::fluid::phase_field_flow::{
@@ -3041,6 +3140,7 @@ fn sloshing_core(
     };
     use sonium_fem::physics::fluid::stokes::navier_stokes::solve_bdf_step_cached_with_force;
     use sonium_fem::physics::fluid::stokes::time_stepping::AdaptiveStepController;
+    use sonium_fem::physics::fluid::stokes::turbulence::wale_eddy_viscosity;
     use sonium_solvers::SparseLuFactorization;
 
     // Tank and fill (metres): quasi-2D section of the 0.1 m wide box.
@@ -3067,7 +3167,7 @@ fn sloshing_core(
         viscosity_minus: 1.8e-5,
         viscosity_plus: 1.0e-3,
         surface_tension: 0.072,
-        interface_thickness: 0.03,
+        interface_thickness: model.interface_thickness,
         mobility: 5.0e-6,
     }
     .validate()
@@ -3112,6 +3212,25 @@ fn sloshing_core(
     }
     if grid_phase_dof.contains(&usize::MAX) {
         return Err("phase grid mapping is incomplete".into());
+    }
+    // Pressure DOFs mapped onto the same structured grid (probes
+    // and the compressible-air law sample pressure at grid nodes).
+    let pressure_coords = p_space
+        .dof_coordinates(&mesh)
+        .ok_or("P1 pressure space did not expose nodal coordinates")?;
+    let mut grid_pressure_dof = vec![usize::MAX; grid_size];
+    for (dof, point) in pressure_coords.iter().enumerate() {
+        let node = mesh
+            .nodes
+            .iter()
+            .position(|candidate| {
+                (candidate.x - point[0]).abs() < 1e-9 && (candidate.y - point[1]).abs() < 1e-9
+            })
+            .ok_or("pressure dof has no matching mesh node")?;
+        grid_pressure_dof[node_grid[node]] = dof;
+    }
+    if grid_pressure_dof.contains(&usize::MAX) {
+        return Err("pressure grid mapping is incomplete".into());
     }
     let interp = move |grid: &[f64], x: f64, y: f64| -> f64 {
         let fx = (x / dx).clamp(0.0, nx as f64 - 1e-9);
@@ -3257,7 +3376,8 @@ fn sloshing_core(
     let dump = |state: &BdfState,
                 phase: &[f64],
                 frame_index: usize,
-                out: &Path|
+                out: &Path,
+                bubble_field: Option<&[f64]>|
      -> Result<String, String> {
         let vel = nodal_velocity(state);
         let mut velocity = vec![[0.0f64; 3]; n_nodes];
@@ -3272,8 +3392,12 @@ fn sloshing_core(
             speed[node] = (vel[node][0].powi(2) + vel[node][1].powi(2)).sqrt();
             water[node] = ((phase_node[node] + 1.0) / 2.0).clamp(0.0, 1.0);
         }
+        let mut point_scalars = vec![("water_fraction", water), ("speed", speed)];
+        if let Some(field) = bubble_field {
+            point_scalars.push(("bubble_void_fraction", field.to_vec()));
+        }
         let fields = FrameFields {
-            point_scalars: vec![("water_fraction", water), ("speed", speed)],
+            point_scalars,
             point_vectors: vec![("velocity", velocity)],
             cell_scalars: Vec::new(),
         };
@@ -3281,7 +3405,7 @@ fn sloshing_core(
     };
 
     if let Some(out) = out_dir {
-        frames.push(dump(&state, &phase, 0, out)?);
+        frames.push(dump(&state, &phase, 0, out, None)?);
         times.push(0.0);
     }
     let mut frame_index = 1usize;
@@ -3289,6 +3413,10 @@ fn sloshing_core(
         max_eta_deviation: 0.0,
         max_speed: 0.0,
         final_water_fraction: initial_water,
+        max_wall_pressure_pa: 0.0,
+        max_roof_pressure_pa: 0.0,
+        peak_bubble_count: 0,
+        bubble_area_m2: 0.0,
     };
     // Surface elevation at a wall-probe column: first 0.5-fraction
     // crossing scanning up the phase grid.
@@ -3302,6 +3430,16 @@ fn sloshing_core(
         }
         fill_depth
     };
+    // Lagged velocity-gradient components on the grid
+    // ([dudx, dudy, dvdx, dvdy]), for the LES eddy viscosity.
+    let mut prev_grad_comp: [Vec<f64>; 4] = [
+        vec![0.0; grid_size],
+        vec![0.0; grid_size],
+        vec![0.0; grid_size],
+        vec![0.0; grid_size],
+    ];
+    // Subgrid bubble parcels (turbulent model only).
+    let mut parcels: Vec<BubbleParcel> = Vec::new();
     let mut previous_dt: Option<f64> = None;
     let mut step = 0usize;
     while state.time < t_end - 1.0e-12 {
@@ -3353,6 +3491,16 @@ fn sloshing_core(
         // sample the same mollified fraction at the element centroid,
         // and gravity below uses the same density law, so inertia,
         // convection, and body force see one density field.
+        // Lagged gauge-pressure grid for the barotropic air law
+        // (turbulent model; empty for the resolved demo).
+        let pressure_grid: Vec<f64> = if model.compressible_air {
+            grid_pressure_dof
+                .iter()
+                .map(|&dof| state.pressure[dof])
+                .collect()
+        } else {
+            Vec::new()
+        };
         let mut eddy_elements = vec![0.0f64; mesh.num_elements()];
         let mut density_elements = vec![0.0f64; mesh.num_elements()];
         for (index, element) in mesh.elements.iter().enumerate() {
@@ -3370,29 +3518,125 @@ fn sloshing_core(
             // spurious air jets kill the iteration. Water keeps the
             // physical value via the interpolation endpoint.
             let mu_e = 2.0e-4 + (viscosity - 2.0e-4) * fraction;
-            // Interface-band numerical viscosity (peak at fraction
-            // 0.5, zero in bulk): damps the parasitic currents that
-            // otherwise grow at the density jump and kill the
-            // momentum iteration. Scales with mesh size, so it
-            // vanishes under refinement.
-            let band = 4.0 * fraction * (1.0 - fraction);
-            let mu_total = mu_e + band * rho_water * dx * 0.02;
+            let rho_mix = rho_air + (rho_water - rho_air) * fraction;
+            let mu_total = if model.les_wale {
+                // WALE LES eddy viscosity from the lagged velocity
+                // gradient, weighted by the water fraction (the
+                // turbulent phase here is the water; the air stays
+                // laminar). This replaces the interface-band
+                // viscosity of the resolved demo.
+                let (cx, cy) = (cx_e / count, cy_e / count);
+                let gradient = [
+                    [
+                        interp(&prev_grad_comp[0], cx, cy),
+                        interp(&prev_grad_comp[1], cx, cy),
+                        0.0,
+                    ],
+                    [
+                        interp(&prev_grad_comp[2], cx, cy),
+                        interp(&prev_grad_comp[3], cx, cy),
+                        0.0,
+                    ],
+                    [0.0, 0.0, 0.0],
+                ];
+                let nu_t = wale_eddy_viscosity(0.5, (dx * dy).sqrt(), gradient);
+                let band = 4.0 * fraction * (1.0 - fraction);
+                mu_e + rho_mix * fraction * nu_t
+                    + band * rho_water * dx * model.interface_band_coeff
+            } else {
+                // Interface-band numerical viscosity (peak at
+                // fraction 0.5, zero in bulk): damps the parasitic
+                // currents that otherwise grow at the density jump
+                // and kill the momentum iteration. Scales with mesh
+                // size, so it vanishes under refinement.
+                let band = 4.0 * fraction * (1.0 - fraction);
+                mu_e + band * rho_water * dx * model.interface_band_coeff
+            };
             eddy_elements[index] = ((mu_total - 1.8e-5) / rho_water).max(0.0);
-            density_elements[index] = rho_air + (rho_water - rho_air) * fraction;
+            // Barotropic air: rho_air(p) with bulk modulus
+            // effective bulk modulus 5.0e5 Pa (stiffer than the
+            // physical gamma * p_atm for lagged-coupling
+            // stability), lagged pressure, clamped to
+            // [0.7, 1.4] x rest density (turbulent model only).
+            let rho_air_local = if model.compressible_air {
+                let p_c = interp(&pressure_grid, cx_e / count, cy_e / count);
+                (rho_air * (1.0 + p_c / 5.0e5)).clamp(0.7 * rho_air, 1.4 * rho_air)
+            } else {
+                rho_air
+            };
+            density_elements[index] = rho_air_local + (rho_water - rho_air_local) * fraction;
         }
         config.element_density = Some(density_elements);
         config.transported_eddy_viscosity_per_element = Some(eddy_elements);
+        // CSF surface-tension force grids sigma * kappa * grad(alpha)
+        // on the structured grid, from the mollified phase (the
+        // sharp field's grid-scale curvature noise drives parasitic
+        // currents; turbulent model only, curvature capped 0.25/dx).
+        let st_force_grid: Option<(Vec<f64>, Vec<f64>)> = if model.surface_tension {
+            let alpha: Vec<f64> = grid_momentum
+                .iter()
+                .map(|c| ((c + 1.0) / 2.0).clamp(0.0, 1.0))
+                .collect();
+            let idx = |i: usize, j: usize| j * (nx + 1) + i;
+            let (mut nx_g, mut ny_g) = (vec![0.0f64; grid_size], vec![0.0f64; grid_size]);
+            let (mut gx_g, mut gy_g) = (vec![0.0f64; grid_size], vec![0.0f64; grid_size]);
+            for j in 0..=ny {
+                for i in 0..=nx {
+                    let (im, ip) = (i.saturating_sub(1), (i + 1).min(nx));
+                    let (jm, jp) = (j.saturating_sub(1), (j + 1).min(ny));
+                    let dax = (alpha[idx(ip, j)] - alpha[idx(im, j)]) / ((ip - im) as f64 * dx);
+                    let day = (alpha[idx(i, jp)] - alpha[idx(i, jm)]) / ((jp - jm) as f64 * dy);
+                    gx_g[idx(i, j)] = dax;
+                    gy_g[idx(i, j)] = day;
+                    let mag = (dax * dax + day * day).sqrt();
+                    if mag > 1e-12 {
+                        nx_g[idx(i, j)] = dax / mag;
+                        ny_g[idx(i, j)] = day / mag;
+                    }
+                }
+            }
+            let kappa_cap = 0.25 / dx.min(dy);
+            let (mut fx_g, mut fy_g) = (vec![0.0f64; grid_size], vec![0.0f64; grid_size]);
+            for j in 0..=ny {
+                for i in 0..=nx {
+                    let (im, ip) = (i.saturating_sub(1), (i + 1).min(nx));
+                    let (jm, jp) = (j.saturating_sub(1), (j + 1).min(ny));
+                    let kappa = -((nx_g[idx(ip, j)] - nx_g[idx(im, j)]) / ((ip - im) as f64 * dx)
+                        + (ny_g[idx(i, jp)] - ny_g[idx(i, jm)]) / ((jp - jm) as f64 * dy));
+                    let kappa = kappa.clamp(-kappa_cap, kappa_cap);
+                    fx_g[idx(i, j)] = material.surface_tension * kappa * gx_g[idx(i, j)];
+                    fy_g[idx(i, j)] = material.surface_tension * kappa * gy_g[idx(i, j)];
+                }
+            }
+            Some((fx_g, fy_g))
+        } else {
+            None
+        };
         let gx = drive_amplitude * drive_omega * drive_omega * (drive_omega * t_next).sin();
         // Gravity samples the same mollified phase density as the
         // element inertia above (no separate floor), so the body
         // force has no sharp jump at the interface either and the
         // hydrostatic balance sees one density field.
         let force_grid = grid_momentum.clone();
+        let force_pressure = pressure_grid.clone();
+        let force_st = st_force_grid;
+        let compressible = model.compressible_air;
         let force = move |coords: [f64; 3]| -> Vec<f64> {
             let fraction =
                 ((interp(&force_grid, coords[0], coords[1]) + 1.0) / 2.0).clamp(0.0, 1.0);
-            let rho = rho_air + (rho_water - rho_air) * fraction;
-            vec![rho * gx, -rho * gravity, 0.0]
+            let rho_air_local = if compressible {
+                let p_c = interp(&force_pressure, coords[0], coords[1]);
+                (rho_air * (1.0 + p_c / 5.0e5)).clamp(0.7 * rho_air, 1.4 * rho_air)
+            } else {
+                rho_air
+            };
+            let rho = rho_air_local + (rho_water - rho_air_local) * fraction;
+            let mut body = vec![rho * gx, -rho * gravity, 0.0];
+            if let Some((st_x, st_y)) = &force_st {
+                body[0] += interp(st_x, coords[0], coords[1]);
+                body[1] += interp(st_y, coords[0], coords[1]);
+            }
+            body
         };
         // Bulk Rayleigh drag on the light phase: with true air
         // inertia the unstabilised P1-P1 coupling excites a spurious
@@ -3410,10 +3654,11 @@ fn sloshing_core(
         // zero in water, full in air, and zero at rest, so the
         // hydrostatic balance and the water dynamics are untouched.
         let drag_grid = grid_momentum;
+        let drag_rate = model.air_drag_per_s;
         let drag_jac = move |coords: [f64; 3]| -> [[f64; 3]; 3] {
             let fraction = ((interp(&drag_grid, coords[0], coords[1]) + 1.0) / 2.0).clamp(0.0, 1.0);
             let rho = rho_air + (rho_water - rho_air) * fraction;
-            let sigma = rho * 25.0 * (1.0 - fraction);
+            let sigma = rho * drag_rate * (1.0 - fraction);
             [[-sigma, 0.0, 0.0], [0.0, -sigma, 0.0], [0.0, 0.0, -sigma]]
         };
         if !solve_bdf_step_cached_with_force(
@@ -3431,6 +3676,21 @@ fn sloshing_core(
             &workspace,
         ) {
             return Err(format!("sloshing BDF solve failed at step {step}"));
+        }
+
+        // Wall/roof gauge-pressure probes (turbulent model):
+        // side walls at mid-fill height, roof at centre and corner.
+        if model.pressure_probes {
+            let probe = |i: usize, j: usize| state.pressure[grid_pressure_dof[j * (nx + 1) + i]];
+            let j_fill = ((0.5 * fill_depth) / dy).round() as usize;
+            stats.max_wall_pressure_pa = stats
+                .max_wall_pressure_pa
+                .max(probe(1, j_fill))
+                .max(probe(nx - 1, j_fill));
+            stats.max_roof_pressure_pa = stats
+                .max_roof_pressure_pa
+                .max(probe(nx / 2, ny))
+                .max(probe(2, ny));
         }
 
         // Phase step: three Picard passes over the linearized
@@ -3518,6 +3778,132 @@ fn sloshing_core(
         }
         phase = iterate;
 
+        // LES: refresh the lagged velocity-gradient grid from the
+        // fresh velocity (central differences, clamped at edges).
+        if model.les_wale {
+            let idx = |i: usize, j: usize| j * (nx + 1) + i;
+            for j in 0..=ny {
+                for i in 0..=nx {
+                    let (im, ip) = (i.saturating_sub(1), (i + 1).min(nx));
+                    let (jm, jp) = (j.saturating_sub(1), (j + 1).min(ny));
+                    let sx = (ip - im) as f64 * dx;
+                    let sy = (jp - jm) as f64 * dy;
+                    prev_grad_comp[0][idx(i, j)] =
+                        (vel_grid[idx(ip, j)][0] - vel_grid[idx(im, j)][0]) / sx;
+                    prev_grad_comp[1][idx(i, j)] =
+                        (vel_grid[idx(i, jp)][0] - vel_grid[idx(i, jm)][0]) / sy;
+                    prev_grad_comp[2][idx(i, j)] =
+                        (vel_grid[idx(ip, j)][1] - vel_grid[idx(im, j)][1]) / sx;
+                    prev_grad_comp[3][idx(i, j)] =
+                        (vel_grid[idx(i, jp)][1] - vel_grid[idx(i, jm)][1]) / sy;
+                }
+            }
+        }
+
+        // Subgrid bubble parcels: entrained air below the resolved
+        // interface scale. Parcels spawn where a fast, descending
+        // interface band indicates plunging entrainment, advect
+        // with the resolved flow plus a buoyant rise velocity,
+        // break up above 3.5 mm radius, and burst on reaching the
+        // air region. One-way coupled except for the reported
+        // entrained area (no density feedback in this demo model).
+        if model.bubble_parcels {
+            let phase_now = phase_grid(&phase);
+            let vel_at = |x: f64, y: f64| -> [f64; 2] {
+                let fx = (x / dx).clamp(0.0, nx as f64 - 1e-9);
+                let fy = (y / dy).clamp(0.0, ny as f64 - 1e-9);
+                let (i, j) = (fx.floor() as usize, fy.floor() as usize);
+                let (tx, ty) = (fx - i as f64, fy - j as f64);
+                let idx = |i: usize, j: usize| j * (nx + 1) + i;
+                [
+                    vel_grid[idx(i, j)][0] * (1.0 - tx) * (1.0 - ty)
+                        + vel_grid[idx(i + 1, j)][0] * tx * (1.0 - ty)
+                        + vel_grid[idx(i, j + 1)][0] * (1.0 - tx) * ty
+                        + vel_grid[idx(i + 1, j + 1)][0] * tx * ty,
+                    vel_grid[idx(i, j)][1] * (1.0 - tx) * (1.0 - ty)
+                        + vel_grid[idx(i + 1, j)][1] * tx * (1.0 - ty)
+                        + vel_grid[idx(i, j + 1)][1] * (1.0 - tx) * ty
+                        + vel_grid[idx(i + 1, j + 1)][1] * tx * ty,
+                ]
+            };
+            let mut spawned = 0usize;
+            for (index, element) in mesh.elements.iter().enumerate() {
+                if spawned >= 6 || parcels.len() >= 500 {
+                    break;
+                }
+                let (mut cx_e, mut cy_e) = (0.0, 0.0);
+                for &node in &element.nodes {
+                    cx_e += mesh.nodes[node].x;
+                    cy_e += mesh.nodes[node].y;
+                }
+                let count = element.nodes.len() as f64;
+                let (cx, cy) = (cx_e / count, cy_e / count);
+                let fraction = ((interp(&phase_now, cx, cy) + 1.0) / 2.0).clamp(0.0, 1.0);
+                let v = vel_at(cx, cy);
+                let speed = (v[0] * v[0] + v[1] * v[1]).sqrt();
+                // Thresholds calibrated on the frame data:
+                // interface-band speeds stay near 1 m/s even when
+                // the bulk peaks at 4 m/s, so entrainment is keyed
+                // to a fast descending band, not the bulk peak.
+                if (0.30..=0.70).contains(&fraction) && speed > 0.6 && v[1] < -0.15 {
+                    parcels.push(BubbleParcel {
+                        x: cx,
+                        y: cy,
+                        radius: 0.0015 + ((index * 37) % 10) as f64 * 0.0001,
+                    });
+                    spawned += 1;
+                }
+            }
+            let mut next: Vec<BubbleParcel> = Vec::with_capacity(parcels.len());
+            for parcel in &parcels {
+                let v = vel_at(parcel.x, parcel.y);
+                let rise = (1.5 * (gravity * parcel.radius).sqrt()).min(0.35);
+                let moved = BubbleParcel {
+                    x: (parcel.x + v[0] * dt).clamp(0.0, tank_l),
+                    y: (parcel.y + (v[1] + rise) * dt).clamp(0.0, tank_h),
+                    radius: parcel.radius,
+                };
+                let fraction_here =
+                    ((interp(&phase_now, moved.x, moved.y) + 1.0) / 2.0).clamp(0.0, 1.0);
+                if fraction_here < 0.35 {
+                    continue;
+                }
+                if moved.radius > 0.0035 {
+                    let split_radius = moved.radius * 0.7937;
+                    next.push(BubbleParcel {
+                        x: (moved.x - moved.radius * 0.5).max(0.0),
+                        radius: split_radius,
+                        ..moved
+                    });
+                    next.push(BubbleParcel {
+                        x: (moved.x + moved.radius * 0.5).min(tank_l),
+                        radius: split_radius,
+                        ..moved
+                    });
+                } else {
+                    next.push(moved);
+                }
+            }
+            parcels = next;
+            stats.peak_bubble_count = stats.peak_bubble_count.max(parcels.len());
+            stats.bubble_area_m2 = if parcels.is_empty() {
+                0.0
+            } else {
+                parcels
+                    .iter()
+                    .map(|p| std::f64::consts::PI * p.radius * p.radius)
+                    .sum()
+            };
+            if (step + 1) % 200 == 0 {
+                println!(
+                    "sloshing-turbulent: step {}, t {t_next:.2} s, parcels {}, bubble area {:.3e} m^2",
+                    step + 1,
+                    parcels.len(),
+                    stats.bubble_area_m2,
+                );
+            }
+        }
+
         // Adapt the next step to the fresh peak speed (vel_node is
         // this step's post-solve field, already used by the phase
         // step above), and record the accepted step size so the next
@@ -3559,7 +3945,26 @@ fn sloshing_core(
                     .fold(0.0f64, f64::max),
             );
             if let Some(out) = out_dir {
-                frames.push(dump(&state, &phase, frame_index, out)?);
+                // Nodal subgrid void fraction from the parcels
+                // (turbulent model; empty field otherwise).
+                let bubble_field: Option<Vec<f64>> = if model.bubble_parcels {
+                    let mut grid_field = vec![0.0f64; grid_size];
+                    for parcel in &parcels {
+                        let i = (parcel.x / dx).round() as usize;
+                        let j = (parcel.y / dy).round() as usize;
+                        let g = j.min(ny) * (nx + 1) + i.min(nx);
+                        grid_field[g] +=
+                            std::f64::consts::PI * parcel.radius * parcel.radius;
+                    }
+                    let mut nodal = vec![0.0f64; n_nodes];
+                    for node in 0..n_nodes {
+                        nodal[node] = (grid_field[node_grid[node]] / (dx * dy)).clamp(0.0, 0.5);
+                    }
+                    Some(nodal)
+                } else {
+                    None
+                };
+                frames.push(dump(&state, &phase, frame_index, out, bubble_field.as_deref())?);
                 times.push(t_next);
                 frame_index += 1;
             }
@@ -3571,16 +3976,22 @@ fn sloshing_core(
         "sloshing: {step} adaptive steps to {t_end:.2} s at {drive_frequency:.3} Hz, amplitude {drive_amplitude:.3} m, max eta deviation {:.3} m, max speed {:.3} m/s, water {:.4} (initial {initial_water:.4})",
         stats.max_eta_deviation, stats.max_speed, stats.final_water_fraction,
     );
+    if model.pressure_probes || model.bubble_parcels {
+        println!(
+            "sloshing-turbulent: max wall pressure {:.1} Pa, max roof pressure {:.1} Pa, peak bubble parcels {}, final bubble area {:.3e} m^2 per unit depth",
+            stats.max_wall_pressure_pa,
+            stats.max_roof_pressure_pa,
+            stats.peak_bubble_count,
+            stats.bubble_area_m2,
+        );
+    }
     if let Some(out) = out_dir {
-        write_manifest(
-            out,
-            "sloshing-tank",
-            "Sloshing water tank",
-            &frames,
-            &times,
-            "water_fraction",
-            (0.0, 1.0),
-        )?;
+        let (slug, title) = if model.bubble_parcels {
+            ("sloshing-turbulent", "Sloshing water tank (turbulent)")
+        } else {
+            ("sloshing-tank", "Sloshing water tank")
+        };
+        write_manifest(out, slug, title, &frames, &times, "water_fraction", (0.0, 1.0))?;
     }
     Ok(stats)
 }
@@ -3589,6 +4000,24 @@ fn sloshing_core(
 /// (200 x 50), five drive periods.
 fn sloshing_tank(out_dir: &Path) -> Result<(), String> {
     sloshing_core(0.10, 200, 50, 1160, Some(out_dir))?;
+    Ok(())
+}
+
+/// Turbulent breaking-wave movie: 250 mm amplitude (past the
+/// breaking onset found by the sweep) at 120 x 30, four drive
+/// periods, with the turbulent model (WALE LES, CSF surface
+/// tension, free compressible air, pressure probes, subgrid
+/// bubble parcels). The resolved `sloshing-tank` demo above is
+/// unchanged and remains the non-breaking reference.
+fn sloshing_turbulent(out_dir: &Path) -> Result<(), String> {
+    sloshing_core_model(
+        0.25,
+        120,
+        30,
+        928,
+        Some(out_dir),
+        &SloshModel::turbulent(),
+    )?;
     Ok(())
 }
 
@@ -4171,6 +4600,7 @@ fn main() {
         "thermal-spreading" => thermal_spreading(&out_dir),
         "melting-plate" => melting_plate(&out_dir),
         "sloshing-tank" => sloshing_tank(&out_dir),
+        "sloshing-turbulent" => sloshing_turbulent(&out_dir),
         "sloshing-sweep" => sloshing_sweep(&out_dir),
         "cylinder-wake" => cylinder_wake(&out_dir),
         "cylinder-mach1" => cylinder_mach1(&out_dir),
