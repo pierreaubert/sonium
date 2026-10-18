@@ -215,6 +215,117 @@ pub fn rusanov_flux(
     flux
 }
 
+/// HLLC numerical flux (Toro, *Riemann Solvers*, Ch. 10) with Einfeldt
+/// wave-speed estimates. Restores the contact wave that the Rusanov flux
+/// dissipates at the sound speed. Returns `None` — signalling a Rusanov
+/// fallback — whenever a wave-speed denominator degenerates or a
+/// star-region density/pressure would be nonphysical.
+pub fn hllc_flux(
+    left: ConservativeState,
+    right: ConservativeState,
+    gas: IdealGas,
+    normal: [f64; 3],
+) -> Option<[f64; 5]> {
+    // (density, velocity, normal velocity, pressure, sound speed, enthalpy)
+    let unpack = |state: ConservativeState| {
+        let velocity = state.velocity();
+        let pressure = state.pressure(gas);
+        let un: f64 = velocity
+            .iter()
+            .zip(normal.iter())
+            .map(|(u, n)| u * n)
+            .sum();
+        let sound = gas.speed_of_sound(pressure, state.density);
+        let enthalpy = (state.total_energy + pressure) / state.density;
+        (state.density, velocity, un, pressure, sound, enthalpy)
+    };
+    let (rho_l, u_l, un_l, p_l, c_l, h_l) = unpack(left);
+    let (rho_r, u_r, un_r, p_r, c_r, h_r) = unpack(right);
+    if !rho_l.is_finite() || !rho_r.is_finite() || rho_l <= 0.0 || rho_r <= 0.0 {
+        return None;
+    }
+    // Einfeldt (Roe-averaged) wave-speed estimates.
+    let (sqrt_l, sqrt_r) = (rho_l.sqrt(), rho_r.sqrt());
+    let denom = sqrt_l + sqrt_r;
+    let u_tilde: [f64; 3] = std::array::from_fn(|i| (sqrt_l * u_l[i] + sqrt_r * u_r[i]) / denom);
+    let h_tilde = (sqrt_l * h_l + sqrt_r * h_r) / denom;
+    let kinetic_tilde: f64 = u_tilde.iter().map(|u| u * u).sum::<f64>() * 0.5;
+    let c_tilde_sq = (gas.gamma - 1.0) * (h_tilde - kinetic_tilde);
+    if !c_tilde_sq.is_finite() || c_tilde_sq <= 0.0 {
+        return None;
+    }
+    let c_tilde = c_tilde_sq.sqrt();
+    let un_tilde: f64 = u_tilde
+        .iter()
+        .zip(normal.iter())
+        .map(|(u, n)| u * n)
+        .sum();
+    let s_l = (un_l - c_l).min(un_tilde - c_tilde);
+    let s_r = (un_r + c_r).max(un_tilde + c_tilde);
+    // Contact (middle) wave speed.
+    let numerator = p_r - p_l + rho_l * un_l * (s_l - un_l) - rho_r * un_r * (s_r - un_r);
+    let denominator = rho_l * (s_l - un_l) - rho_r * (s_r - un_r);
+    if denominator.abs() < 1.0e-300 {
+        return None;
+    }
+    let s_m = numerator / denominator;
+    let star_state = |state: ConservativeState,
+                      rho: f64,
+                      velocity: [f64; 3],
+                      un: f64,
+                      pressure: f64,
+                      s_k: f64|
+     -> Option<ConservativeState> {
+        let factor = rho * (s_k - un) / (s_k - s_m);
+        if !factor.is_finite() || factor <= 0.0 {
+            return None;
+        }
+        let p_star = pressure + rho * (s_k - un) * (s_m - un);
+        if !p_star.is_finite() || p_star <= 0.0 {
+            return None;
+        }
+        let mut velocity_star = velocity;
+        for (component, n) in velocity_star.iter_mut().zip(normal.iter()) {
+            *component += (s_m - un) * n;
+        }
+        let energy_star = factor
+            * (state.total_energy / rho
+                + (s_m - un) * (s_m + pressure / (rho * (s_k - un))));
+        let candidate = ConservativeState {
+            density: factor,
+            momentum: [
+                factor * velocity_star[0],
+                factor * velocity_star[1],
+                factor * velocity_star[2],
+            ],
+            total_energy: energy_star,
+        };
+        if candidate.is_physical(gas, 1.0e-14, 1.0e-14) {
+            Some(candidate)
+        } else {
+            None
+        }
+    };
+    let flux_l = left.euler_flux(gas, normal);
+    let flux_r = right.euler_flux(gas, normal);
+    let add_scaled_flux = |flux: [f64; 5], star: ConservativeState, base: ConservativeState, s: f64| {
+        let star = star.as_array();
+        let base = base.as_array();
+        std::array::from_fn(|i| flux[i] + s * (star[i] - base[i]))
+    };
+    if s_l >= 0.0 {
+        Some(flux_l)
+    } else if s_m >= 0.0 {
+        let star = star_state(left, rho_l, u_l, un_l, p_l, s_l)?;
+        Some(add_scaled_flux(flux_l, star, left, s_l))
+    } else if s_r >= 0.0 {
+        let star = star_state(right, rho_r, u_r, un_r, p_r, s_r)?;
+        Some(add_scaled_flux(flux_r, star, right, s_r))
+    } else {
+        Some(flux_r)
+    }
+}
+
 pub fn local_lax_friedrichs_speed(
     left: ConservativeState,
     right: ConservativeState,
@@ -236,6 +347,49 @@ pub fn sod_shock_tube_states(gas: IdealGas) -> (ConservativeState, ConservativeS
         ConservativeState::from_primitive(1.0, [0.0, 0.0, 0.0], 1.0, gas),
         ConservativeState::from_primitive(0.125, [0.0, 0.0, 0.0], 0.1, gas),
     )
+}
+
+#[cfg(test)]
+mod hllc_tests {
+    use super::*;
+
+    #[test]
+    fn hllc_matches_physical_flux_for_equal_states() {
+        let gas = IdealGas::AIR;
+        let state = ConservativeState::from_primitive(1.2, [30.0, -5.0, 2.0], 101_325.0, gas);
+        let numerical = hllc_flux(state, state, gas, [1.0, 0.0, 0.0]).expect("HLLC flux");
+        let physical = state.euler_flux(gas, [1.0, 0.0, 0.0]);
+        for i in 0..5 {
+            assert!(
+                (numerical[i] - physical[i]).abs() < 1.0e-6,
+                "component {i}: {} vs {}",
+                numerical[i],
+                physical[i]
+            );
+        }
+    }
+
+    #[test]
+    fn hllc_preserves_stationary_contact_where_rusanov_does_not() {
+        let gas = IdealGas {
+            gamma: 1.4,
+            gas_constant: 1.0,
+        };
+        let left = ConservativeState::from_primitive(1.0, [0.0; 3], 1.0, gas);
+        let right = ConservativeState::from_primitive(0.4, [0.0; 3], 1.0, gas);
+        let hllc = hllc_flux(left, right, gas, [1.0, 0.0, 0.0]).expect("HLLC contact flux");
+        let rusanov = rusanov_flux(left, right, gas, [1.0, 0.0, 0.0]);
+        assert!(
+            hllc[0].abs() < 1.0e-12,
+            "stationary contact must have zero HLLC mass flux, got {}",
+            hllc[0]
+        );
+        assert!(
+            rusanov[0].abs() > 0.1,
+            "Rusanov should visibly diffuse the same contact, got {}",
+            rusanov[0]
+        );
+    }
 }
 
 #[cfg(test)]

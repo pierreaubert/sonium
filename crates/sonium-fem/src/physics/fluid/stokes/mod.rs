@@ -19,6 +19,7 @@
 //!
 //! Uses Taylor-Hood P2-P1 elements (inf-sup stable, no stabilization needed).
 
+pub mod drag_shape_opt;
 pub mod forms;
 pub mod materials;
 pub mod navier_stokes;

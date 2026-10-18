@@ -286,8 +286,10 @@ pub struct NavierStokesConfig {
     /// reference density for stabilisation and closures. The values
     /// are lagged for the current segregated step (e.g. interpolated
     /// from a phase field) and are not differentiated by the Newton
-    /// tangent APIs. `None` (default) preserves the legacy behaviour
-    /// exactly.
+    /// tangent APIs; they may change on every step, and the cached
+    /// BDF matrix re-scatters them so the mass block always matches
+    /// the field used for the step's right-hand side. `None`
+    /// (default) preserves the legacy behaviour exactly.
     pub element_density: Option<Vec<f64>>,
     /// Compute backend used for the per-iteration linear solve. `Cpu`
     /// (default) keeps the legacy in-house BLAS-1 + ILU path. `Cuda` and `Metal`
@@ -662,6 +664,197 @@ mod element_density_tests {
         assert!(
             run_two_density_case(true),
             "element-density BDF case failed"
+        );
+    }
+
+    #[test]
+    fn element_density_time_varying_field_bdf_steps_run() {
+        // The density field flips halves halfway through the run, as
+        // it does every step when an interface sweeps the mesh. The
+        // BDF mass block must follow the current field; a mass block
+        // frozen at the first step leaves matrix and BDF right-hand
+        // side inconsistent and the iteration diverges.
+        use crate::boundary::locate_dofs_geometrical;
+        use crate::physics::fluid::stokes::time_stepping::{BdfConfig, BdfState};
+        use crate::physics::fluid::stokes::workspace::BdfWorkspace;
+        use crate::spaces::FunctionSpace;
+
+        let mesh = crate::mesh::generators::rectangular_mesh_triangles(0.0, 1.0, 0.0, 1.0, 8, 8);
+        let v_space = crate::spaces::VectorH1Space::new(crate::basis::PolynomialDegree::P1, 2);
+        let p_space = crate::spaces::H1Space::new(crate::basis::PolynomialDegree::P1);
+        let n_v = v_space.num_global_dofs(&mesh);
+        let n_p = p_space.num_global_dofs(&mesh);
+        let density_field = |flipped: bool| -> Vec<f64> {
+            mesh.elements
+                .iter()
+                .map(|element| {
+                    let cx = element
+                        .nodes
+                        .iter()
+                        .map(|&node| mesh.nodes[node].x)
+                        .sum::<f64>()
+                        / element.nodes.len() as f64;
+                    let heavy_left = (cx < 0.5) != flipped;
+                    if heavy_left { 998.0 } else { 1.2 }
+                })
+                .collect()
+        };
+        let mut config = NavierStokesConfig {
+            mu: 1.0e-3,
+            rho: 1000.0,
+            use_direct_solver: false,
+            linear_solver_max_iterations: 3000,
+            linear_solver_tolerance: 1e-8,
+            linear_solver_cpu_preconditioner:
+                crate::backend_selection::LinearSolverCpuPreconditionerKind::IlutSchur,
+            element_density: Some(density_field(false)),
+            ..Default::default()
+        };
+        let bc_dofs = locate_dofs_geometrical(&mesh, &v_space, |x, y, _z| {
+            x < 1e-9 || (1.0 - x) < 1e-9 || y < 1e-9 || (1.0 - y) < 1e-9
+        });
+        let bc = |_x: f64, _y: f64, _z: f64| vec![0.0, 0.0];
+        let bdf = BdfConfig::bdf2(0.01, 20);
+        let mut workspace = BdfWorkspace::new(&mesh, &v_space, &p_space);
+        workspace.set_pressure_gauge(0, 0.0);
+        let mut state = BdfState::from_rest(n_v, n_p);
+        for step in 0..20 {
+            if step == 10 {
+                config.element_density = Some(density_field(true));
+            }
+            assert!(
+                solve_bdf_step_cached_with_force(
+                    &mesh,
+                    &v_space,
+                    &p_space,
+                    &config,
+                    &bdf,
+                    &mut state,
+                    &bc,
+                    &bc_dofs,
+                    &[],
+                    |_coords: [f64; 3]| vec![0.0, -1.0, 0.0],
+                    |_| [[0.0; 3]; 3],
+                    &workspace,
+                ),
+                "time-varying density BDF step {step} failed"
+            );
+        }
+        assert!(
+            state
+                .velocity
+                .iter()
+                .all(|v| v.is_finite() && v.abs() < 10.0),
+            "time-varying density velocity must stay bounded"
+        );
+    }
+
+    #[test]
+    fn element_density_hydrostatic_state_stays_quiet() {
+        // Flat interface at rest under gravity with the full
+        // air/water density contrast: the exact solution is u = 0
+        // forever, so any velocity is a spurious current. The
+        // discrete hydrostatic state must keep them negligible, and
+        // every step must solve (the Schur-preconditioned Krylov
+        // handles the density-contrast saddle system; plain ILU
+        // stagnates on it).
+        use crate::boundary::locate_dofs_geometrical;
+        use crate::physics::fluid::stokes::time_stepping::{BdfConfig, BdfState};
+        use crate::physics::fluid::stokes::workspace::BdfWorkspace;
+        use crate::spaces::FunctionSpace;
+
+        let (lx, ly) = (2.0f64, 0.5f64);
+        let mesh = crate::mesh::generators::rectangular_mesh_triangles(0.0, lx, 0.0, ly, 100, 25);
+        let v_space = crate::spaces::VectorH1Space::new(crate::basis::PolynomialDegree::P1, 2);
+        let p_space = crate::spaces::H1Space::new(crate::basis::PolynomialDegree::P1);
+        let n_v = v_space.num_global_dofs(&mesh);
+        let n_p = p_space.num_global_dofs(&mesh);
+        fn fraction_of_y(y: f64) -> f64 {
+            0.5 * (1.0 + ((0.20 - y) / 0.04).tanh())
+        }
+        fn rho_of_y(y: f64) -> f64 {
+            1.2 + (998.0 - 1.2) * fraction_of_y(y).clamp(0.0, 1.0)
+        }
+        // Demo-like transported viscosity: air floor 2e-4, water
+        // 1e-3, plus the interface-band numerical viscosity.
+        let eddy: Vec<f64> = mesh
+            .elements
+            .iter()
+            .map(|element| {
+                let cy = element
+                    .nodes
+                    .iter()
+                    .map(|&node| mesh.nodes[node].y)
+                    .sum::<f64>()
+                    / element.nodes.len() as f64;
+                let fraction = fraction_of_y(cy);
+                let mu_e = 2.0e-4 + (1.0e-3 - 2.0e-4) * fraction;
+                let band = 4.0 * fraction * (1.0 - fraction);
+                let mu_total = mu_e + band * 998.0 * 0.02 * 0.02;
+                ((mu_total - 1.8e-5) / 998.0).max(0.0)
+            })
+            .collect();
+        let config = NavierStokesConfig {
+            mu: 1.8e-5,
+            rho: 998.0,
+            use_direct_solver: false,
+            linear_solver_max_iterations: 3000,
+            linear_solver_tolerance: 1e-8,
+            linear_solver_cpu_preconditioner:
+                crate::backend_selection::LinearSolverCpuPreconditionerKind::IlutSchur,
+            transported_eddy_viscosity_per_element: Some(eddy),
+            element_density: Some(
+                mesh.elements
+                    .iter()
+                    .map(|element| {
+                        let cy = element
+                            .nodes
+                            .iter()
+                            .map(|&node| mesh.nodes[node].y)
+                            .sum::<f64>()
+                            / element.nodes.len() as f64;
+                        rho_of_y(cy)
+                    })
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+        let bc_dofs = locate_dofs_geometrical(&mesh, &v_space, |x, y, _z| {
+            x < 1e-9 || (lx - x) < 1e-9 || y < 1e-9 || (ly - y) < 1e-9
+        });
+        let bc = |_x: f64, _y: f64, _z: f64| vec![0.0, 0.0];
+        let bdf = BdfConfig::bdf2(0.0125, 60);
+        let mut workspace = BdfWorkspace::new(&mesh, &v_space, &p_space);
+        workspace.set_pressure_gauge(0, 0.0);
+        let mut state = BdfState::from_rest(n_v, n_p);
+        let mut worst_speed = 0.0f64;
+        for step in 0..60 {
+            let ok = solve_bdf_step_cached_with_force(
+                &mesh,
+                &v_space,
+                &p_space,
+                &config,
+                &bdf,
+                &mut state,
+                &bc,
+                &bc_dofs,
+                &[],
+                move |coords: [f64; 3]| vec![0.0, -rho_of_y(coords[1]) * 9.81, 0.0],
+                |_| [[0.0; 3]; 3],
+                &workspace,
+            );
+            assert!(ok, "hydrostatic step {step} failed");
+            worst_speed = worst_speed.max(
+                state
+                    .velocity
+                    .chunks(2)
+                    .map(|v| (v[0] * v[0] + v[1] * v[1]).sqrt())
+                    .fold(0.0f64, f64::max),
+            );
+        }
+        assert!(
+            worst_speed < 1.0e-2,
+            "spurious hydrostatic current too large: {worst_speed:e} m/s"
         );
     }
 
@@ -4458,6 +4651,7 @@ where
                 mass_coeff,
                 viscous_scale,
                 use_transported,
+                mass_triplet,
                 transported_viscous_triplet.as_ref(),
                 &conv_triplet,
                 &body_force_matrix,
@@ -4484,6 +4678,7 @@ where
                     mass_coeff,
                     viscous_scale,
                     use_transported,
+                    mass_triplet,
                     transported_viscous_triplet.as_ref(),
                     &conv_triplet,
                     &body_force_matrix,
@@ -5255,8 +5450,18 @@ pub fn audit_bdf_step<VSpace: crate::spaces::FunctionSpace>(
         config,
         mesh.dimension,
     );
+    // With an element-density field the mass triplet already carries
+    // rho per element; otherwise the unit mass is scaled by `rho`.
+    let density_mass = assemble_density_mass_triplet(mesh, v_space, config, workspace.quad_order)
+        .ok()
+        .flatten();
+    let (audit_mass, audit_mass_scale): (&crate::assembly::TripletMatrix<f64>, f64) =
+        match density_mass.as_ref() {
+            Some(triplet) => (triplet, 1.0),
+            None => (&workspace.mass_triplet, config.rho),
+        };
     let kinetic = |velocity: &[f64]| {
-        0.5 * config.rho * triplet_bilinear(velocity, &workspace.mass_triplet, velocity)
+        0.5 * audit_mass_scale * triplet_bilinear(velocity, audit_mass, velocity)
     };
     let derivative: Vec<f64> = u
         .iter()
@@ -5264,7 +5469,7 @@ pub fn audit_bdf_step<VSpace: crate::spaces::FunctionSpace>(
         .zip(unm1)
         .map(|((&u1, &u0), &um1)| coeffs.a0 * u1 + coeffs.a1 * u0 + coeffs.a2 * um1)
         .collect();
-    let bdf_mass_work = config.rho * triplet_bilinear(u, &workspace.mass_triplet, &derivative);
+    let bdf_mass_work = audit_mass_scale * triplet_bilinear(u, audit_mass, &derivative);
     let effective_viscosity = config
         .effective_dynamic_viscosity_and_speed_derivative(
             un.chunks(mesh.dimension)
@@ -8185,7 +8390,15 @@ mod tests {
             pin,
         );
         let (values, _) = cache
-            .try_fill(mass_coeff, viscous_scale, false, None, &conv, &body)
+            .try_fill(
+                mass_coeff,
+                viscous_scale,
+                false,
+                &workspace.mass_triplet,
+                None,
+                &conv,
+                &body,
+            )
             .expect("cache matches current triplets");
         let fast = cache.to_csr(values);
 
@@ -8256,7 +8469,15 @@ mod tests {
         reordered.values.swap(0, last);
         assert!(
             cache
-                .try_fill(mass_coeff, viscous_scale, false, None, &reordered, &body)
+                .try_fill(
+                    mass_coeff,
+                    viscous_scale,
+                    false,
+                    &workspace.mass_triplet,
+                    None,
+                    &reordered,
+                    &body,
+                )
                 .is_none(),
             "reordered positions must miss the pattern cache"
         );
@@ -8274,7 +8495,15 @@ mod tests {
             pin,
         );
         let (rebuilt_values, _) = rebuilt
-            .try_fill(mass_coeff, viscous_scale, false, None, &reordered, &body)
+            .try_fill(
+                mass_coeff,
+                viscous_scale,
+                false,
+                &workspace.mass_triplet,
+                None,
+                &reordered,
+                &body,
+            )
             .expect("rebuilt cache matches reordered triplets");
         let rebuilt_csr = rebuilt.to_csr(rebuilt_values);
         assert_eq!(rebuilt_csr.row_ptrs, reference.row_ptrs);
@@ -8297,15 +8526,73 @@ mod tests {
             *value *= 1.5;
         }
         let (_, base_fingerprints) = cache
-            .try_fill(mass_coeff, viscous_scale, false, None, &conv, &body)
+            .try_fill(
+                mass_coeff,
+                viscous_scale,
+                false,
+                &workspace.mass_triplet,
+                None,
+                &conv,
+                &body,
+            )
             .expect("base fill succeeds");
         let (_, rescaled_fingerprints) = cache
-            .try_fill(mass_coeff, viscous_scale, false, None, &rescaled, &body)
+            .try_fill(
+                mass_coeff,
+                viscous_scale,
+                false,
+                &workspace.mass_triplet,
+                None,
+                &rescaled,
+                &body,
+            )
             .expect("same positions fill");
         assert_ne!(
             base_fingerprints.convection, rescaled_fingerprints.convection,
             "value fingerprints must track values"
         );
+
+        // Mass values are re-scattered on every fill, not frozen at
+        // cache build: tripling the mass triplet (same positions) must
+        // triple its contribution. This is the element-density path —
+        // the density field changes whenever the interface moves.
+        let mut tripled_mass = workspace.mass_triplet.clone();
+        for value in &mut tripled_mass.values {
+            *value *= 3.0;
+        }
+        let (tripled_values, tripled_fingerprints) = cache
+            .try_fill(
+                mass_coeff,
+                viscous_scale,
+                false,
+                &tripled_mass,
+                None,
+                &conv,
+                &body,
+            )
+            .expect("tripled mass fills");
+        assert_ne!(
+            base_fingerprints.mass, tripled_fingerprints.mass,
+            "mass fingerprint must track values"
+        );
+        let probe: Vec<f64> = (0..n_total)
+            .map(|i| 0.01 * ((i % 5) as f64) - 0.02)
+            .collect();
+        let base_y = fast.matvec(&probe);
+        let tripled_y = cache.to_csr(tripled_values).matvec(&probe);
+        let unit_mass_y = workspace.mass_triplet.to_csr().matvec(&probe[..n_v]);
+        for row in 0..n_total {
+            let expected = if row < n_v {
+                2.0 * mass_coeff * unit_mass_y[row]
+            } else {
+                0.0
+            };
+            assert!(
+                (tripled_y[row] - base_y[row] - expected).abs() <= 1.0e-9 * expected.abs().max(1.0),
+                "row {row}: mass re-scatter drift {}",
+                tripled_y[row] - base_y[row] - expected
+            );
+        }
 
         // Transported-viscosity mode: unit block replaced by the scattered
         // transported block, and mode switches miss the cache.
@@ -8333,7 +8620,15 @@ mod tests {
             pin,
         );
         let (transported_values, _) = transported_cache
-            .try_fill(mass_coeff, 1.0, true, Some(&transported), &conv, &body)
+            .try_fill(
+                mass_coeff,
+                1.0,
+                true,
+                &workspace.mass_triplet,
+                Some(&transported),
+                &conv,
+                &body,
+            )
             .expect("transported cache matches");
         let transported_csr = transported_cache.to_csr(transported_values);
         let mut transported_mono = crate::assembly::TripletMatrix::new(n_total, n_total);
@@ -8399,13 +8694,29 @@ mod tests {
         );
         assert!(
             transported_cache
-                .try_fill(mass_coeff, viscous_scale, false, None, &conv, &body)
+                .try_fill(
+                    mass_coeff,
+                    viscous_scale,
+                    false,
+                    &workspace.mass_triplet,
+                    None,
+                    &conv,
+                    &body,
+                )
                 .is_none(),
             "viscosity-mode switch must miss the cache"
         );
         assert!(
             cache
-                .try_fill(mass_coeff, 1.0, true, Some(&transported), &conv, &body)
+                .try_fill(
+                    mass_coeff,
+                    1.0,
+                    true,
+                    &workspace.mass_triplet,
+                    Some(&transported),
+                    &conv,
+                    &body,
+                )
                 .is_none(),
             "viscosity-mode switch must miss the cache"
         );

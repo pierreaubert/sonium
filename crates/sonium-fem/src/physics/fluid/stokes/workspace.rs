@@ -180,6 +180,7 @@ impl BdfSchurCacheEntry {
         self.mass_coeff_bits == mass_coeff.to_bits()
             && self.viscous_scale_bits == viscous_scale.to_bits()
             && self.use_transported == use_transported
+            && self.value_fingerprints.mass == fingerprints.mass
             && self.value_fingerprints.convection == fingerprints.convection
             && self.value_fingerprints.body == fingerprints.body
             && (!use_transported || self.value_fingerprints.transported == fingerprints.transported)
@@ -400,8 +401,13 @@ pub(crate) struct BdfMonoPatternCache {
     n_total: usize,
     row_ptrs: Vec<usize>,
     col_indices: Vec<usize>,
-    /// Merged unscaled mass values, length `nnz`.
-    mass_part: Vec<f64>,
+    /// Scatter map for the mass triplet: entry `k` of the current
+    /// step's mass triplet lands at `mass_map[k]` in the merged
+    /// pattern. Mass values are re-scattered on every fill (like
+    /// convection), never stored: an element-density field changes
+    /// them whenever the interface moves.
+    mass_map: Vec<usize>,
+    mass_fingerprint: u64,
     /// Merged unit-viscosity values, length `nnz`. Unused on steps that
     /// scatter a transported viscous block instead.
     viscous_part: Vec<f64>,
@@ -421,6 +427,7 @@ pub(crate) struct BdfMonoPatternCache {
 /// downstream memo keyed on them can only serve an exact product.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ValueFingerprints {
+    pub(crate) mass: u64,
     pub(crate) convection: u64,
     pub(crate) body: u64,
     pub(crate) transported: u64,
@@ -540,9 +547,9 @@ impl BdfMonoPatternCache {
 
         let mut row_ptrs = vec![0usize; n_total + 1];
         let mut col_indices = Vec::with_capacity(entries.len());
-        let mut mass_part = Vec::with_capacity(entries.len());
         let mut viscous_part = Vec::with_capacity(entries.len());
         let mut static_part = Vec::with_capacity(entries.len());
+        let mut mass_map = vec![usize::MAX; mass.rows.len()];
         let mut convection_map = vec![usize::MAX; convection.rows.len()];
         let mut body_map = vec![usize::MAX; body.rows.len()];
         let mut transported_map =
@@ -554,7 +561,6 @@ impl BdfMonoPatternCache {
                 let row = (key >> 32) as usize;
                 let col = (key & 0xffff_ffff) as usize;
                 col_indices.push(col);
-                mass_part.push(0.0);
                 viscous_part.push(0.0);
                 static_part.push(0.0);
                 if prev_row == usize::MAX {
@@ -571,7 +577,7 @@ impl BdfMonoPatternCache {
             }
             let position = col_indices.len() - 1;
             match tag {
-                Self::TAG_MASS => mass_part[position] += value,
+                Self::TAG_MASS => mass_map[source_index] = position,
                 Self::TAG_VISCOUS => viscous_part[position] += value,
                 Self::TAG_STATIC => static_part[position] += value,
                 Self::TAG_CONVECTION => convection_map[source_index] = position,
@@ -586,6 +592,7 @@ impl BdfMonoPatternCache {
                 *slot = final_nnz;
             }
         }
+        debug_assert!(mass_map.iter().all(|&index| index != usize::MAX));
         debug_assert!(convection_map.iter().all(|&index| index != usize::MAX));
         debug_assert!(body_map.iter().all(|&index| index != usize::MAX));
         debug_assert!(transported_map.iter().all(|&index| index != usize::MAX));
@@ -594,7 +601,8 @@ impl BdfMonoPatternCache {
             n_total,
             row_ptrs,
             col_indices,
-            mass_part,
+            mass_map,
+            mass_fingerprint: triplet_position_fingerprint(&mass.rows, &mass.cols),
             viscous_part,
             static_part,
             convection_map,
@@ -645,11 +653,17 @@ impl BdfMonoPatternCache {
         mass_coeff: f64,
         viscous_scale: f64,
         use_transported: bool,
+        mass: &TripletMatrix<f64>,
         transported: Option<&TripletMatrix<f64>>,
         convection: &TripletMatrix<f64>,
         body: &TripletMatrix<f64>,
     ) -> Option<(Vec<f64>, ValueFingerprints)> {
         if use_transported != self.has_transported {
+            return None;
+        }
+        if triplet_position_fingerprint(&mass.rows, &mass.cols) != self.mass_fingerprint
+            || mass.rows.len() != self.mass_map.len()
+        {
             return None;
         }
         if triplet_position_fingerprint(&convection.rows, &convection.cols)
@@ -678,8 +692,11 @@ impl BdfMonoPatternCache {
             } else {
                 0.0
             };
-            mass_coeff * self.mass_part[i] + unit + self.static_part[i]
+            unit + self.static_part[i]
         });
+        for k in 0..mass.rows.len() {
+            values[self.mass_map[k]] += mass_coeff * mass.values[k];
+        }
         for k in 0..convection.rows.len() {
             values[self.convection_map[k]] += convection.values[k];
         }
@@ -694,6 +711,7 @@ impl BdfMonoPatternCache {
         Some((
             values,
             ValueFingerprints {
+                mass: Self::values_fingerprint(&mass.values),
                 convection: Self::values_fingerprint(&convection.values),
                 body: Self::values_fingerprint(&body.values),
                 transported: transported

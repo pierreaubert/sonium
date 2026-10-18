@@ -72,6 +72,10 @@ required-features = ["cli"]
 name = "stokes_shape_opt"
 required-features = ["cli"]
 
+[[example]]
+name = "ns_shape_opt"
+required-features = ["cli"]
+
 [[bench]]
 name = "helmholtz_3d_scaling"
 harness = false

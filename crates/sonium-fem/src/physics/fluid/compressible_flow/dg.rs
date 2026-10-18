@@ -1,4 +1,4 @@
-//! Explicit P1 discontinuous-Galerkin compressible Navier--Stokes solver.
+//! Explicit P1/P2 discontinuous-Galerkin compressible Navier--Stokes solver.
 
 use std::collections::HashMap;
 
@@ -8,7 +8,7 @@ use crate::quadrature::QuadratureRule;
 use crate::spaces::dg::{DGSpace, build_interior_facets, element_diameter};
 use crate::spaces::{BasisTabulation, FunctionSpace};
 
-use super::{ConservativeState, IdealGas, ViscosityModel, rusanov_flux};
+use super::{ConservativeState, IdealGas, ViscosityModel, hllc_flux, rusanov_flux};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CompressibleBoundaryCondition {
@@ -44,6 +44,41 @@ pub struct CompressibleDgConfig {
     pub troubled_cell_relaxation: f64,
     pub maximum_step_retries: usize,
     pub boundaries: HashMap<i32, CompressibleBoundaryCondition>,
+    /// Persson--Peraire modal smoothness threshold on `log10` of the
+    /// highest-degree modal energy fraction of the density. When finite,
+    /// it replaces the jump/deviation sensor as the primary troubled-cell
+    /// criterion (a strong cell-average jump above 0.5 remains as a safety
+    /// net). `f64::INFINITY` (default) disables it.
+    pub persson_threshold: f64,
+    /// Troubled-cell sensor threshold: an element is limited only when the
+    /// relative jump of density or pressure between its cell average and a
+    /// facet neighbour's cell average exceeds this value. Smooth elements
+    /// keep their full polynomial slopes. The default 0.03 was calibrated
+    /// on the Mach 1 cylinder (best stagnation-pressure accuracy of the
+    /// swept values 0.03/0.1/0.2/0.5, with no positivity retries); set
+    /// `f64::INFINITY` to disable the sensor and limit every element
+    /// (legacy behaviour).
+    pub troubled_cell_threshold: f64,
+    /// Element polynomial degree of the DG space. `P1` (default) preserves
+    /// the legacy solver exactly; `P2` uses quadratic Lagrange nodes
+    /// (vertices plus edge midpoints) with a quadrature-computed mass
+    /// inverse. `P3` is rejected: its face/bubble node layout is not wired
+    /// into this solver's state layout.
+    pub degree: PolynomialDegree,
+    /// Numerical flux for the inviscid interface term.
+    pub flux: CompressibleFluxKind,
+}
+
+/// Interface flux selection for the compressible DG operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CompressibleFluxKind {
+    /// Rusanov (local Lax--Friedrichs): one scalar dissipation for all
+    /// waves. Legacy default.
+    #[default]
+    Rusanov,
+    /// HLLC: restores the contact wave; falls back to Rusanov whenever the
+    /// star-region state would be nonphysical.
+    Hllc,
 }
 
 impl Default for CompressibleDgConfig {
@@ -59,6 +94,10 @@ impl Default for CompressibleDgConfig {
             troubled_cell_relaxation: 0.05,
             maximum_step_retries: 8,
             boundaries: HashMap::new(),
+            troubled_cell_threshold: 0.03,
+            persson_threshold: f64::INFINITY,
+            degree: PolynomialDegree::P1,
+            flux: CompressibleFluxKind::Rusanov,
         }
     }
 }
@@ -83,6 +122,10 @@ impl CompressibleDgConfig {
             || !self.troubled_cell_relaxation.is_finite()
             || self.troubled_cell_relaxation < 0.0
             || self.maximum_step_retries == 0
+            || self.degree == PolynomialDegree::P3
+            || self.troubled_cell_threshold.is_nan()
+            || self.troubled_cell_threshold <= 0.0
+            || self.persson_threshold.is_nan()
         {
             return Err(CompressibleDgError::InvalidConfiguration);
         }
@@ -101,28 +144,109 @@ pub enum CompressibleDgError {
     StepRetriesExhausted,
 }
 
-/// Element-local P1-DG conservative state. Values are stored for every local
-/// vertex of every element; neighboring elements never share entries.
+/// Element-local DG conservative state. Values are stored for every local
+/// Lagrange node of every element (P1: vertices; P2: vertices plus edge
+/// midpoints, in `ElementType::local_edges` order); neighboring elements
+/// never share entries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompressibleDgState {
     pub dimension: usize,
     pub values: Vec<ConservativeState>,
     element_offsets: Vec<usize>,
+    /// Polynomial degree the local node layout was built for.
+    pub degree: PolynomialDegree,
+    /// Quadrature weights of the local basis over the reference element
+    /// (∫φᵢ dΩ / V), one per local node. The cell average is the weighted
+    /// sum with these weights; for P2 the vertex weights are zero on
+    /// triangles and negative on tetrahedra, so an arithmetic mean of the
+    /// nodal values would not be the cell average.
+    average_weights: Vec<f64>,
+}
+
+/// Local Lagrange-node count for one simplex element at `degree`.
+fn local_node_count(element_type: ElementType, degree: PolynomialDegree) -> usize {
+    match degree {
+        PolynomialDegree::P1 => element_type.num_nodes_p1(),
+        PolynomialDegree::P2 => element_type.num_nodes_p2(),
+        PolynomialDegree::P3 => element_type.num_nodes_p3(),
+    }
+}
+
+/// Physical positions of the local Lagrange nodes of one element: vertices
+/// first, then (P2) edge midpoints in `local_edges` order. Geometry is
+/// affine (P1-mapped), so midpoints are exact.
+fn local_node_positions(
+    mesh: &Mesh,
+    element: usize,
+    degree: PolynomialDegree,
+) -> Vec<[f64; 3]> {
+    let cell = &mesh.elements[element];
+    let vertices = cell.vertices();
+    let mut positions: Vec<[f64; 3]> = vertices
+        .iter()
+        .map(|&node| {
+            let point = &mesh.nodes[node];
+            [point.x, point.y, point.z]
+        })
+        .collect();
+    if degree == PolynomialDegree::P2 {
+        for &(a, b) in cell.element_type.local_edges() {
+            let (pa, pb) = (positions[a], positions[b]);
+            positions.push([
+                0.5 * (pa[0] + pb[0]),
+                0.5 * (pa[1] + pb[1]),
+                0.5 * (pa[2] + pb[2]),
+            ]);
+        }
+    }
+    positions
+}
+
+/// Reference-element average weights ∫φᵢ/V per local node.
+fn average_weights(element_type: ElementType, degree: PolynomialDegree) -> Vec<f64> {
+    match (element_type, degree) {
+        (ElementType::Triangle, PolynomialDegree::P1) => vec![1.0 / 3.0; 3],
+        (ElementType::Triangle, PolynomialDegree::P2) => {
+            vec![0.0, 0.0, 0.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]
+        }
+        (ElementType::Tetrahedron, PolynomialDegree::P1) => vec![0.25; 4],
+        (ElementType::Tetrahedron, PolynomialDegree::P2) => {
+            let mut weights = vec![-1.0 / 20.0; 4];
+            weights.extend([0.2; 6]);
+            weights
+        }
+        _ => Vec::new(),
+    }
 }
 
 impl CompressibleDgState {
-    pub fn from_function<F>(mesh: &Mesh, mut initial: F) -> Result<Self, CompressibleDgError>
+    pub fn from_function<F>(mesh: &Mesh, initial: F) -> Result<Self, CompressibleDgError>
+    where
+        F: FnMut([f64; 3]) -> ConservativeState,
+    {
+        Self::from_function_degree(mesh, PolynomialDegree::P1, initial)
+    }
+
+    /// Build a state at an explicit polynomial degree by sampling the
+    /// initial field at the element-local Lagrange nodes.
+    pub fn from_function_degree<F>(
+        mesh: &Mesh,
+        degree: PolynomialDegree,
+        mut initial: F,
+    ) -> Result<Self, CompressibleDgError>
     where
         F: FnMut([f64; 3]) -> ConservativeState,
     {
         validate_simplex_mesh(mesh)?;
+        if degree == PolynomialDegree::P3 {
+            return Err(CompressibleDgError::UnsupportedMesh);
+        }
         let mut values = Vec::new();
         let mut element_offsets = Vec::with_capacity(mesh.num_elements() + 1);
         element_offsets.push(0);
-        for element in &mesh.elements {
-            for &node in element.vertices() {
-                let point = &mesh.nodes[node];
-                let mut state = initial([point.x, point.y, point.z]);
+        for element in 0..mesh.num_elements() {
+            for position in local_node_positions(mesh, element, degree) {
+                let mut state = initial(position);
                 if mesh.dimension == 2 {
                     state.momentum[2] = 0.0;
                 }
@@ -130,10 +254,17 @@ impl CompressibleDgState {
             }
             element_offsets.push(values.len());
         }
+        let weights = if mesh.num_elements() > 0 {
+            average_weights(mesh.elements[0].element_type, degree)
+        } else {
+            Vec::new()
+        };
         Ok(Self {
             dimension: mesh.dimension,
             values,
             element_offsets,
+            degree,
+            average_weights: weights,
         })
     }
 
@@ -152,7 +283,17 @@ impl CompressibleDgState {
     }
 
     pub fn cell_average(&self, element: usize) -> ConservativeState {
-        average_states(self.element(element))
+        let cell = self.element(element);
+        if self.average_weights.len() != cell.len() {
+            return average_states(cell);
+        }
+        let mut average = [0.0; 5];
+        for (state, weight) in cell.iter().zip(&self.average_weights) {
+            for (target, value) in average.iter_mut().zip(state.as_array()) {
+                *target += weight * value;
+            }
+        }
+        ConservativeState::from_array(average)
     }
 
     pub fn validate_layout(&self, mesh: &Mesh) -> Result<(), CompressibleDgError> {
@@ -161,7 +302,7 @@ impl CompressibleDgState {
             || self.element_offsets.last().copied() != Some(self.values.len())
             || mesh.elements.iter().enumerate().any(|(element, cell)| {
                 self.element_offsets[element + 1] - self.element_offsets[element]
-                    != cell.vertices().len()
+                    != local_node_count(cell.element_type, self.degree)
             })
         {
             return Err(CompressibleDgError::StateSizeMismatch);
@@ -201,26 +342,134 @@ pub struct CompressibleDgOperator<'a> {
     mesh: &'a Mesh,
     space: DGSpace,
     pub config: CompressibleDgConfig,
+    /// Per-element inverse mass matrices (row-major, local-node sized),
+    /// computed once by quadrature. At P1 this reproduces the closed-form
+    /// simplex inverse the solver used previously.
+    mass_inverses: Vec<Vec<f64>>,
+}
+
+/// Volume quadrature order for the operator at `degree`.
+fn volume_quadrature_order(degree: PolynomialDegree) -> usize {
+    match degree {
+        PolynomialDegree::P1 => 3,
+        _ => 5,
+    }
+}
+
+/// Invert a small dense matrix by Gauss--Jordan elimination with partial
+/// pivoting. Returns `None` for (near-)singular input.
+fn invert_small(matrix: &[f64], n: usize) -> Option<Vec<f64>> {
+    let mut a: Vec<Vec<f64>> = (0..n)
+        .map(|row| matrix[row * n..(row + 1) * n].to_vec())
+        .collect();
+    let mut inv: Vec<Vec<f64>> = (0..n)
+        .map(|row| (0..n).map(|col| if row == col { 1.0 } else { 0.0 }).collect())
+        .collect();
+    for col in 0..n {
+        let pivot = (col..n).max_by(|&r1, &r2| {
+            a[r1][col]
+                .abs()
+                .partial_cmp(&a[r2][col].abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })?;
+        if a[pivot][col].abs() < 1.0e-300 {
+            return None;
+        }
+        a.swap(col, pivot);
+        inv.swap(col, pivot);
+        let scale = a[col][col];
+        for value in a[col].iter_mut().chain(inv[col].iter_mut()) {
+            *value /= scale;
+        }
+        for row in 0..n {
+            if row == col {
+                continue;
+            }
+            let factor = a[row][col];
+            if factor == 0.0 {
+                continue;
+            }
+            for c in 0..n {
+                a[row][c] -= factor * a[col][c];
+                inv[row][c] -= factor * inv[col][c];
+            }
+        }
+    }
+    Some(inv.into_iter().flatten().collect())
 }
 
 impl<'a> CompressibleDgOperator<'a> {
     pub fn new(mesh: &'a Mesh, config: CompressibleDgConfig) -> Result<Self, CompressibleDgError> {
         validate_simplex_mesh(mesh)?;
         config.validate()?;
+        let space = DGSpace::new(config.degree);
+        // Precompute per-element inverse mass matrices by quadrature:
+        // M_ij = sum_q w_q detJ_q phi_i(q) phi_j(q).
+        let mut mass_inverses = Vec::with_capacity(mesh.num_elements());
+        for element in 0..mesh.num_elements() {
+            let n = local_node_count(mesh.elements[element].element_type, config.degree);
+            let rule = QuadratureRule::new(
+                mesh.elements[element].element_type,
+                volume_quadrature_order(config.degree),
+            );
+            let mut mass = vec![0.0; n * n];
+            for point in rule.iter() {
+                let tab = space.tabulate(
+                    mesh,
+                    element,
+                    point.coords[0],
+                    point.coords[1],
+                    point.coords[2],
+                );
+                let weight = point.weight * tab.det_j;
+                for i in 0..n {
+                    for j in 0..n {
+                        mass[i * n + j] += weight * tab.values[i] * tab.values[j];
+                    }
+                }
+            }
+            let inverse = invert_small(&mass, n).ok_or(CompressibleDgError::UnsupportedMesh)?;
+            mass_inverses.push(inverse);
+        }
         Ok(Self {
             mesh,
-            space: DGSpace::new(PolynomialDegree::P1),
+            space,
             config,
+            mass_inverses,
         })
+    }
+
+    fn check_state_degree(
+        &self,
+        state: &CompressibleDgState,
+    ) -> Result<(), CompressibleDgError> {
+        state.validate_layout(self.mesh)?;
+        if state.degree != self.config.degree {
+            return Err(CompressibleDgError::StateSizeMismatch);
+        }
+        Ok(())
     }
 
     /// Evaluate the semi-discrete `dU/dt` including Euler volume/facet fluxes,
     /// Newtonian stress, Fourier heat flux, and SIPG jump stabilization.
+    /// Basis values of `element`'s local space at a physical point, via its
+    /// barycentric coordinates. At P1 this returns the barycentric weights
+    /// themselves; at P2 it evaluates the quadratic Lagrange basis.
+    fn facet_basis(&self, element: usize, point: [f64; 3]) -> Vec<f64> {
+        let lambda = barycentric_coordinates(self.mesh, element, point);
+        let (xi, eta, zeta) = if self.mesh.dimension == 2 {
+            (lambda[1], lambda[2], 0.0)
+        } else {
+            (lambda[1], lambda[2], lambda[3])
+        };
+        self.space.tabulate(self.mesh, element, xi, eta, zeta).values
+    }
+
     pub fn spatial_operator(
         &self,
         state: &CompressibleDgState,
     ) -> Result<Vec<ConservativeState>, CompressibleDgError> {
-        state.validate_layout(self.mesh)?;
+        self.check_state_degree(state)?;
         let mut integrated = vec![[0.0; 5]; state.values.len()];
         self.add_volume_terms(state, &mut integrated)?;
         self.add_interior_facet_terms(state, &mut integrated)?;
@@ -232,7 +481,7 @@ impl<'a> CompressibleDgOperator<'a> {
         &self,
         state: &CompressibleDgState,
     ) -> Result<f64, CompressibleDgError> {
-        state.validate_layout(self.mesh)?;
+        self.check_state_degree(state)?;
         let mut dt = f64::INFINITY;
         for element in 0..self.mesh.num_elements() {
             let average = state.cell_average(element);
@@ -264,7 +513,10 @@ impl<'a> CompressibleDgOperator<'a> {
                 .max(conductivity / (average.density * self.config.gas.specific_heat_cp()));
             let convective = h / speed.max(f64::MIN_POSITIVE);
             let viscous = 0.5 * h * h / diffusivity.max(f64::MIN_POSITIVE);
-            dt = dt.min(self.config.cfl * convective.min(viscous));
+            // DG spectral radius grows like (2p + 1); scale the P1-tuned
+            // CFL by 3 / (2p + 1) so `cfl` keeps its meaning across degrees.
+            let degree_factor = 3.0 / (2.0 * self.config.degree.degree() as f64 + 1.0);
+            dt = dt.min(self.config.cfl * degree_factor * convective.min(viscous));
         }
         Ok(dt)
     }
@@ -293,7 +545,10 @@ impl<'a> CompressibleDgOperator<'a> {
                 &self.space.tabulate(self.mesh, element, 0.25, 0.25, 0.25),
                 self.config.gas,
             );
-            let rule = QuadratureRule::new(self.mesh.elements[element].element_type, 3);
+            let rule = QuadratureRule::new(
+                self.mesh.elements[element].element_type,
+                volume_quadrature_order(self.config.degree),
+            );
             let offset = state.element_offsets[element];
             for point in rule.iter() {
                 let tab = self.space.tabulate(
@@ -367,9 +622,11 @@ impl<'a> CompressibleDgOperator<'a> {
             let h = 0.5
                 * (element_diameter(self.mesh, facet.elem_plus)
                     + element_diameter(self.mesh, facet.elem_minus));
-            for (point, weight) in facet_quadrature(self.mesh, &facet.shared_nodes) {
-                let plus_basis = barycentric_coordinates(self.mesh, facet.elem_plus, point);
-                let minus_basis = barycentric_coordinates(self.mesh, facet.elem_minus, point);
+            for (point, weight) in
+                facet_quadrature(self.mesh, &facet.shared_nodes, self.config.degree)
+            {
+                let plus_basis = self.facet_basis(facet.elem_plus, point);
+                let minus_basis = self.facet_basis(facet.elem_minus, point);
                 let left = interpolate_with_basis(plus, &plus_basis);
                 let right = interpolate_with_basis(minus, &minus_basis);
                 let flux =
@@ -423,8 +680,9 @@ impl<'a> CompressibleDgOperator<'a> {
             }
             let h = element_diameter(self.mesh, element);
             let offset = state.element_offsets[element];
-            for (point, weight) in facet_quadrature(self.mesh, &face.nodes) {
-                let basis = barycentric_coordinates(self.mesh, element, point);
+            for (point, weight) in facet_quadrature(self.mesh, &face.nodes, self.config.degree)
+            {
+                let basis = self.facet_basis(element, point);
                 let interior = interpolate_with_basis(cell, &basis);
                 let exterior = boundary_state(condition, interior, normal, self.config.gas)?;
                 let flux =
@@ -458,7 +716,11 @@ impl<'a> CompressibleDgOperator<'a> {
                 return Err(CompressibleDgError::NonPhysicalQuadratureState);
             }
         }
-        let inviscid = rusanov_flux(left, right, self.config.gas, normal);
+        let inviscid = match self.config.flux {
+            CompressibleFluxKind::Rusanov => rusanov_flux(left, right, self.config.gas, normal),
+            CompressibleFluxKind::Hllc => hllc_flux(left, right, self.config.gas, normal)
+                .unwrap_or_else(|| rusanov_flux(left, right, self.config.gas, normal)),
+        };
         let left_viscous = viscous_flux_tensor(
             left,
             left_gradients,
@@ -505,16 +767,16 @@ impl<'a> CompressibleDgOperator<'a> {
         let mut derivative = vec![ConservativeState::from_array([0.0; 5]); integrated.len()];
         let mut offset = 0;
         for element in 0..self.mesh.num_elements() {
-            let n = self.mesh.elements[element].vertices().len();
-            let volume = cell_volume(self.mesh, element);
-            let scale = (n * (n + 1)) as f64 / volume;
+            let n = local_node_count(
+                self.mesh.elements[element].element_type,
+                self.config.degree,
+            );
+            let inverse = &self.mass_inverses[element];
             for equation in 0..5 {
-                let sum = (0..n)
-                    .map(|local| integrated[offset + local][equation])
-                    .sum::<f64>();
                 for local in 0..n {
-                    let value =
-                        scale * (integrated[offset + local][equation] - sum / (n + 1) as f64);
+                    let value: f64 = (0..n)
+                        .map(|other| inverse[local * n + other] * integrated[offset + other][equation])
+                        .sum();
                     let mut array = derivative[offset + local].as_array();
                     array[equation] = value;
                     derivative[offset + local] = ConservativeState::from_array(array);
@@ -554,7 +816,7 @@ impl<'a> CompressibleDgSolver<'a> {
         state: &mut CompressibleDgState,
         requested_time_step: f64,
     ) -> Result<CompressibleStepReport, CompressibleDgError> {
-        state.validate_layout(self.operator.mesh)?;
+        self.operator.check_state_degree(state)?;
         let before = self.operator.conserved_totals(state);
         let original = state.clone();
         let stable = self.operator.stable_time_step(state)?;
@@ -609,6 +871,8 @@ impl<'a> CompressibleDgSolver<'a> {
             state,
             self.operator.config.gas,
             self.operator.config.troubled_cell_relaxation,
+            self.operator.config.troubled_cell_threshold,
+            self.operator.config.persson_threshold,
         );
         apply_zhang_shu_positivity(
             state,
@@ -807,16 +1071,203 @@ fn characteristic_far_field_state(
     )
 }
 
+/// Monomial exponents up to `degree` in `dim` variables, ordered by total
+/// degree (constant, linears, then quadratics). The count equals the
+/// simplex Lagrange-node count at that degree.
+fn monomial_exponents(dim: usize, degree: usize) -> Vec<Vec<usize>> {
+    let mut result = Vec::new();
+    for total in 0..=degree {
+        // Generate compositions of `total` into `dim` parts.
+        fn compositions(
+            dim: usize,
+            total: usize,
+            current: &mut Vec<usize>,
+            out: &mut Vec<Vec<usize>>,
+        ) {
+            if current.len() == dim - 1 {
+                let mut entry = current.clone();
+                entry.push(total - current.iter().sum::<usize>());
+                out.push(entry);
+                return;
+            }
+            let used: usize = current.iter().sum();
+            for value in 0..=(total - used) {
+                current.push(value);
+                compositions(dim, total, current, out);
+                current.pop();
+            }
+        }
+        compositions(dim, total, &mut Vec::new(), &mut result);
+    }
+    result
+}
+
+fn monomial_value(exponents: &[usize], point: [f64; 3]) -> f64 {
+    exponents
+        .iter()
+        .enumerate()
+        .map(|(axis, &power)| point[axis].powi(power as i32))
+        .product()
+}
+
+/// Precomputed Persson--Peraire data for one element type and degree:
+/// the nodal-to-modal (monomial) transform and the modal Gram matrix on
+/// the reference element. Both energy terms scale with the same Jacobian
+/// determinant on affine elements, so their ratio is mesh-independent.
+struct PerssonMatrices {
+    vandermonde_inverse: Vec<f64>,
+    gram: Vec<f64>,
+    n: usize,
+    highest_start: usize,
+}
+
+fn persson_matrices(element_type: ElementType, degree: PolynomialDegree) -> Option<PerssonMatrices> {
+    let dim = element_type.dimension();
+    let degree_value = degree.degree();
+    let exponents = monomial_exponents(dim, degree_value);
+    let n = exponents.len();
+    if n != local_node_count(element_type, degree) {
+        return None;
+    }
+    let corners: &[[f64; 3]] = if dim == 2 {
+        &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    } else {
+        &[
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    };
+    let mut nodes: Vec<[f64; 3]> = corners[..element_type.num_vertices()].to_vec();
+    if degree == PolynomialDegree::P2 {
+        for &(a, b) in element_type.local_edges() {
+            nodes.push(std::array::from_fn(|axis| 0.5 * (corners[a][axis] + corners[b][axis])));
+        }
+    }
+    if nodes.len() != n {
+        return None;
+    }
+    let mut vandermonde = vec![0.0; n * n];
+    for (node, point) in nodes.iter().enumerate() {
+        for (mode, exponents) in exponents.iter().enumerate() {
+            vandermonde[node * n + mode] = monomial_value(exponents, *point);
+        }
+    }
+    let vandermonde_inverse = invert_small(&vandermonde, n)?;
+    let rule = QuadratureRule::new(element_type, 5);
+    let mut gram = vec![0.0; n * n];
+    for point in rule.iter() {
+        let coords = [point.coords[0], point.coords[1], point.coords[2]];
+        let values: Vec<f64> = exponents
+            .iter()
+            .map(|exponents| monomial_value(exponents, coords))
+            .collect();
+        for row in 0..n {
+            for col in 0..n {
+                gram[row * n + col] += point.weight * values[row] * values[col];
+            }
+        }
+    }
+    let highest_start = exponents
+        .iter()
+        .filter(|exponents| exponents.iter().sum::<usize>() < degree_value)
+        .count();
+    Some(PerssonMatrices {
+        vandermonde_inverse,
+        gram,
+        n,
+        highest_start,
+    })
+}
+
+/// Persson--Peraire smoothness indicator for one element's density:
+/// `log10` of the fraction of modal energy in the highest-degree modes.
+/// Smooth (polynomial-degree < p) fields give `-inf`; discontinuities
+/// give values near 0.
+fn persson_indicator(density: &[f64], matrices: &PerssonMatrices) -> f64 {
+    let n = matrices.n;
+    let coefficients: Vec<f64> = (0..n)
+        .map(|mode| {
+            (0..n)
+                .map(|node| matrices.vandermonde_inverse[mode * n + node] * density[node])
+                .sum()
+        })
+        .collect();
+    let energy = |range: std::ops::Range<usize>| -> f64 {
+        let mut total = 0.0;
+        for row in range.clone() {
+            for col in range.clone() {
+                total += coefficients[row] * matrices.gram[row * n + col] * coefficients[col];
+            }
+        }
+        total
+    };
+    let total = energy(0..n);
+    if total <= 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    let highest = energy(matrices.highest_start..n).max(0.0);
+    if highest <= 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    (highest / total).log10()
+}
+
+/// Troubled-cell sensor with two criteria, either of which flags the
+/// element for limiting:
+/// 1. the relative density/pressure jump of the cell average to any facet
+///    neighbour exceeds `threshold` (captured discontinuities), or
+/// 2. any local nodal density/pressure deviates from the cell average by
+///    more than `threshold` (within-element oscillation at a shock foot,
+///    which the cell-average jump alone misses: a Sod run with only
+///    criterion 1 exhausts its positivity retries).
+///
+/// Smooth gradients shrink both measures with the mesh; discontinuities
+/// keep them O(1).
+fn is_troubled_cell(
+    cell: &[ConservativeState],
+    average: ConservativeState,
+    neighbors: &[(usize, [f64; 3])],
+    averages: &[ConservativeState],
+    gas: IdealGas,
+    threshold: f64,
+) -> bool {
+    let pressure = average.pressure(gas);
+    let density_scale = average.density.abs().max(1.0e-300);
+    let pressure_scale = pressure.abs().max(1.0e-300);
+    let within_element = cell.iter().any(|nodal| {
+        (nodal.density - average.density).abs() / density_scale > threshold
+            || (nodal.pressure(gas) - pressure).abs() / pressure_scale > threshold
+    });
+    if within_element {
+        return true;
+    }
+    neighbors.iter().any(|&(neighbor, _)| {
+        let other = averages[neighbor];
+        let density_jump = (other.density - average.density).abs() / density_scale;
+        let pressure_jump = (other.pressure(gas) - pressure).abs() / pressure_scale;
+        density_jump > threshold || pressure_jump > threshold
+    })
+}
+
 fn apply_characteristic_vertex_limiter(
     mesh: &Mesh,
     state: &mut CompressibleDgState,
     gas: IdealGas,
     relaxation: f64,
+    threshold: f64,
+    persson_threshold: f64,
 ) {
     let original = state.clone();
     let averages = (0..mesh.num_elements())
         .map(|element| original.cell_average(element))
         .collect::<Vec<_>>();
+    let persson_matrices = if persson_threshold.is_finite() && mesh.num_elements() > 0 {
+        persson_matrices(mesh.elements[0].element_type, state.degree)
+    } else {
+        None
+    };
     let mut neighbors: Vec<Vec<(usize, [f64; 3])>> = vec![Vec::new(); mesh.num_elements()];
     for facet in build_interior_facets(mesh) {
         let mut normal = facet.normal;
@@ -838,6 +1289,44 @@ fn apply_characteristic_vertex_limiter(
             continue;
         }
         let average = averages[element];
+        // Troubled-cell decision. With a finite Persson--Peraire
+        // threshold it is the primary criterion, backed by a strong-jump
+        // safety net (relative average jump above 0.5); otherwise the
+        // jump/deviation sensor decides, and an infinite threshold there
+        // disables sensing entirely (legacy limit-everything).
+        let troubled = if persson_threshold.is_finite() {
+            let density: Vec<f64> = original
+                .element(element)
+                .iter()
+                .map(|nodal| nodal.density)
+                .collect();
+            let smooth = persson_matrices.as_ref().is_some_and(|matrices| {
+                persson_indicator(&density, matrices) <= persson_threshold
+            });
+            let strong_jump = neighbors[element].iter().any(|&(neighbor, _)| {
+                let other = averages[neighbor];
+                (other.density - average.density).abs() / average.density.abs().max(1.0e-300)
+                    > 0.5
+                    || (other.pressure(gas) - average.pressure(gas)).abs()
+                        / average.pressure(gas).abs().max(1.0e-300)
+                        > 0.5
+            });
+            !smooth || strong_jump
+        } else if threshold.is_finite() {
+            is_troubled_cell(
+                original.element(element),
+                average,
+                &neighbors[element],
+                &averages,
+                gas,
+                threshold,
+            )
+        } else {
+            true
+        };
+        if !troubled {
+            continue;
+        }
         let mut theta = 1.0_f64;
         for &(neighbor, normal) in &neighbors[element] {
             let center_characteristics = characteristic_variables(average, normal, gas);
@@ -1085,11 +1574,27 @@ fn barycentric_coordinates(mesh: &Mesh, element: usize, point: [f64; 3]) -> Vec<
     }
 }
 
-fn facet_quadrature(mesh: &Mesh, nodes: &[usize]) -> Vec<([f64; 3], f64)> {
+fn facet_quadrature(
+    mesh: &Mesh,
+    nodes: &[usize],
+    degree: PolynomialDegree,
+) -> Vec<([f64; 3], f64)> {
     let area = facet_measure(mesh, nodes);
     if nodes.len() == 2 {
         let a = point3(mesh, nodes[0]);
         let b = point3(mesh, nodes[1]);
+        if degree == PolynomialDegree::P2 {
+            // 3-point Gauss--Legendre (degree 5) for quadratic traces.
+            let offset = (3.0_f64 / 5.0).sqrt();
+            return [
+                (0.5 * (1.0 - offset), 5.0 / 18.0),
+                (0.5, 8.0 / 18.0),
+                (0.5 * (1.0 + offset), 5.0 / 18.0),
+            ]
+            .into_iter()
+            .map(|(s, w)| (add3(scale3(a, 1.0 - s), scale3(b, s)), w * area))
+            .collect();
+        }
         let offset = 1.0 / 3.0_f64.sqrt();
         [0.5 * (1.0 - offset), 0.5 * (1.0 + offset)]
             .into_iter()
@@ -1270,6 +1775,288 @@ mod tests {
             .map(f64::abs)
             .fold(0.0, f64::max);
         assert!(maximum < 1.0e-5, "maximum residual={maximum:e}");
+    }
+
+    fn config_p2_far_field(mesh: &Mesh, state: ConservativeState) -> CompressibleDgConfig {
+        let mut config = config_with_far_field(mesh, state);
+        config.degree = PolynomialDegree::P2;
+        config
+    }
+
+    #[test]
+    fn p2_uniform_flow_residual_vanishes_on_triangles_and_tetrahedra() {
+        let reference = uniform_state();
+        let tri = unit_square_triangles(2);
+        let state = CompressibleDgState::from_function_degree(
+            &tri,
+            PolynomialDegree::P2,
+            |_| reference,
+        )
+        .unwrap();
+        assert_eq!(state.element(0).len(), 6);
+        let operator =
+            CompressibleDgOperator::new(&tri, config_p2_far_field(&tri, reference)).unwrap();
+        let residual = operator.spatial_operator(&state).unwrap();
+        let maximum = residual
+            .iter()
+            .flat_map(|value| value.as_array())
+            .map(f64::abs)
+            .fold(0.0, f64::max);
+        assert!(maximum < 1.0e-5, "P2 triangle residual={maximum:e}");
+
+        let tet = unit_cube_tetrahedra(1);
+        let state = CompressibleDgState::from_function_degree(
+            &tet,
+            PolynomialDegree::P2,
+            |_| reference,
+        )
+        .unwrap();
+        assert_eq!(state.element(0).len(), 10);
+        let operator =
+            CompressibleDgOperator::new(&tet, config_p2_far_field(&tet, reference)).unwrap();
+        let residual = operator.spatial_operator(&state).unwrap();
+        let maximum = residual
+            .iter()
+            .flat_map(|value| value.as_array())
+            .map(f64::abs)
+            .fold(0.0, f64::max);
+        assert!(maximum < 1.0e-5, "P2 tetrahedron residual={maximum:e}");
+    }
+
+    #[test]
+    fn p2_cell_average_matches_linear_field_at_centroid() {
+        // Density is linear in space, so its cell average equals the value
+        // at the centroid. This pins the P2 average weights (zero/negative
+        // at vertices) and the edge-midpoint node layout.
+        let field = |point: [f64; 3]| ConservativeState {
+            density: 1.0 + 0.3 * point[0] - 0.2 * point[1] + 0.1 * point[2],
+            momentum: [0.0; 3],
+            total_energy: 2.5,
+        };
+        let tri = unit_square_triangles(2);
+        let state =
+            CompressibleDgState::from_function_degree(&tri, PolynomialDegree::P2, field).unwrap();
+        for element in 0..tri.num_elements() {
+            let centroid = element_centroid(&tri, element);
+            let expected = field(centroid).density;
+            let average = state.cell_average(element);
+            assert!(
+                (average.density - expected).abs() < 1.0e-12,
+                "triangle {element}: average {} vs centroid {expected}",
+                average.density
+            );
+        }
+        let tet = unit_cube_tetrahedra(1);
+        let state =
+            CompressibleDgState::from_function_degree(&tet, PolynomialDegree::P2, field).unwrap();
+        for element in 0..tet.num_elements() {
+            let centroid = element_centroid(&tet, element);
+            let expected = field(centroid).density;
+            let average = state.cell_average(element);
+            assert!(
+                (average.density - expected).abs() < 1.0e-12,
+                "tetrahedron {element}: average {} vs centroid {expected}",
+                average.density
+            );
+        }
+        // Interpolation at a non-node point pins the edge-node ordering
+        // shared by the state layout and the tabulated P2 basis: a permuted
+        // edge order would still pass the average checks above.
+        let space = DGSpace::new(PolynomialDegree::P2);
+        let tri_state =
+            CompressibleDgState::from_function_degree(&tri, PolynomialDegree::P2, field).unwrap();
+        for (mesh, state) in [(&tri, &tri_state), (&tet, &state)] {
+            let tab = space.tabulate(mesh, 0, 0.2, 0.3, 0.1);
+            let interpolated = interpolate_with_basis(state.element(0), &tab.values);
+            let expected = field(tab.physical_coords).density;
+            assert!(
+                (interpolated.density - expected).abs() < 1.0e-12,
+                "P2 interpolation {} vs exact {expected}",
+                interpolated.density
+            );
+        }
+    }
+
+    #[test]
+    fn p2_ssprk3_advances_physical_uniform_state() {
+        let mesh = unit_square_triangles(1);
+        let reference = uniform_state();
+        let mut state = CompressibleDgState::from_function_degree(
+            &mesh,
+            PolynomialDegree::P2,
+            |_| reference,
+        )
+        .unwrap();
+        let solver =
+            CompressibleDgSolver::new(&mesh, config_p2_far_field(&mesh, reference)).unwrap();
+        let report = solver.step(&mut state, 1.0e-5).unwrap();
+        assert!(report.minimum_density > 0.0);
+        assert!(report.minimum_pressure > 0.0);
+    }
+
+    #[test]
+    fn troubled_cell_sensor_leaves_smooth_field_unlimited() {
+        // Linear density ramp: neighbour cell-average jumps are ~1%, far
+        // below the 0.5 threshold, so no element may be touched.
+        let mesh = unit_square_triangles(4);
+        let gas = IdealGas {
+            gamma: 1.4,
+            gas_constant: 1.0,
+        };
+        let mut state = CompressibleDgState::from_function_degree(
+            &mesh,
+            PolynomialDegree::P2,
+            |point| ConservativeState {
+                density: 1.0 + 0.1 * point[0],
+                momentum: [0.0; 3],
+                total_energy: 2.5,
+            },
+        )
+        .unwrap();
+        let before = state.clone();
+        apply_characteristic_vertex_limiter(&mesh, &mut state, gas, 0.5, 0.5, f64::INFINITY);
+        assert_eq!(state, before, "smooth field must not be limited");
+        // With the sensor disabled (infinite threshold) the same field IS
+        // flattened somewhere: this is the legacy behaviour being gated.
+        let mut legacy = before.clone();
+        apply_characteristic_vertex_limiter(&mesh, &mut legacy, gas, 0.5, f64::INFINITY, f64::INFINITY);
+        assert_ne!(legacy, before, "legacy limiter should alter the ramp");
+    }
+
+    #[test]
+    fn troubled_cell_sensor_limits_only_the_shocked_element() {
+        // Density ramp on the left, jump down at x = 0.5. The element
+        // straddling the jump is troubled; a far-upstream element is not.
+        let mesh = unit_square_triangles(4);
+        let gas = IdealGas {
+            gamma: 1.4,
+            gas_constant: 1.0,
+        };
+        let field = |point: [f64; 3]| ConservativeState {
+            density: 1.0 + 0.4 * point[0] - if point[0] > 0.5 { 0.8 } else { 0.0 },
+            momentum: [0.0; 3],
+            total_energy: 2.5,
+        };
+        let mut state = CompressibleDgState::from_function_degree(
+            &mesh,
+            PolynomialDegree::P2,
+            field,
+        )
+        .unwrap();
+        let before = state.clone();
+        apply_characteristic_vertex_limiter(&mesh, &mut state, gas, 0.05, 0.1, f64::INFINITY);
+        // Find an element whose centroid is far upstream (smooth) and one
+        // adjacent to the jump.
+        let mut smooth_changed = false;
+        let mut shocked_changed = false;
+        for element in 0..mesh.num_elements() {
+            let centroid = element_centroid(&mesh, element);
+            let changed = state.element(element) != before.element(element);
+            if centroid[0] < 0.2 {
+                smooth_changed |= changed;
+            }
+            if (centroid[0] - 0.45).abs() < 0.08 {
+                shocked_changed |= changed;
+            }
+        }
+        assert!(!smooth_changed, "smooth upstream element must stay unlimited");
+        assert!(shocked_changed, "element at the jump must be limited");
+    }
+
+    #[test]
+    fn persson_indicator_separates_smooth_from_discontinuous() {
+        let mesh = unit_square_triangles(4);
+        let matrices = persson_matrices(
+            mesh.elements[0].element_type,
+            PolynomialDegree::P2,
+        )
+        .expect("P2 Persson matrices");
+        let gas = IdealGas {
+            gamma: 1.4,
+            gas_constant: 1.0,
+        };
+        let _ = gas;
+        let indicator_of = |field: &dyn Fn([f64; 3]) -> f64| -> f64 {
+            let state = CompressibleDgState::from_function_degree(
+                &mesh,
+                PolynomialDegree::P2,
+                |point| ConservativeState {
+                    density: field(point),
+                    momentum: [0.0; 3],
+                    total_energy: 2.5,
+                },
+            )
+            .unwrap();
+            // Worst (largest) indicator across elements.
+            (0..mesh.num_elements())
+                .map(|element| {
+                    let density: Vec<f64> = state
+                        .element(element)
+                        .iter()
+                        .map(|nodal| nodal.density)
+                        .collect();
+                    persson_indicator(&density, &matrices)
+                })
+                .fold(f64::NEG_INFINITY, f64::max)
+        };
+        let linear = indicator_of(&|point| 1.0 + 0.1 * point[0] - 0.05 * point[1]);
+        let quadratic = indicator_of(&|point| 1.0 + 0.3 * point[0] * point[0]);
+        let step = indicator_of(&|point| if point[0] < 0.5 { 1.0 } else { 0.3 });
+        assert!(linear < -8.0, "linear field indicator {linear} should be tiny");
+        assert!(
+            step > -1.5,
+            "step field indicator {step} should approach 0 (all energy in top modes)"
+        );
+        assert!(
+            quadratic > linear && quadratic < step,
+            "quadratic indicator {quadratic} should sit between linear {linear} and step {step}"
+        );
+    }
+
+    #[test]
+    fn persson_mode_leaves_smooth_ramp_unlimited() {
+        let mesh = unit_square_triangles(4);
+        let gas = IdealGas {
+            gamma: 1.4,
+            gas_constant: 1.0,
+        };
+        let mut state = CompressibleDgState::from_function_degree(
+            &mesh,
+            PolynomialDegree::P2,
+            |point| ConservativeState {
+                density: 1.0 + 0.4 * point[0] * point[0],
+                momentum: [0.0; 3],
+                total_energy: 2.5,
+            },
+        )
+        .unwrap();
+        let before = state.clone();
+        // PP threshold -1 flags only near-discontinuous elements; the
+        // legacy jump sensor stays out of the decision in PP mode.
+        apply_characteristic_vertex_limiter(
+            &mesh,
+            &mut state,
+            gas,
+            0.05,
+            0.03,
+            -1.0,
+        );
+        assert_eq!(state, before, "smooth quadratic field must not be limited in PP mode");
+    }
+
+    #[test]
+    fn p2_state_rejected_by_p1_operator() {
+        let mesh = unit_square_triangles(1);
+        let reference = uniform_state();
+        let state = CompressibleDgState::from_function_degree(
+            &mesh,
+            PolynomialDegree::P2,
+            |_| reference,
+        )
+        .unwrap();
+        let operator =
+            CompressibleDgOperator::new(&mesh, config_with_far_field(&mesh, reference)).unwrap();
+        assert!(operator.spatial_operator(&state).is_err());
     }
 
     #[test]
