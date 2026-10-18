@@ -32,13 +32,16 @@
 //! Tier-1 spline oracle); the frozen campaign winner is handed to downstream
 //! consumers through [`super::handoff`] with its evidence links.
 //!
-//! # Inward-only limitation
+//! # Inward-only default and opt-in flare
 //!
 //! Normalised variables `u in [0, 1]` map to `r = R0 - u·(R0 - r_min)`, so
-//! every candidate stays inside the original bore (`r(x) <= R0`) by
-//! construction and the dense grid re-audits it. Outward flare beyond `R0` is
-//! out of scope; relaxing that bound is a follow-up decision, not a silent
-//! parameter change.
+//! every candidate from [`SplinePortProfile::from_normalized`] stays inside
+//! the original bore (`r(x) <= R0`) by construction and the dense grid
+//! re-audits it. The frozen campaign used this mapping, so it stays the
+//! default. [`SplinePortProfile::from_normalized_flared`] is the explicit
+//! opt-in flare mapping: every knot is free, `u = 0` is still the straight
+//! bore, negative `u` widens toward a caller-supplied flare cap above `R0`,
+//! and positive `u` still pinches toward `r_min`.
 //!
 //! # Equal-airflow reporting rule
 //!
@@ -469,15 +472,20 @@ impl ProfileInterpolant {
 /// knots `2..N-1`.
 ///
 /// Every constructor runs the full dense-grid validation (finite, ordered
-/// knots, bounds, `r'(0) = 0`, `r <= R0`, slope limit, curvature budget) and
-/// rejects the candidate with [`PortFlowError::InvalidConfig`] before any
-/// solve can consume it.
+/// knots, bounds, `r'(0) = 0`, `r <=` effective radius cap, slope limit,
+/// curvature budget) and rejects the candidate with
+/// [`PortFlowError::InvalidConfig`] before any solve can consume it. The
+/// effective cap is `R0` for legacy profiles and the flare cap for profiles
+/// built by [`SplinePortProfile::from_normalized_flared`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SplinePortProfile {
     n_control_points: usize,
     length_m: f64,
     bore_radius_m: f64,
     throat_radius_m: f64,
+    /// Flare cap above `R0` in m (`None` keeps the legacy `r <= R0` cap).
+    #[serde(default)]
+    flare_max_radius_m: Option<f64>,
     spacing: KnotSpacing,
     limits: ShapeLimits,
     kind: ProfileSplineKind,
@@ -505,6 +513,7 @@ impl SplinePortProfile {
         length_m: f64,
         bore_radius_m: f64,
         throat_radius_m: f64,
+        flare_max_radius_m: Option<f64>,
         options: ProfileOptions,
     ) -> Result<Self, PortFlowError> {
         let n = radii.len();
@@ -529,6 +538,14 @@ impl SplinePortProfile {
                 "spline port profile throat radius {throat_radius_m} exceeds bore radius {bore_radius_m}"
             )));
         }
+        if let Some(flare_max) = flare_max_radius_m
+            && (!flare_max.is_finite() || flare_max <= bore_radius_m)
+        {
+            return Err(PortFlowError::InvalidConfig(format!(
+                "spline port profile flare cap {flare_max} must be finite and above bore radius {bore_radius_m}"
+            )));
+        }
+        let max_radius_m = flare_max_radius_m.unwrap_or(bore_radius_m);
         if !options.limits.slope_max.is_finite() || options.limits.slope_max < 0.0 {
             return Err(PortFlowError::InvalidConfig(format!(
                 "spline port profile slope_max must be finite and non-negative, got {}",
@@ -549,9 +566,9 @@ impl SplinePortProfile {
                     "spline port profile radius {index} must be finite"
                 )));
             }
-            if *radius < throat_radius_m || *radius > bore_radius_m {
+            if *radius < throat_radius_m || *radius > max_radius_m {
                 return Err(PortFlowError::InvalidConfig(format!(
-                    "spline port profile radius {index} = {radius} outside [r_min, R0] = [{throat_radius_m}, {bore_radius_m}]"
+                    "spline port profile radius {index} = {radius} outside [r_min, r_max] = [{throat_radius_m}, {max_radius_m}]"
                 )));
             }
         }
@@ -578,6 +595,7 @@ impl SplinePortProfile {
             length_m,
             bore_radius_m,
             throat_radius_m,
+            flare_max_radius_m,
             spacing: options.spacing,
             limits: options.limits,
             kind: options.kind,
@@ -626,7 +644,80 @@ impl SplinePortProfile {
         for (i, value) in u.iter().enumerate() {
             radii[i + 2] = bore_radius_m - value * span;
         }
-        Self::from_radii_with(radii, length_m, bore_radius_m, throat_radius_m, options)
+        Self::from_radii_with(
+            radii,
+            length_m,
+            bore_radius_m,
+            throat_radius_m,
+            None,
+            options,
+        )
+    }
+
+    /// Build a flared profile from signed normalised radii `u in [u_min, 1]^N`.
+    ///
+    /// Every knot is a free variable: `u[i]` sets knot `i` via the same
+    /// linear map `r = R0 - u·(R0 - r_min)` as [`Self::from_normalized`], so
+    /// `u = 0` is the straight bore, positive `u` pinches toward `r_min`, and
+    /// negative `u` widens toward `flare_max_radius_m`. The lower bound is
+    /// `u_min = (R0 - flare_max)/(R0 - r_min)` (negative, since the cap must
+    /// exceed `R0`). Both mouths can therefore flare, unlike the legacy
+    /// mapping which pins them to `R0`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PortFlowError::InvalidConfig`] when `N < 3`, `u` does not
+    /// hold one entry per knot, any `u` is non-finite or outside
+    /// `[u_min, 1]`, the flare cap is not finite and above `R0`, or the
+    /// resulting profile violates the shape limits.
+    pub fn from_normalized_flared(
+        n_control_points: usize,
+        length_m: f64,
+        bore_radius_m: f64,
+        throat_radius_m: f64,
+        flare_max_radius_m: f64,
+        u: &[f64],
+        options: ProfileOptions,
+    ) -> Result<Self, PortFlowError> {
+        if n_control_points < 3 {
+            return Err(PortFlowError::InvalidConfig(format!(
+                "spline port profile needs at least 3 control points, got {n_control_points}"
+            )));
+        }
+        if u.len() != n_control_points {
+            return Err(PortFlowError::InvalidConfig(format!(
+                "flared spline port profile with N = {n_control_points} needs {n_control_points} free radii, got {}",
+                u.len()
+            )));
+        }
+        if !flare_max_radius_m.is_finite() || flare_max_radius_m <= bore_radius_m {
+            return Err(PortFlowError::InvalidConfig(format!(
+                "spline port profile flare cap {flare_max_radius_m} must be finite and above bore radius {bore_radius_m}"
+            )));
+        }
+        let span = bore_radius_m - throat_radius_m;
+        if !span.is_finite() || span <= 0.0 {
+            return Err(PortFlowError::InvalidConfig(format!(
+                "flared spline port profile needs throat radius {throat_radius_m} below bore radius {bore_radius_m}"
+            )));
+        }
+        let u_min = (bore_radius_m - flare_max_radius_m) / span;
+        for (index, value) in u.iter().enumerate() {
+            if !value.is_finite() || *value < u_min || *value > 1.0 {
+                return Err(PortFlowError::InvalidConfig(format!(
+                    "spline port profile u[{index}] = {value} outside [{u_min}, 1]"
+                )));
+            }
+        }
+        let radii: Vec<f64> = u.iter().map(|value| bore_radius_m - value * span).collect();
+        Self::from_radii_with(
+            radii,
+            length_m,
+            bore_radius_m,
+            throat_radius_m,
+            Some(flare_max_radius_m),
+            options,
+        )
     }
 
     /// Build a profile from absolute knot radii (all pinned knots included).
@@ -647,6 +738,7 @@ impl SplinePortProfile {
             length_m,
             bore_radius_m,
             throat_radius_m,
+            None,
             options,
         )
     }
@@ -706,10 +798,10 @@ impl SplinePortProfile {
             min_radius = min_radius.min(r);
             max_slope = max_slope.max(slope);
         }
-        if max_radius > self.bore_radius_m + tol {
+        if max_radius > self.max_radius_m() + tol {
             return Err(PortFlowError::InvalidConfig(format!(
-                "spline port profile overshoots the bore: max r = {max_radius} > R0 = {}",
-                self.bore_radius_m
+                "spline port profile overshoots the bore: max r = {max_radius} > r_max = {}",
+                self.max_radius_m()
             )));
         }
         if min_radius < self.throat_radius_m - tol {
@@ -760,6 +852,16 @@ impl SplinePortProfile {
         self.throat_radius_m
     }
 
+    /// Flare cap above `R0` in m (`None` for a legacy inward-only profile).
+    pub fn flare_max_radius_m(&self) -> Option<f64> {
+        self.flare_max_radius_m
+    }
+
+    /// Effective maximum radius in m: the flare cap, or `R0` when unflared.
+    pub fn max_radius_m(&self) -> f64 {
+        self.flare_max_radius_m.unwrap_or(self.bore_radius_m)
+    }
+
     /// Knot placement used by this profile.
     pub fn spacing(&self) -> KnotSpacing {
         self.spacing
@@ -785,9 +887,21 @@ impl SplinePortProfile {
         &self.radii
     }
 
-    /// Free radii in normalised `u in [0, 1]` variables (knots `2..N-1`).
+    /// Free radii in normalised variables.
+    ///
+    /// Legacy profiles return `u in [0, 1]` for knots `2..N-1`. Flared
+    /// profiles return one signed entry per knot, with negative values
+    /// above `R0` toward the flare cap (see
+    /// [`Self::from_normalized_flared`]).
     pub fn normalized(&self) -> Vec<f64> {
         let span = self.bore_radius_m - self.throat_radius_m;
+        if self.flare_max_radius_m.is_some() {
+            return self
+                .radii
+                .iter()
+                .map(|r| (self.bore_radius_m - r) / span)
+                .collect();
+        }
         self.radii
             .iter()
             .skip(2)
@@ -1300,6 +1414,101 @@ mod tests {
             assert!(v >= prev - 1.0e-12, "monotone data must stay monotone");
             prev = v;
         }
+    }
+
+    #[test]
+    fn flared_profile_flares_both_mouths_and_round_trips() {
+        // Flare cap 1.4·R0: u = -1 maps a knot to the cap, u = 0 to R0.
+        let flare_max = 1.4 * R0;
+        let u = vec![-0.5, -0.25, 0.0, -0.25, -0.5];
+        let p = SplinePortProfile::from_normalized_flared(
+            5,
+            L,
+            R0,
+            RMIN,
+            flare_max,
+            &u,
+            ProfileOptions::default(),
+        )
+        .expect("gentle flare must construct");
+        assert_eq!(p.flare_max_radius_m(), Some(flare_max));
+        assert!(
+            (p.local_radius_m(0.0) - 0.030).abs() < 1.0e-12,
+            "interior mouth must flare above R0, got {}",
+            p.local_radius_m(0.0)
+        );
+        assert!(
+            (p.local_radius_m(L) - 0.030).abs() < 1.0e-12,
+            "exterior mouth must flare above R0, got {}",
+            p.local_radius_m(L)
+        );
+        assert!(
+            (p.local_radius_m(0.5 * L) - R0).abs() < 1.0e-12,
+            "throat knot must stay at R0 for u = 0"
+        );
+        let back = p.normalized();
+        assert_eq!(back.len(), u.len(), "flare mode packs every knot");
+        for (got, want) in back.iter().zip(u.iter()) {
+            assert!((got - want).abs() < 1.0e-12, "flare u round trip failed");
+        }
+        p.validate().expect("flared profile must re-validate");
+    }
+
+    #[test]
+    fn flared_profile_rejects_beyond_cap_and_bad_cap() {
+        let flare_max = 1.4 * R0;
+        assert!(
+            SplinePortProfile::from_normalized_flared(
+                5,
+                L,
+                R0,
+                RMIN,
+                flare_max,
+                &[-1.1, 0.0, 0.0, 0.0, 0.0],
+                ProfileOptions::default(),
+            )
+            .is_err(),
+            "radius beyond the flare cap must be rejected"
+        );
+        assert!(
+            SplinePortProfile::from_normalized_flared(
+                5,
+                L,
+                R0,
+                RMIN,
+                R0,
+                &[0.0; 5],
+                ProfileOptions::default(),
+            )
+            .is_err(),
+            "flare cap at or below R0 is not a flare and must be rejected"
+        );
+        assert!(
+            SplinePortProfile::from_normalized_flared(
+                5,
+                L,
+                R0,
+                RMIN,
+                flare_max,
+                &[0.0; 2],
+                ProfileOptions::default(),
+            )
+            .is_err(),
+            "flare mode needs one variable per knot"
+        );
+        // The legacy inward-only constructor still rejects negative u.
+        assert!(
+            SplinePortProfile::from_normalized(
+                5,
+                L,
+                R0,
+                RMIN,
+                &[-0.1, 0.0],
+                ProfileOptions::default()
+            )
+            .is_err(),
+            "legacy mapping must stay inward-only"
+        );
     }
 
     #[test]

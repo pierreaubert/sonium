@@ -58,7 +58,7 @@ pub use campaign::{
     Step7Report, airflow_match_residual_pct, campaign_duct_config, campaign_f_target_hz,
     campaign_profile_options, check_criterion_1, check_criterion_2, coarse_screening_fidelity,
     equal_airflow_voltage, grid_candidates, lhs_candidates, production_fidelity, profile_csv,
-    quota_selection, resample_winner_u,
+    quota_selection, quota_selection_with_straight, resample_winner_u,
 };
 pub use convergence::{
     PORT_FLOW_PROMOTION_SCHEMA_VERSION, PortFlowConvergenceLevel, PortFlowPhasor,
@@ -76,7 +76,7 @@ pub use evaluate::{
     PortCandidateMetrics, PortEvalDrive, PortEvalFidelity, PortEvalHealth, SecondTone,
     SmallSignalReference, TIER2_EVAL_PROVENANCE, TIER2_EVAL_SCHEMA_VERSION,
     TIER2_LINEAR_RESIDUAL_OK_MAX, TIER2_MIN_SAMPLES_PER_CYCLE, TIER2_THROAT_FRACTION_OF_BORE,
-    Tier2EvalContext, Tier2EvalOutcome,
+    Tier2EvalContext, Tier2EvalOutcome, Tier2SolverDevice, Tier2SolverSettings,
 };
 pub use finalist::{
     FinalistNoiseLevel, STEP8_MIN_NOISE_SNAPSHOTS, STEP8_NOISE_HARMONICS,
@@ -115,11 +115,11 @@ pub use optim_gate::{
     Step10Tier1Stage, Step10Tier2Fidelity, Step10Tier2Stage, run_step10_gate,
 };
 pub use optimize::{
-    AlBobyqaConfig, BudgetUsage, CBO_TIER2_BUDGET_THRESHOLD, CONSTRAINT_NAMES, CboSearchConfig,
-    DEFAULT_AIRFLOW_MIN_RATIO, DEFAULT_CACHE_QUANTIZATION_STEP, DEFAULT_COMPRESSION_MAX_DB,
-    DEFAULT_TUNING_TOLERANCE_HZ, Duct1dTier0Evaluator, EngineChoice, EngineUsed, EvalTier,
-    EvaluatedCandidate, FeasibilitySpec, FunnelConfig, FunnelOutcome, FunnelReport,
-    HistoryOutcomeKind, HistoryRecord, OptimHistory, PARETO_VIOLATION_PENALTY,
+    AlBobyqaConfig, AlCmaEsConfig, BudgetUsage, CBO_TIER2_BUDGET_THRESHOLD, CONSTRAINT_NAMES,
+    CboSearchConfig, DEFAULT_AIRFLOW_MIN_RATIO, DEFAULT_CACHE_QUANTIZATION_STEP,
+    DEFAULT_COMPRESSION_MAX_DB, DEFAULT_TUNING_TOLERANCE_HZ, Duct1dTier0Evaluator, EngineChoice,
+    EngineUsed, EvalTier, EvaluatedCandidate, FeasibilitySpec, FunnelConfig, FunnelOutcome,
+    FunnelReport, HistoryOutcomeKind, HistoryRecord, OptimHistory, PARETO_VIOLATION_PENALTY,
     PORT_OPTIM_HISTORY_PROVENANCE, PORT_OPTIM_HISTORY_SCHEMA_VERSION, ParetoCandidate,
     ParetoResult, ParetoSearchConfig, PortOptimError, PortOptimFunnel, REJECTED_OBJECTIVE,
     RankedCandidate, ScalarSearchConfig, ScalarWeights, ScalarizedResult, SplineTier1Evaluator,

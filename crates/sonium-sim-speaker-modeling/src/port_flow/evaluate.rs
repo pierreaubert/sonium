@@ -50,7 +50,10 @@ use std::f64::consts::{PI, TAU};
 use serde::{Deserialize, Serialize};
 use sonium_fem::basis::PolynomialDegree;
 use sonium_fem::mesh::Mesh;
-use sonium_fem::physics::fluid::stokes::navier_stokes::NavierStokesConfig;
+use sonium_fem::physics::fluid::stokes::navier_stokes::{
+    BackendPreconditionerKind, BackendPressureSchurPreconditionerKind, LinearSolverBackend,
+    LinearSolverCpuPreconditionerKind, NavierStokesConfig,
+};
 use sonium_fem::physics::fluid::stokes::time_stepping::BdfConfig;
 use sonium_fem::spaces::{FunctionSpace, H1Space, VectorH1Space};
 
@@ -459,6 +462,43 @@ pub struct Tier2EvalOutcome {
     pub field_snapshots: Vec<PortFlowFieldSnapshot>,
 }
 
+/// Linear-solver device for Tier-2 evaluations.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Tier2SolverDevice {
+    /// Legacy CPU path: sparse direct solve (the frozen-campaign default).
+    #[default]
+    Cpu,
+    /// GPU path: backend GMRES with a Jacobi-Schur/Chebyshev block
+    /// preconditioner, mirroring the proven 3D spot-check configuration.
+    /// Requires a `cuda`-feature build plus a CUDA driver; the harness
+    /// fails loudly when a solve resolves to the wrong device.
+    Cuda,
+}
+
+/// Linear-solver settings for Tier-2 evaluations.
+///
+/// The CPU device ignores the iteration fields (direct solve); they apply
+/// to the iterative GPU backend path only.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Tier2SolverSettings {
+    /// Device that must resolve every linear solve.
+    pub device: Tier2SolverDevice,
+    /// Maximum backend GMRES iterations per solve (GPU path).
+    pub max_iterations: usize,
+    /// Relative residual tolerance per solve (GPU path).
+    pub tolerance: f64,
+}
+
+impl Default for Tier2SolverSettings {
+    fn default() -> Self {
+        Self {
+            device: Tier2SolverDevice::Cpu,
+            max_iterations: 5_000,
+            tolerance: 1.0e-8,
+        }
+    }
+}
+
 /// Frozen Tier-2 evaluation envelope with one shared straight baseline mesh.
 ///
 /// The reference tube, chambers, mesh size, lumped box/driver, and medium all
@@ -475,6 +515,7 @@ pub struct Tier2EvalContext {
     mesh_size_m: f64,
     smoothing_passes: usize,
     baseline_mesh: Mesh,
+    solver: Tier2SolverSettings,
 }
 
 impl Tier2EvalContext {
@@ -501,6 +542,7 @@ impl Tier2EvalContext {
             smoothing_passes: DEFAULT_MORPH_SMOOTHING_PASSES,
             case,
             baseline_mesh,
+            solver: Tier2SolverSettings::default(),
         })
     }
 
@@ -525,6 +567,22 @@ impl Tier2EvalContext {
         self.baseline_mesh = build_slot_port_mesh(&slot)?;
         self.mesh_size_m = mesh_size_m;
         Ok(self)
+    }
+
+    /// Select the linear-solver device/settings for evaluations.
+    ///
+    /// Consumes and returns the context so the override stays visible at
+    /// the call site. The CPU device (default) keeps the frozen direct
+    /// solver; CUDA switches to the iterative backend path and makes
+    /// [`Self::evaluate`] fail loudly if any solve resolves off-device.
+    pub fn with_solver_settings(mut self, solver: Tier2SolverSettings) -> Self {
+        self.solver = solver;
+        self
+    }
+
+    /// Linear-solver settings evaluations will use.
+    pub fn solver_settings(&self) -> Tier2SolverSettings {
+        self.solver
     }
 
     /// The frozen reference case backing this context.
@@ -635,18 +693,33 @@ impl Tier2EvalContext {
             let ratio = drive.second_tone.map_or(0.0, |tone| tone.amplitude_ratio);
             (f2, ratio)
         });
+        // CPU device keeps the frozen Navier-Stokes defaults exactly
+        // (sparse direct solve). CUDA switches to the iterative backend
+        // path with the 3D spot-check block preconditioner.
+        let mut ns_config = NavierStokesConfig {
+            mu: self.case.dynamic_viscosity_pa_s,
+            rho: self.case.density_kg_per_m3,
+            use_residual_stabilisation: false,
+            // Zero body force through `solve_bdf_step_cached`: the
+            // force quadrature is identical every step, so caching
+            // skips two full assemblies per step after the first.
+            cache_body_force_assembly: true,
+            ..Default::default()
+        };
+        if self.solver.device == Tier2SolverDevice::Cuda {
+            ns_config.use_direct_solver = false;
+            ns_config.linear_solver_backend = LinearSolverBackend::Cuda;
+            ns_config.linear_solver_backend_preconditioner = BackendPreconditionerKind::JacobiSchur;
+            ns_config.linear_solver_schur_preconditioner =
+                BackendPressureSchurPreconditionerKind::Chebyshev;
+            ns_config.linear_solver_cpu_preconditioner =
+                LinearSolverCpuPreconditionerKind::JacobiSchur;
+            ns_config.linear_solver_max_iterations = self.solver.max_iterations;
+            ns_config.linear_solver_tolerance = self.solver.tolerance;
+        }
         Ok(CoupledPortConfig {
             driver: self.case.driver(),
-            ns_config: NavierStokesConfig {
-                mu: self.case.dynamic_viscosity_pa_s,
-                rho: self.case.density_kg_per_m3,
-                use_residual_stabilisation: false,
-                // Zero body force through `solve_bdf_step_cached`: the
-                // force quadrature is identical every step, so caching
-                // skips two full assemblies per step after the first.
-                cache_body_force_assembly: true,
-                ..Default::default()
-            },
+            ns_config,
             bdf: BdfConfig::bdf2(run.dt_s, run.num_steps)
                 .with_output(fidelity.snapshot_interval_steps),
             voltage_fn: Box::new(move |time_s| {
@@ -702,6 +775,22 @@ impl Tier2EvalContext {
         let v_space = VectorH1Space::new(PolynomialDegree::P2, 2);
         let p_space = H1Space::new(PolynomialDegree::P1);
         let result = run_coupled_port(&mesh, &v_space, &p_space, &config)?;
+        // A CUDA request must never silently report CPU numbers: every
+        // linear solve has to resolve to the requested device.
+        if self.solver.device == Tier2SolverDevice::Cuda
+            && result.linear_solves.iter().any(|solve| {
+                !matches!(
+                    solve.resolved_linear_solver_backend,
+                    LinearSolverBackend::Cuda
+                )
+            })
+        {
+            return Err(PortFlowError::InvalidConfig(
+                "Tier 2 requested the CUDA device but a linear solve fell back to CPU; \
+                 build with the cuda feature and provide a CUDA driver"
+                    .to_string(),
+            ));
+        }
         let reduction = TailReduction {
             result: &result,
             mesh: &mesh,

@@ -29,17 +29,23 @@
 //! The scalarised search objective is
 //! `J = w_THD·(THD/THD_ref) + w_N·(N/N_ref) + w_k·(κ/κ_max)`, normalised by the
 //! straight-tube baseline at the evaluating tier so the weights are
-//! scale-free. Tiers that cannot measure a term (Tier 0/1 have no THD or
-//! noise) rank by the available terms and flag the value partial
-//! ([`EvaluatedCandidate::objective_partial`]); the full `J` is only claimed
-//! at Tier 2. Pareto mode returns the (distortion-plus-noise, airflow) front
-//! instead of a scalar optimum.
+//! scale-free. Tiers that cannot measure a term rank by the available
+//! terms and flag the value partial
+//! ([`EvaluatedCandidate::objective_partial`]): Tier 0/1 carry the
+//! `U^8/L^3` throat-velocity noise surrogate (the Tier 2 trend definition
+//! applied to the linear flow) but no THD, so the full `J` is only claimed
+//! at Tier 2. Pareto mode returns the (distortion-plus-noise, airflow)
+//! front instead of a scalar optimum.
 //!
 //! # Engines
 //!
 //! * Default: hand-rolled augmented-Lagrangian outer loop with BOBYQA inner
 //!   solves ([`PortOptimFunnel::optimize_al_bobyqa`]), derivative-free as plan
 //!   decision D7 requires (the bundled AL only offers gradient inner solvers).
+//! * Same outer loop with CMA-ES inner solves
+//!   ([`PortOptimFunnel::optimize_al_cmaes`]) for rugged merits where the
+//!   quadratic model stalls (e.g. coupled widening directions); explicit
+//!   choice via [`EngineChoice::AugmentedLagrangianCmaEs`], never `Auto`.
 //! * Constrained Bayesian optimisation when the Tier 2 budget is below
 //!   [`CBO_TIER2_BUDGET_THRESHOLD`] ([`PortOptimFunnel::optimize_cbo`]).
 //! * NSGA-II for Pareto mode ([`PortOptimFunnel::optimize_pareto`]).
@@ -55,13 +61,17 @@
 //! its evidence links are handed to downstream consumers through
 //! [`super::handoff`].
 //!
-//! # Inward-only limitation
+//! # Inward-only default and flare opt-in
 //!
-//! The search variables are the normalised free radii `u in [0, 1]^(N-3)`
-//! with `r = R0 - u·(R0 - r_min)`, so the funnel can only propose profiles
-//! inside the original bore (`r(x) <= R0`). The campaign outcome is honestly a
-//! documented SC2 null result under this constraint; outward flare is a
-//! follow-up decision, not a silent bound change.
+//! By default the search variables are the normalised free radii
+//! `u in [0, 1]^(N-3)` with `r = R0 - u·(R0 - r_min)`, so the funnel only
+//! proposes profiles inside the original bore (`r(x) <= R0`); the frozen
+//! campaign outcome is honestly a documented SC2 null result under this
+//! constraint. Setting [`ProfileTemplate::flare_max_radius_m`] opts into
+//! the flare search space: one signed variable per knot, `u = 0` still the
+//! straight bore, negative values widening toward the flare cap (see
+//! [`SplinePortProfile::from_normalized_flared`]). The legacy mapping stays
+//! the default so frozen campaign vectors keep their meaning.
 //!
 //! # Equal-airflow reporting rule
 //!
@@ -80,9 +90,9 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sonium_fem::physics::acoustics::pressure::FluidProperties;
 use sonium_solvers_optimization::{
-    BayesOptConstraint, BayesOptConstraintFn, BobyqaConfig, Bound, ConstrainedBayesOptConfig,
-    Constraint, ConstraintKind, NsgaConfig, NsgaVariant, bobyqa, constrained_bayesian_optimization,
-    nsga2,
+    BayesOptConstraint, BayesOptConstraintFn, BobyqaConfig, Bound, CmaEsConfig,
+    ConstrainedBayesOptConfig, Constraint, ConstraintKind, NsgaConfig, NsgaVariant, bobyqa, cma_es,
+    constrained_bayesian_optimization, nsga2,
 };
 
 use super::baseline::PortOptimReferenceCase;
@@ -96,7 +106,7 @@ use super::linear_reference::{
     SplinePortLinearReferenceConfig, solve_spline_port_linear_reference,
 };
 use super::profile::{PROFILE_VALIDATION_GRID_POINTS, ProfileOptions, SplinePortProfile};
-use crate::AcousticMedium;
+use crate::{AcousticMedium, free_turbulence_power_trend};
 
 /// Schema version for [`OptimHistory`].
 pub const PORT_OPTIM_HISTORY_SCHEMA_VERSION: u32 = 1;
@@ -154,11 +164,15 @@ pub enum EvalTier {
     Tier2,
 }
 
-/// Fixed geometry behind the normalised search variables `u in [0, 1]^(N-3)`.
+/// Fixed geometry behind the normalised search variables.
 ///
-/// Axial knots are fixed (plan D3); only the free radii vary. The inlet,
-/// outlet, and straight-start knots are pinned to `R0` by
-/// [`SplinePortProfile::from_normalized`].
+/// Axial knots are fixed (plan D3); only the radii vary. By default the
+/// legacy inward-only mapping applies: `u in [0, 1]^(N-3)` with the inlet,
+/// outlet, and straight-start knots pinned to `R0` by
+/// [`SplinePortProfile::from_normalized`]. Setting
+/// [`Self::flare_max_radius_m`] switches to the flare mapping: one signed
+/// variable per knot (`u in [u_min, 1]^N`, `u_min < 0`), `u = 0` still the
+/// straight bore, negative values widening toward the flare cap.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProfileTemplate {
     /// Control-point count `N` (needs `N >= 3`; optimisation needs `N >= 4`
@@ -170,25 +184,118 @@ pub struct ProfileTemplate {
     pub bore_radius_m: f64,
     /// Minimum admissible radius `r_min` in m (default `0.6·R0`).
     pub throat_radius_m: f64,
+    /// Flare cap above `R0` in m; `Some` enables the flare search space.
+    #[serde(default)]
+    pub flare_max_radius_m: Option<f64>,
+    /// Optional port-length search range `(min_m, max_m)`.
+    ///
+    /// When set, one extra trailing search variable `s in [0, 1]` maps to
+    /// `L = min + s·(max - min)`, so the optimiser can re-trim tuning by
+    /// length while the radii shape the flow. [`Self::length_m`] is the
+    /// nominal (straight) length and must lie inside the range. Leave unset
+    /// when the cabinet fixes the port length.
+    #[serde(default)]
+    pub length_range_m: Option<(f64, f64)>,
+    /// Pin the exterior (exhaust) knot to `R0` in the flare mapping.
+    ///
+    /// Set when the cabinet fixes the exhaust opening: the last knot is
+    /// then not a search variable and its radius stays at the bore.
+    #[serde(default)]
+    pub pin_exterior_mouth: bool,
+    /// Pin the interior (inlet) knot to `R0` in the flare mapping.
+    ///
+    /// Set when the cabinet fixes the inlet opening: the first knot is
+    /// then not a search variable and its radius stays at the bore. With
+    /// both mouths pinned, only the interior spline knots are unknown.
+    #[serde(default)]
+    pub pin_interior_mouth: bool,
     /// Knot spacing, shape limits, and spline kind.
     pub options: ProfileOptions,
 }
 
 impl ProfileTemplate {
-    /// Number of free search variables (`N - 3`, saturating at zero).
-    pub fn n_free(&self) -> usize {
-        self.n_control_points.saturating_sub(3)
+    /// Number of free radius variables (without the length variable).
+    fn n_radii_free(&self) -> usize {
+        if self.flare_max_radius_m.is_some() {
+            let pinned =
+                usize::from(self.pin_interior_mouth) + usize::from(self.pin_exterior_mouth);
+            self.n_control_points.saturating_sub(pinned)
+        } else {
+            self.n_control_points.saturating_sub(3)
+        }
     }
 
-    /// Build the straight-tube profile (`u = 0`), validating the template.
+    /// Number of free search variables.
+    ///
+    /// `N - 3` (saturating at zero) for the legacy mapping, `N` when the
+    /// flare mapping frees every knot, plus one when a length range is set.
+    pub fn n_free(&self) -> usize {
+        self.n_radii_free() + usize::from(self.length_range_m.is_some())
+    }
+
+    /// Search bounds for every free variable, in solver types.
+    ///
+    /// The legacy mapping uses the unit box. The flare mapping extends the
+    /// lower bound to `(R0 - flare_max)/(R0 - r_min)` so `u = 0` stays the
+    /// straight bore and the bound reaches the flare cap exactly. The
+    /// trailing length variable, when present, uses the unit interval.
+    pub fn variable_bounds(&self) -> Vec<Bound<f64>> {
+        let lower = match self.flare_max_radius_m {
+            Some(flare_max) => {
+                (self.bore_radius_m - flare_max) / (self.bore_radius_m - self.throat_radius_m)
+            }
+            None => 0.0,
+        };
+        let mut bounds = vec![Bound::both(lower, 1.0); self.n_radii_free()];
+        if self.length_range_m.is_some() {
+            bounds.push(Bound::both(0.0, 1.0));
+        }
+        bounds
+    }
+
+    /// The straight-tube search vector (zero radii, nominal length).
+    pub fn straight_u(&self) -> Vec<f64> {
+        let mut u = vec![0.0; self.n_radii_free()];
+        if let Some((min_m, max_m)) = self.length_range_m {
+            u.push((self.length_m - min_m) / (max_m - min_m));
+        }
+        u
+    }
+
+    /// Candidate port length for a full search vector in m.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PortFlowError::InvalidConfig`] when the vector is short,
+    /// the length coordinate is outside `[0, 1]`, or the template length
+    /// range is invalid or does not contain the nominal length.
+    fn candidate_length_m(&self, u: &[f64]) -> Result<f64, PortFlowError> {
+        let Some((min_m, max_m)) = self.length_range_m else {
+            return Ok(self.length_m);
+        };
+        if !(min_m.is_finite() && max_m.is_finite() && min_m > 0.0 && max_m > min_m) {
+            return Err(PortFlowError::InvalidConfig(format!(
+                "port length range ({min_m}, {max_m}) must be finite with 0 < min < max"
+            )));
+        }
+        if !(self.length_m >= min_m && self.length_m <= max_m) {
+            return Err(PortFlowError::InvalidConfig(format!(
+                "nominal port length {} outside the search range ({min_m}, {max_m})",
+                self.length_m
+            )));
+        }
+        let s = u.last().copied().unwrap_or(f64::NAN);
+        if !s.is_finite() || !(0.0..=1.0).contains(&s) {
+            return Err(PortFlowError::InvalidConfig(format!(
+                "port length variable = {s} outside [0, 1]"
+            )));
+        }
+        Ok(min_m + s * (max_m - min_m))
+    }
+
+    /// Build the straight-tube profile, validating the template.
     pub fn straight(&self) -> Result<SplinePortProfile, PortFlowError> {
-        SplinePortProfile::straight(
-            self.n_control_points,
-            self.length_m,
-            self.bore_radius_m,
-            self.throat_radius_m,
-            self.options,
-        )
+        self.unpack(&self.straight_u())
     }
 
     /// Build a candidate profile from normalised variables (`unpack`).
@@ -197,14 +304,56 @@ impl ProfileTemplate {
     /// violating the shape limits, with [`PortFlowError::InvalidConfig`]
     /// before any solve can consume it.
     pub fn unpack(&self, u: &[f64]) -> Result<SplinePortProfile, PortFlowError> {
-        SplinePortProfile::from_normalized(
-            self.n_control_points,
-            self.length_m,
-            self.bore_radius_m,
-            self.throat_radius_m,
-            u,
-            self.options,
-        )
+        let length_m = self.candidate_length_m(u)?;
+        let radii_u = if self.length_range_m.is_some() {
+            u.get(..self.n_radii_free()).ok_or_else(|| {
+                PortFlowError::InvalidConfig(format!(
+                    "port search vector needs {} entries, got {}",
+                    self.n_free(),
+                    u.len()
+                ))
+            })?
+        } else {
+            u
+        };
+        match self.flare_max_radius_m {
+            Some(flare_max) => {
+                // Pinned mouths contribute fixed zero (bore) entries at the
+                // end knots; the profile constructor always sees all N.
+                let full_u;
+                let flare_u = if self.pin_interior_mouth || self.pin_exterior_mouth {
+                    let mut expanded = Vec::with_capacity(self.n_control_points);
+                    if self.pin_interior_mouth {
+                        expanded.push(0.0);
+                    }
+                    expanded.extend_from_slice(radii_u);
+                    if self.pin_exterior_mouth {
+                        expanded.push(0.0);
+                    }
+                    full_u = expanded;
+                    &full_u[..]
+                } else {
+                    radii_u
+                };
+                SplinePortProfile::from_normalized_flared(
+                    self.n_control_points,
+                    length_m,
+                    self.bore_radius_m,
+                    self.throat_radius_m,
+                    flare_max,
+                    flare_u,
+                    self.options,
+                )
+            }
+            None => SplinePortProfile::from_normalized(
+                self.n_control_points,
+                length_m,
+                self.bore_radius_m,
+                self.throat_radius_m,
+                radii_u,
+                self.options,
+            ),
+        }
     }
 }
 
@@ -252,7 +401,10 @@ pub struct Tier0Obs {
     pub plane_wave_margin: f64,
     /// Analytic distortion term (toy evaluators only; `None` for [`solve_duct_1d`]).
     pub thd_proxy: Option<f64>,
-    /// Analytic noise term (toy evaluators only; `None` for [`solve_duct_1d`]).
+    /// Noise trend `U_throat^8/L^3` mirroring the Tier 2 proxy definition.
+    ///
+    /// Filled by [`Duct1dTier0Evaluator`] from the duct flow and the
+    /// profile minimum area; toy evaluators may supply their own term.
     pub noise_proxy: Option<f64>,
 }
 
@@ -273,7 +425,10 @@ pub struct Tier1Obs {
     pub flux_relative_difference: f64,
     /// Analytic distortion term (toy evaluators only; `None` for the FEM reference).
     pub thd_proxy: Option<f64>,
-    /// Analytic noise term (toy evaluators only; `None` for the FEM reference).
+    /// Noise trend `U_throat^8/L^3` mirroring the Tier 2 proxy definition.
+    ///
+    /// Filled by [`SplineTier1Evaluator`] from the reference flow and the
+    /// profile minimum area; toy evaluators may supply their own term.
     pub noise_proxy: Option<f64>,
 }
 
@@ -302,6 +457,41 @@ pub trait Tier2Evaluator: Send + Sync {
 // Production evaluators
 // ---------------------------------------------------------------------------
 
+/// Noise surrogate for the linear tiers, mirroring the Tier 2 trend.
+///
+/// Computes `U^8/L^3` with `U = |Q|/S_min` the throat (minimum-area)
+/// particle velocity, exactly the quantity whose eighth power the Tier 2
+/// harness reports via [`free_turbulence_power_trend`] on its throat area.
+/// This is a relative trend for ranking, not an absolute noise prediction:
+/// Tier 0/1 stay linear, so flow separation itself remains a Tier 2 claim.
+/// A silent duct (`Q = 0`) trends to zero instead of failing the trend's
+/// positive-velocity contract.
+///
+/// # Errors
+///
+/// Returns [`PortFlowError::InvalidConfig`] when the profile minimum area
+/// or the resulting trend is not finite and positive-area.
+fn noise_trend_proxy(profile: &SplinePortProfile, q_rms_m3s: f64) -> Result<f64, PortFlowError> {
+    let min_radius = profile
+        .sampled_profile(PROFILE_VALIDATION_GRID_POINTS)
+        .iter()
+        .map(|station| station[1])
+        .fold(f64::INFINITY, f64::min);
+    if !(min_radius.is_finite() && min_radius > 0.0) {
+        return Err(PortFlowError::InvalidConfig(format!(
+            "noise surrogate needs a positive finite profile minimum radius, got {min_radius}"
+        )));
+    }
+    if q_rms_m3s == 0.0 {
+        return Ok(0.0);
+    }
+    let throat_area = std::f64::consts::PI * min_radius * min_radius;
+    let throat_velocity = q_rms_m3s / throat_area;
+    free_turbulence_power_trend(throat_velocity, profile.length_m()).map_err(|error| {
+        PortFlowError::InvalidConfig(format!("noise surrogate rejected its inputs: {error}"))
+    })
+}
+
 /// Tier 0 evaluator backed by the variable-area duct model.
 #[derive(Debug, Clone, Copy)]
 pub struct Duct1dTier0Evaluator {
@@ -317,14 +507,15 @@ impl Tier0Evaluator for Duct1dTier0Evaluator {
     fn eval_tier0(&self, profile: &SplinePortProfile) -> Result<Tier0Obs, PortFlowError> {
         let f0_hz = tuning_frequency_hz(profile, self.medium, &self.duct)?;
         let point = solve_duct_1d(profile, self.medium, self.f_target_hz, &self.duct)?;
+        let q_rms_m3s = point.inlet_volume_velocity_rms_m3_per_s.norm();
         Ok(Tier0Obs {
             f0_hz,
-            q_rms_m3s: point.inlet_volume_velocity_rms_m3_per_s.norm(),
+            q_rms_m3s,
             curvature_m3: profile.curvature_integral(),
             max_slope: max_profile_slope(profile),
             plane_wave_margin: point.plane_wave_margin,
             thd_proxy: None,
-            noise_proxy: None,
+            noise_proxy: Some(noise_trend_proxy(profile, q_rms_m3s)?),
         })
     }
 }
@@ -375,9 +566,10 @@ impl Tier1Evaluator for SplineTier1Evaluator {
             box_volume_m3: self.box_volume_m3,
         };
         let transfer = solve_spline_port_linear_reference(&mesh, &config, self.f_target_hz)?;
+        let q_rms_m3s = transfer.port_volume_velocity_rms_m3_per_s.norm();
         Ok(Tier1Obs {
             f0_hz,
-            q_rms_m3s: transfer.port_volume_velocity_rms_m3_per_s.norm(),
+            q_rms_m3s,
             z_port_pa_s_per_m3: [
                 transfer.port_impedance_pa_s_per_m3.re,
                 transfer.port_impedance_pa_s_per_m3.im,
@@ -389,7 +581,7 @@ impl Tier1Evaluator for SplineTier1Evaluator {
             relative_residual: transfer.relative_residual,
             flux_relative_difference: transfer.strong_weak_exterior_flux_relative_difference,
             thd_proxy: None,
-            noise_proxy: None,
+            noise_proxy: Some(noise_trend_proxy(profile, q_rms_m3s)?),
         })
     }
 }
@@ -619,6 +811,14 @@ pub struct EvaluatedCandidate {
     pub compression_db: Option<f64>,
     /// Peak Mach number, bulk velocity over throat (`None` below Tier 2).
     pub peak_mach: Option<f64>,
+    /// Duct separation fraction from Tier-2 tail snapshots.
+    ///
+    /// Mean fraction of duct-band velocity DOFs opposing the bulk flow;
+    /// `None` below Tier 2 or when snapshots were disabled. This is the
+    /// separation-aware observable the throat-velocity noise trend cannot
+    /// see: mouth flare moves it without moving the trend.
+    #[serde(default)]
+    pub separation_fraction: Option<f64>,
     /// Profile curvature budget `∫(r'')² dx` in m⁻³.
     pub curvature_m3: f64,
     /// Maximum wall slope (dimensionless).
@@ -1035,14 +1235,30 @@ impl PortOptimFunnel {
         &self.config
     }
 
-    /// Number of free search variables (`N - 3`).
+    /// Number of free search variables (template mapping dependent).
     pub fn n_free(&self) -> usize {
         self.config.template.n_free()
     }
 
-    /// Unit-box bounds for the free variables in solver types.
+    /// Search bounds for the free variables in solver types.
+    ///
+    /// Unit box for the legacy mapping; the flare mapping extends the
+    /// lower bound below zero (see [`ProfileTemplate::variable_bounds`]).
     pub fn bounds(&self) -> Vec<Bound<f64>> {
-        free_variable_bounds(self.n_free())
+        self.config.template.variable_bounds()
+    }
+
+    /// Search bounds as `(lower, upper)` pairs for tuple-based drivers.
+    fn bound_pairs(&self) -> Vec<(f64, f64)> {
+        self.bounds()
+            .iter()
+            .map(|bound| {
+                (
+                    bound.lower.unwrap_or(f64::NEG_INFINITY),
+                    bound.upper.unwrap_or(f64::INFINITY),
+                )
+            })
+            .collect()
     }
 
     /// Current budget consumption and funnel accounting.
@@ -1213,13 +1429,16 @@ impl PortOptimFunnel {
         if u.len() != n_free {
             return Err(format!("expected {n_free} free variables, got {}", u.len()));
         }
-        if let Some((index, value)) = u
-            .iter()
-            .enumerate()
-            .find(|(_, v)| !v.is_finite() || **v < 0.0 || **v > 1.0)
-        {
+        let bounds = self.config.template.variable_bounds();
+        if let Some((index, value)) = u.iter().enumerate().find(|(index, v)| {
+            let lower = bounds[*index].lower.unwrap_or(f64::NEG_INFINITY);
+            let upper = bounds[*index].upper.unwrap_or(f64::INFINITY);
+            !v.is_finite() || **v < lower || **v > upper
+        }) {
+            let lower = bounds[index].lower.unwrap_or(f64::NEG_INFINITY);
+            let upper = bounds[index].upper.unwrap_or(f64::INFINITY);
             return Err(format!(
-                "u[{index}] = {value} outside the [0, 1] search box"
+                "u[{index}] = {value} outside the [{lower}, {upper}] search box"
             ));
         }
         Ok(())
@@ -1275,7 +1494,7 @@ impl PortOptimFunnel {
         if let Some(baseline) = self.lock_state().baselines.get(&tier).copied() {
             return Ok(baseline);
         }
-        let straight = vec![0.0; self.n_free()];
+        let straight = self.config.template.straight_u();
         let outcome = self.evaluate_inner(tier, &straight, true)?;
         let candidate = match outcome {
             FunnelOutcome::Evaluated(candidate) => candidate,
@@ -1326,6 +1545,7 @@ impl PortOptimFunnel {
                     obs.noise_proxy,
                     None,
                     None,
+                    None,
                     obs.curvature_m3,
                     obs.max_slope,
                     baseline,
@@ -1344,6 +1564,7 @@ impl PortOptimFunnel {
                     obs.q_rms_m3s,
                     obs.thd_proxy,
                     obs.noise_proxy,
+                    None,
                     None,
                     None,
                     profile.curvature_integral(),
@@ -1366,6 +1587,7 @@ impl PortOptimFunnel {
                     Some(metrics.turbulence_power_trend),
                     metrics.compression_db,
                     Some(metrics.peak_mach_bulk),
+                    metrics.separation_fraction,
                     metrics.curvature_integral_m3,
                     max_profile_slope(profile),
                     baseline,
@@ -1385,6 +1607,7 @@ impl PortOptimFunnel {
         noise_proxy: Option<f64>,
         compression_db: Option<f64>,
         peak_mach: Option<f64>,
+        separation_fraction: Option<f64>,
         curvature_m3: f64,
         max_slope: f64,
         baseline: Option<BaselineObs>,
@@ -1406,6 +1629,7 @@ impl PortOptimFunnel {
             ("noise_proxy", noise_proxy),
             ("compression_db", compression_db),
             ("peak_mach", peak_mach),
+            ("separation_fraction", separation_fraction),
         ] {
             if let Some(v) = value
                 && !v.is_finite()
@@ -1498,6 +1722,7 @@ impl PortOptimFunnel {
             noise_proxy,
             compression_db,
             peak_mach,
+            separation_fraction,
             curvature_m3,
             max_slope,
             constraints,
@@ -1735,13 +1960,16 @@ impl PortOptimFunnel {
                 x0.len()
             )));
         }
-        if let Some((index, value)) = x0
-            .iter()
-            .enumerate()
-            .find(|(_, v)| !v.is_finite() || **v < 0.0 || **v > 1.0)
-        {
+        let bounds = self.config.template.variable_bounds();
+        if let Some((index, value)) = x0.iter().enumerate().find(|(index, v)| {
+            let lower = bounds[*index].lower.unwrap_or(f64::NEG_INFINITY);
+            let upper = bounds[*index].upper.unwrap_or(f64::INFINITY);
+            !v.is_finite() || **v < lower || **v > upper
+        }) {
+            let lower = bounds[index].lower.unwrap_or(f64::NEG_INFINITY);
+            let upper = bounds[index].upper.unwrap_or(f64::INFINITY);
             return Err(PortOptimError::InvalidConfig(format!(
-                "start point x0[{index}] = {value} outside the [0, 1] search box"
+                "start point x0[{index}] = {value} outside the [{lower}, {upper}] search box"
             )));
         }
         Ok(())
@@ -1775,6 +2003,8 @@ pub enum EngineChoice {
     Auto,
     /// Augmented-Lagrangian outer loop with BOBYQA inner solves.
     AugmentedLagrangianBobyqa,
+    /// Augmented-Lagrangian outer loop with CMA-ES inner solves.
+    AugmentedLagrangianCmaEs,
     /// Constrained Bayesian optimisation (small evaluation budgets).
     ConstrainedBayesOpt,
 }
@@ -1784,6 +2014,8 @@ pub enum EngineChoice {
 pub enum EngineUsed {
     /// Augmented-Lagrangian outer loop with BOBYQA inner solves.
     AugmentedLagrangianBobyqa,
+    /// Augmented-Lagrangian outer loop with CMA-ES inner solves.
+    AugmentedLagrangianCmaEs,
     /// Constrained Bayesian optimisation.
     ConstrainedBayesOpt,
 }
@@ -1821,6 +2053,44 @@ impl Default for AlBobyqaConfig {
     }
 }
 
+/// Augmented-Lagrangian plus CMA-ES search configuration.
+///
+/// The population engine suits rugged or noisy merits (Tier 2 harness
+/// objectives, failure cliffs) where BOBYQA's quadratic model is fragile;
+/// on smooth low-dimensional merits it spends more evaluations than
+/// BOBYQA, so it is an explicit choice, never the `Auto` default.
+#[derive(Debug, Clone)]
+pub struct AlCmaEsConfig {
+    /// Outer multiplier-update iterations.
+    pub max_outer_iterations: usize,
+    /// CMA-ES evaluations per outer iteration (capped by remaining budget).
+    pub max_inner_evals: usize,
+    /// Initial global step size in normalised box coordinates.
+    pub sigma0: f64,
+    /// Base RNG seed (outer iteration added per restart) for determinism.
+    pub seed: Option<u64>,
+    /// Constraint tolerance for the stall/early-exit test.
+    pub constraint_tolerance: f64,
+    /// Initial penalty parameter.
+    pub initial_penalty: f64,
+    /// Penalty growth factor when the violation stalls.
+    pub penalty_factor: f64,
+}
+
+impl Default for AlCmaEsConfig {
+    fn default() -> Self {
+        Self {
+            max_outer_iterations: 8,
+            max_inner_evals: 250,
+            sigma0: 0.3,
+            seed: Some(0),
+            constraint_tolerance: 1.0e-3,
+            initial_penalty: 10.0,
+            penalty_factor: 5.0,
+        }
+    }
+}
+
 /// Constrained-Bayesian-optimisation search configuration.
 #[derive(Debug, Clone)]
 pub struct CboSearchConfig {
@@ -1849,6 +2119,8 @@ pub struct ScalarSearchConfig {
     pub engine: EngineChoice,
     /// BOBYQA plus augmented-Lagrangian settings.
     pub al_bobyqa: AlBobyqaConfig,
+    /// CMA-ES plus augmented-Lagrangian settings.
+    pub al_cmaes: AlCmaEsConfig,
     /// Constrained-Bayesian-optimisation settings.
     pub cbo: CboSearchConfig,
 }
@@ -1878,6 +2150,7 @@ impl PortOptimFunnel {
     pub fn resolve_engine(&self, engine: EngineChoice) -> EngineUsed {
         match engine {
             EngineChoice::AugmentedLagrangianBobyqa => EngineUsed::AugmentedLagrangianBobyqa,
+            EngineChoice::AugmentedLagrangianCmaEs => EngineUsed::AugmentedLagrangianCmaEs,
             EngineChoice::ConstrainedBayesOpt => EngineUsed::ConstrainedBayesOpt,
             EngineChoice::Auto if self.config.budgets.tier2 < CBO_TIER2_BUDGET_THRESHOLD => {
                 EngineUsed::ConstrainedBayesOpt
@@ -1897,6 +2170,7 @@ impl PortOptimFunnel {
     ) -> Result<ScalarizedResult, PortOptimError> {
         match self.resolve_engine(config.engine) {
             EngineUsed::AugmentedLagrangianBobyqa => self.optimize_al_bobyqa(x0, &config.al_bobyqa),
+            EngineUsed::AugmentedLagrangianCmaEs => self.optimize_al_cmaes(x0, &config.al_cmaes),
             EngineUsed::ConstrainedBayesOpt => self.optimize_cbo(x0, &config.cbo),
         }
     }
@@ -2023,6 +2297,127 @@ impl PortOptimFunnel {
         }
     }
 
+    /// Scalarised search via an augmented-Lagrangian outer loop with CMA-ES
+    /// inner solves.
+    ///
+    /// Same multiplier/penalty update and best-feasible reporting as
+    /// [`Self::optimize_al_bobyqa`]; only the inner engine differs. CMA-ES
+    /// offspring are evaluated serially (`parallel = false`) so funnel
+    /// history order stays deterministic under a fixed seed. The engine is
+    /// tier-agnostic: it searches at `config.search_tier`, Tier 1 included.
+    pub fn optimize_al_cmaes(
+        &self,
+        x0: &[f64],
+        config: &AlCmaEsConfig,
+    ) -> Result<ScalarizedResult, PortOptimError> {
+        self.check_search_start(x0)?;
+        if config.max_outer_iterations == 0 || config.max_inner_evals == 0 {
+            return Err(PortOptimError::InvalidConfig(
+                "AL-CMA-ES needs at least one outer iteration and inner evaluation".to_string(),
+            ));
+        }
+        for (name, value) in [
+            ("sigma0", config.sigma0),
+            ("constraint_tolerance", config.constraint_tolerance),
+            ("initial_penalty", config.initial_penalty),
+            ("penalty_factor", config.penalty_factor),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(PortOptimError::InvalidConfig(format!(
+                    "AL-CMA-ES field {name} must be finite and positive, got {value}"
+                )));
+            }
+        }
+        let history_before = self.lock_state().history.records.len();
+        let n_constraints = self.search_constraint_names().len();
+        let mut x = x0.to_vec();
+        let mut lambda = vec![0.0; n_constraints];
+        let mut mu = config.initial_penalty;
+        let mut prev_violation = f64::INFINITY;
+        let mut best_j = f64::INFINITY;
+        let mut stall = 0usize;
+        let mut message = String::from("outer iterations exhausted");
+
+        // Seed the baseline references before the first inner solve.
+        let _ = self.search_point(&x);
+
+        for outer in 0..config.max_outer_iterations {
+            if self.budget_exhausted() {
+                message = String::from("search-tier budget exhausted");
+                break;
+            }
+            let remaining = self.budget_remaining(self.config.search_tier).max(1);
+            let inner_evals = config.max_inner_evals.min(remaining);
+            let merit = |point: &[f64]| self.al_merit(point, &lambda, mu);
+            let cma_config = CmaEsConfig {
+                bounds: self.bounds(),
+                x0: Some(x.clone()),
+                sigma0: config.sigma0,
+                max_fun_evals: inner_evals,
+                seed: config.seed.map(|seed| seed.wrapping_add(outer as u64)),
+                // Serial offspring: funnel history order must stay
+                // deterministic under a fixed seed.
+                parallel: false,
+                ..CmaEsConfig::default()
+            };
+            match cma_es(&merit, &cma_config) {
+                Ok(result) => x = result.x,
+                Err(error) => {
+                    message = format!("CMA-ES inner solve failed: {error}");
+                    break;
+                }
+            }
+            let (constraints, _, _) = self.search_point(&x);
+            let violation = constraints
+                .iter()
+                .map(|c| (-c).max(0.0))
+                .fold(0.0f64, f64::max);
+            if violation > 0.25 * prev_violation {
+                mu *= config.penalty_factor;
+            }
+            prev_violation = violation;
+            for (lambda_i, c) in lambda.iter_mut().zip(constraints.iter()) {
+                *lambda_i = (*lambda_i - mu * c).max(0.0);
+            }
+            if let Some(best) = self.best_feasible_cached()
+                && best.objective_j < best_j - 1.0e-12 * best_j.abs().max(1.0)
+            {
+                best_j = best.objective_j;
+                stall = 0;
+            } else {
+                stall += 1;
+            }
+            if violation <= config.constraint_tolerance && best_j.is_finite() && stall >= 3 {
+                message = String::from("feasible and stalled (converged)");
+                break;
+            }
+        }
+
+        let best = self.best_feasible_cached();
+        let evaluations = self.lock_state().history.records.len() - history_before;
+        let budget_exhausted = self.budget_exhausted();
+        match best {
+            Some(candidate) => Ok(ScalarizedResult {
+                engine: EngineUsed::AugmentedLagrangianCmaEs,
+                best_u: Some(candidate.u),
+                best_j: Some(candidate.objective_j),
+                feasible: true,
+                evaluations,
+                budget_exhausted,
+                message,
+            }),
+            None => Ok(ScalarizedResult {
+                engine: EngineUsed::AugmentedLagrangianCmaEs,
+                best_u: None,
+                best_j: None,
+                feasible: false,
+                evaluations,
+                budget_exhausted,
+                message: format!("no feasible point found ({message})"),
+            }),
+        }
+    }
+
     /// Scalarised search via constrained Bayesian optimisation (small budgets).
     ///
     /// Funnel constraints negate into the `g(x) <= 0` cBO convention. The
@@ -2053,7 +2448,7 @@ impl PortOptimFunnel {
             constraints.push(BayesOptConstraint { fun });
         }
         let cbo_config = ConstrainedBayesOptConfig {
-            bounds: vec![(0.0, 1.0); self.n_free()],
+            bounds: self.bound_pairs(),
             x0: Some(x0.to_vec()),
             initial_samples: config.initial_samples,
             maxeval,
@@ -2194,7 +2589,7 @@ impl PortOptimFunnel {
             ]
         };
         let nsga_config = NsgaConfig {
-            bounds: vec![(0.0, 1.0); self.n_free()],
+            bounds: self.bound_pairs(),
             x0: config.x0.clone(),
             population_size: config.population_size,
             maxeval,
@@ -2550,7 +2945,7 @@ impl PortOptimFunnel {
         tier: EvalTier,
         candidates: &[Vec<f64>],
     ) -> StageAdmissionPlan {
-        let straight = vec![0.0; self.n_free()];
+        let straight = self.config.template.straight_u();
         let straight_key = self.quantize(&straight, tier);
         let (mut simulated_cache, baseline_cached, mut simulated_used) = {
             let state = self.lock_state();
@@ -2724,6 +3119,10 @@ pub fn campaign_template(
         length_m: case.port_length_l_m,
         bore_radius_m: case.port_radius_r0_m,
         throat_radius_m: 0.6 * case.port_radius_r0_m,
+        flare_max_radius_m: None,
+        length_range_m: None,
+        pin_exterior_mouth: false,
+        pin_interior_mouth: false,
         options,
     }
 }
@@ -2740,6 +3139,10 @@ pub fn tier2_slot_template(
         length_m: case.tier2_duct_length_m,
         bore_radius_m: 0.5 * case.tier2_duct_height_m,
         throat_radius_m: 0.3 * case.tier2_duct_height_m,
+        flare_max_radius_m: None,
+        length_range_m: None,
+        pin_exterior_mouth: false,
+        pin_interior_mouth: false,
         options,
     }
 }
@@ -2780,6 +3183,10 @@ mod tests {
             length_m: L,
             bore_radius_m: R0,
             throat_radius_m: RMIN,
+            flare_max_radius_m: None,
+            length_range_m: None,
+            pin_exterior_mouth: false,
+            pin_interior_mouth: false,
             options: relaxed_options(),
         }
     }
@@ -2896,7 +3303,7 @@ mod tests {
                 compression_db: Some(0.1 + 0.5 * (u[0] + u[1])),
                 peak_mach_bulk: 0.01,
                 peak_mach_field: None,
-                separation_fraction: None,
+                separation_fraction: Some(0.05),
                 turbulence_power_trend: noise,
                 curvature_integral_m3: profile.curvature_integral(),
                 energy_physical_relative_closure: 1.0e-3,
@@ -3318,6 +3725,183 @@ mod tests {
     }
 
     #[test]
+    fn tier2_candidate_carries_separation_fraction() {
+        let toy = toy_funnel(0.0);
+        let tier2 = toy
+            .funnel
+            .evaluate(EvalTier::Tier2, &[0.2, 0.4])
+            .expect("toy Tier 2 must evaluate");
+        let FunnelOutcome::Evaluated(candidate) = tier2 else {
+            panic!("toy Tier 2 must produce observables");
+        };
+        assert_eq!(
+            candidate.separation_fraction,
+            Some(0.05),
+            "Tier 2 candidate must carry the snapshot separation fraction"
+        );
+        let tier0 = toy
+            .funnel
+            .evaluate(EvalTier::Tier0, &[0.2, 0.4])
+            .expect("toy Tier 0 must evaluate");
+        let FunnelOutcome::Evaluated(candidate0) = tier0 else {
+            panic!("toy Tier 0 must produce observables");
+        };
+        assert_eq!(
+            candidate0.separation_fraction, None,
+            "Tier 0 has no snapshot separation observable"
+        );
+    }
+
+    #[test]
+    fn cmaes_tier0_optimum_recovery() {
+        let toy = toy_funnel(0.0);
+        let config = ScalarSearchConfig {
+            engine: EngineChoice::AugmentedLagrangianCmaEs,
+            al_cmaes: AlCmaEsConfig {
+                max_outer_iterations: 6,
+                max_inner_evals: 400,
+                sigma0: 0.3,
+                seed: Some(7),
+                ..AlCmaEsConfig::default()
+            },
+            ..ScalarSearchConfig::default()
+        };
+        let result = toy
+            .funnel
+            .optimize_scalarized(&[0.05, 0.05], &config)
+            .expect("toy CMA-ES search must run");
+        assert_eq!(result.engine, EngineUsed::AugmentedLagrangianCmaEs);
+        assert!(result.feasible, "toy CMA-ES must find a feasible point");
+        let best = result.best_u.expect("feasible search must return a point");
+        for (got, want) in best.iter().zip(TOY_OPTIMUM.iter()) {
+            assert!(
+                (got - want).abs() < 0.12,
+                "recovered {best:?} must approach the known optimum {TOY_OPTIMUM:?}"
+            );
+        }
+        let (_, straight_j, _) = toy.funnel.search_point(&[0.0, 0.0]);
+        let best_j = result.best_j.expect("feasible search must return J");
+        assert!(
+            best_j < 0.5 * straight_j,
+            "best J = {best_j} must beat the straight tube J = {straight_j}"
+        );
+    }
+
+    /// Next tier: the same CMA-ES driver searching at Tier 1 (toy oracle).
+    #[test]
+    fn cmaes_tier1_optimum_recovery() {
+        let mut config = toy_config();
+        config.search_tier = EvalTier::Tier1;
+        let toy = toy_funnel_with_config(0.0, config, false);
+        let search = ScalarSearchConfig {
+            engine: EngineChoice::AugmentedLagrangianCmaEs,
+            al_cmaes: AlCmaEsConfig {
+                max_outer_iterations: 6,
+                max_inner_evals: 400,
+                sigma0: 0.3,
+                seed: Some(11),
+                ..AlCmaEsConfig::default()
+            },
+            ..ScalarSearchConfig::default()
+        };
+        let result = toy
+            .funnel
+            .optimize_scalarized(&[0.05, 0.05], &search)
+            .expect("Tier 1 CMA-ES search must run");
+        assert_eq!(result.engine, EngineUsed::AugmentedLagrangianCmaEs);
+        assert!(result.feasible, "Tier 1 CMA-ES must find a feasible point");
+        assert!(
+            toy.tier1_calls.calls.load(Ordering::SeqCst) > 0,
+            "Tier 1 search must actually evaluate the Tier 1 oracle"
+        );
+        let (_, straight_j, _) = toy.funnel.search_point(&[0.0, 0.0]);
+        let best_j = result.best_j.expect("feasible search must return J");
+        assert!(
+            best_j < 0.7 * straight_j,
+            "Tier 1 best J = {best_j} must beat the straight tube J = {straight_j}"
+        );
+    }
+
+    /// Real Tier 0 race on the flare template: both engines must beat the
+    /// straight tube; timings are reported, not asserted.
+    #[test]
+    fn engine_race_tier0_flare_template() {
+        let case = campaign_case();
+        let run = |engine: EngineChoice| {
+            let mut template = campaign_template(&case, 5, relaxed_options());
+            template.flare_max_radius_m = Some(1.4 * case.port_radius_r0_m);
+            let straight = template.straight().expect("straight must build");
+            let f_target = tuning_frequency_hz(&straight, case.medium(), &campaign_duct())
+                .expect("straight tuning must resolve");
+            let evaluator = Duct1dTier0Evaluator {
+                medium: case.medium(),
+                duct: campaign_duct(),
+                f_target_hz: f_target,
+            };
+            let config = FunnelConfig {
+                template,
+                weights: ScalarWeights::default(),
+                feasibility: FeasibilitySpec::port_optim_defaults(f_target),
+                budgets: TierBudgets::default(),
+                search_tier: EvalTier::Tier0,
+                tier2_quota: 0,
+                cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
+                pareto_penalty: PARETO_VIOLATION_PENALTY,
+                stage_parallelism: 1,
+            };
+            let funnel = Arc::new(
+                PortOptimFunnel::new(config, Box::new(evaluator), None, None)
+                    .expect("race funnel must build"),
+            );
+            let (_, straight_j, _) = funnel.search_point(&[0.0; 5]);
+            let search = ScalarSearchConfig {
+                engine,
+                al_bobyqa: AlBobyqaConfig {
+                    max_outer_iterations: 6,
+                    max_inner_evals: 120,
+                    ..AlBobyqaConfig::default()
+                },
+                al_cmaes: AlCmaEsConfig {
+                    max_outer_iterations: 6,
+                    max_inner_evals: 300,
+                    sigma0: 0.25,
+                    seed: Some(42),
+                    ..AlCmaEsConfig::default()
+                },
+                ..ScalarSearchConfig::default()
+            };
+            let started = Instant::now();
+            let result = funnel
+                .optimize_scalarized(&[0.0; 5], &search)
+                .expect("race search must run");
+            (result, straight_j, started.elapsed())
+        };
+        for engine in [
+            EngineChoice::AugmentedLagrangianBobyqa,
+            EngineChoice::AugmentedLagrangianCmaEs,
+        ] {
+            let (result, straight_j, elapsed) = run(engine);
+            eprintln!(
+                "race {engine:?}: best_j={:?} straight_j={straight_j:.6} evals={} wall={elapsed:?} msg={}",
+                result.best_j, result.evaluations, result.message
+            );
+            assert!(result.feasible, "{engine:?} must find a feasible point");
+            // The improving direction widens every knot together: the
+            // minimum area only moves on that diagonal, so per-axis model
+            // steps see no gain. CMA-ES (full covariance) must find it;
+            // BOBYQA is only reported — it stalls at the straight tube on
+            // this landscape, which is the motivation for the CMA driver.
+            if engine == EngineChoice::AugmentedLagrangianCmaEs {
+                let best_j = result.best_j.expect("feasible race must return J");
+                assert!(
+                    best_j < straight_j,
+                    "{engine:?} best J = {best_j} must beat straight J = {straight_j}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn engine_auto_selects_cbo_for_small_tier2_budget() {
         let small = toy_funnel(0.0);
         assert_eq!(
@@ -3679,6 +4263,244 @@ mod tests {
             dipped.q_rms_m3s < candidate.q_rms_m3s,
             "dipped port must flow less than the straight tube"
         );
+    }
+
+    /// Tier 0 noise surrogate: filled by the duct evaluator, ordered by
+    /// throat velocity (pinch raises it, widening lowers it).
+    #[test]
+    fn tier0_noise_surrogate_orders_by_throat_velocity() {
+        let case = campaign_case();
+        let template = campaign_template(&case, 5, relaxed_options());
+        let straight = template.straight().expect("straight must build");
+        let f_target = tuning_frequency_hz(&straight, case.medium(), &campaign_duct())
+            .expect("straight tuning must resolve");
+        let evaluator = Duct1dTier0Evaluator {
+            medium: case.medium(),
+            duct: campaign_duct(),
+            f_target_hz: f_target,
+        };
+        let straight_obs = evaluator
+            .eval_tier0(&straight)
+            .expect("straight Tier 0 must evaluate");
+        let straight_noise = straight_obs
+            .noise_proxy
+            .expect("Tier 0 duct evaluator must fill the noise surrogate");
+        assert!(straight_noise.is_finite() && straight_noise > 0.0);
+
+        let dipped = SplinePortProfile::from_normalized(
+            5,
+            case.port_length_l_m,
+            case.port_radius_r0_m,
+            0.6 * case.port_radius_r0_m,
+            &[0.5, 0.5],
+            relaxed_options(),
+        )
+        .expect("dipped profile must build");
+        let dipped_obs = evaluator.eval_tier0(&dipped).expect("dipped must evaluate");
+        assert!(
+            dipped_obs.noise_proxy.expect("dipped noise surrogate") > straight_noise,
+            "pinched throat must raise the U^8 noise trend"
+        );
+
+        let widened = SplinePortProfile::from_normalized_flared(
+            5,
+            case.port_length_l_m,
+            case.port_radius_r0_m,
+            0.6 * case.port_radius_r0_m,
+            1.4 * case.port_radius_r0_m,
+            &[-0.3; 5],
+            relaxed_options(),
+        )
+        .expect("widened profile must build");
+        let widened_obs = evaluator
+            .eval_tier0(&widened)
+            .expect("widened must evaluate");
+        assert!(
+            widened_obs.noise_proxy.expect("widened noise surrogate") < straight_noise,
+            "widened throat must lower the U^8 noise trend"
+        );
+    }
+
+    /// Flare template: signed variables, straight at zero, and a widened
+    /// candidate that beats the straight tube on the Tier 0 objective.
+    #[test]
+    fn flare_template_widening_improves_tier0_objective() {
+        let case = campaign_case();
+        let mut template = campaign_template(&case, 5, relaxed_options());
+        template.flare_max_radius_m = Some(1.4 * case.port_radius_r0_m);
+        assert_eq!(template.n_free(), 5, "flare mode frees every knot");
+        let bounds = template.variable_bounds();
+        assert_eq!(bounds.len(), 5);
+        assert!(
+            (bounds[0].lower.expect("flare lower bound") + 1.0).abs() < 1.0e-12,
+            "flare lower bound must reach the 1.4 R0 cap"
+        );
+        let straight = template.straight().expect("flare straight must build");
+        let f_target = tuning_frequency_hz(&straight, case.medium(), &campaign_duct())
+            .expect("straight tuning must resolve");
+        let evaluator = Duct1dTier0Evaluator {
+            medium: case.medium(),
+            duct: campaign_duct(),
+            f_target_hz: f_target,
+        };
+        let config = FunnelConfig {
+            template,
+            weights: ScalarWeights::default(),
+            feasibility: FeasibilitySpec::port_optim_defaults(f_target),
+            budgets: TierBudgets::default(),
+            search_tier: EvalTier::Tier0,
+            tier2_quota: 0,
+            cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
+            pareto_penalty: PARETO_VIOLATION_PENALTY,
+            stage_parallelism: 1,
+        };
+        let funnel = PortOptimFunnel::new(config, Box::new(evaluator), None, None)
+            .expect("flare funnel must build");
+        let straight_outcome = funnel
+            .evaluate(EvalTier::Tier0, &[0.0; 5])
+            .expect("straight must evaluate");
+        let FunnelOutcome::Evaluated(straight_candidate) = straight_outcome else {
+            panic!("straight must produce observables");
+        };
+        let widened_outcome = funnel
+            .evaluate(EvalTier::Tier0, &[-0.3; 5])
+            .expect("widened must evaluate through the funnel");
+        let FunnelOutcome::Evaluated(widened_candidate) = widened_outcome else {
+            panic!("widened must produce observables, got rejected or failed");
+        };
+        assert!(
+            widened_candidate.objective_j < straight_candidate.objective_j,
+            "widened flare candidate must improve J: {} vs {}",
+            widened_candidate.objective_j,
+            straight_candidate.objective_j
+        );
+        assert!(
+            widened_candidate.noise_proxy.expect("widened noise")
+                < straight_candidate.noise_proxy.expect("straight noise"),
+            "objective gain must come from the noise surrogate"
+        );
+    }
+
+    /// Length variable: the last coordinate re-trims tuning so a widened
+    /// (detuned) candidate can be brought back inside the tuning band.
+    #[test]
+    fn length_variable_retunes_widened_candidate() {
+        let case = campaign_case();
+        let mut template = campaign_template(&case, 5, relaxed_options());
+        template.flare_max_radius_m = Some(1.4 * case.port_radius_r0_m);
+        template.length_range_m = Some((0.08, 0.13));
+        assert_eq!(template.n_free(), 6, "five radii plus one length variable");
+        let straight_u = template.straight_u();
+        assert_eq!(straight_u.len(), 6);
+        assert!(
+            straight_u[..5].iter().all(|v| *v == 0.0),
+            "radii stay at the straight bore"
+        );
+        assert!(
+            (straight_u[5] - 0.4).abs() < 1.0e-12,
+            "straight length 0.1 m sits at (0.1-0.08)/0.05 = 0.4 in [0.08, 0.13]"
+        );
+        assert_eq!(template.variable_bounds()[5].lower, Some(0.0));
+        assert_eq!(template.variable_bounds()[5].upper, Some(1.0));
+
+        let straight = template.straight().expect("straight must build");
+        assert!((straight.length_m() - case.port_length_l_m).abs() < 1.0e-12);
+        let shortest = template
+            .unpack(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            .expect("shortest must build");
+        assert!((shortest.length_m() - 0.08).abs() < 1.0e-12);
+
+        let f_target = tuning_frequency_hz(&straight, case.medium(), &campaign_duct())
+            .expect("straight tuning must resolve");
+        let evaluator = Duct1dTier0Evaluator {
+            medium: case.medium(),
+            duct: campaign_duct(),
+            f_target_hz: f_target,
+        };
+        let config = FunnelConfig {
+            template,
+            weights: ScalarWeights::default(),
+            feasibility: FeasibilitySpec::port_optim_defaults(f_target),
+            budgets: TierBudgets::default(),
+            search_tier: EvalTier::Tier0,
+            tier2_quota: 0,
+            cache_quantization_step: DEFAULT_CACHE_QUANTIZATION_STEP,
+            pareto_penalty: PARETO_VIOLATION_PENALTY,
+            stage_parallelism: 1,
+        };
+        let funnel = PortOptimFunnel::new(config, Box::new(evaluator), None, None)
+            .expect("length funnel must build");
+        let (_, straight_j, _) = funnel.search_point(&straight_u);
+        // Widened radii at the straight length detune upward; lengthening
+        // must pull tuning back down and open a feasible improved point.
+        let mut widened = vec![-0.1; 5];
+        widened.push(0.4);
+        let at_straight_length = funnel
+            .evaluate(EvalTier::Tier0, &widened)
+            .expect("widened must evaluate");
+        let FunnelOutcome::Evaluated(detuned) = at_straight_length else {
+            panic!("widened must produce observables");
+        };
+        assert!(
+            !detuned.feasible,
+            "widened at L = 0.1 m must detune out of band"
+        );
+        let mut found = None;
+        for step in 0..=10 {
+            let mut candidate = vec![-0.1; 5];
+            candidate.push(step as f64 / 10.0);
+            if let FunnelOutcome::Evaluated(c) = funnel
+                .evaluate(EvalTier::Tier0, &candidate)
+                .expect("scan candidate must evaluate")
+                && c.feasible
+                && c.objective_j < straight_j
+            {
+                found = Some(c);
+                break;
+            }
+        }
+        let found = found.expect("a lengthened widened candidate must be feasible and improve J");
+        assert!(
+            found.q_rms_m3s / found.q_baseline_m3s >= DEFAULT_AIRFLOW_MIN_RATIO,
+            "retuned candidate must keep the airflow constraint"
+        );
+    }
+
+    /// Fixed mouths and fixed length: only the interior spline knots are
+    /// search variables, and both mouth radii stay at the bore.
+    #[test]
+    fn fixed_mouths_leave_only_interior_knots_free() {
+        let case = campaign_case();
+        let mut template = campaign_template(&case, 5, relaxed_options());
+        template.flare_max_radius_m = Some(1.4 * case.port_radius_r0_m);
+        template.pin_interior_mouth = true;
+        template.pin_exterior_mouth = true;
+        assert_eq!(
+            template.n_free(),
+            3,
+            "N=5 with both mouths pinned frees 3 knots"
+        );
+        assert_eq!(template.length_range_m, None, "length stays fixed");
+        let profile = template
+            .unpack(&[-0.5, 0.0, -0.5])
+            .expect("interior flare must build");
+        assert!(
+            (profile.local_radius_m(0.0) - case.port_radius_r0_m).abs() < 1.0e-12,
+            "inlet mouth must stay at the bore"
+        );
+        assert!(
+            (profile.local_radius_m(case.port_length_l_m) - case.port_radius_r0_m).abs() < 1.0e-12,
+            "exhaust mouth must stay at the bore"
+        );
+        assert!(
+            profile.local_radius_m(0.25 * case.port_length_l_m) > case.port_radius_r0_m,
+            "interior knot must be free to widen above the bore"
+        );
+        assert!(
+            (profile.length_m() - case.port_length_l_m).abs() < 1.0e-12,
+            "port length must stay at the nominal fixed value"
+        );
+        assert_eq!(template.straight_u(), vec![0.0; 3]);
     }
 
     /// End-to-end dry run: real Tier 0 screen, toy Tier 1 re-rank, toy Tier 2

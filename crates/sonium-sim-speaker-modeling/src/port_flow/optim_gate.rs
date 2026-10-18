@@ -32,7 +32,7 @@ use super::campaign::{
     STEP7_GRID_LEVELS_N5, STEP7_TIER1_COARSE_MESH_M, STEP7_TIER2_DRIVES_V_PEAK,
     campaign_duct_config, campaign_f_target_hz, campaign_profile_options, check_criterion_1,
     check_criterion_2, coarse_screening_fidelity, equal_airflow_voltage, grid_candidates,
-    production_fidelity, quota_selection,
+    production_fidelity, quota_selection_with_straight,
 };
 use super::error::PortFlowError;
 use super::evaluate::{
@@ -42,7 +42,7 @@ use super::optimize::{
     AlBobyqaConfig, BudgetUsage, DEFAULT_CACHE_QUANTIZATION_STEP, Duct1dTier0Evaluator, EvalTier,
     EvaluatedCandidate, FeasibilitySpec, FunnelConfig, PARETO_VIOLATION_PENALTY, PortOptimError,
     PortOptimFunnel, RankedCandidate, ScalarWeights, SplineTier1Evaluator, StageReport,
-    Tier1Evaluator, TierBudgets, campaign_template,
+    Tier1Evaluator, TierBudgets, campaign_template, tier2_slot_template,
 };
 
 /// QA case id for the bounded port-optim gate (mirrored in
@@ -92,6 +92,19 @@ pub struct Step10GateConfig {
     /// verification waves. Rankings and Tier-2 metrics match the serial
     /// path; only per-record wall times vary run to run.
     pub stage_parallelism: usize,
+    /// Flare cap as a multiple of the bore radius (`Some`, e.g. `1.4`,
+    /// enables the flare search space at campaign and slot scales).
+    #[serde(default)]
+    pub flare_ratio: Option<f64>,
+    /// Port-length search range in m (enables the length variable).
+    #[serde(default)]
+    pub length_range_m: Option<(f64, f64)>,
+    /// Pin the inlet knot to the bore (cabinet-fixed inlet opening).
+    #[serde(default)]
+    pub pin_interior_mouth: bool,
+    /// Pin the exhaust knot to the bore (cabinet-fixed exhaust opening).
+    #[serde(default)]
+    pub pin_exterior_mouth: bool,
 }
 
 impl Step10GateConfig {
@@ -104,6 +117,23 @@ impl Step10GateConfig {
             run_tier1: true,
             tier2: Step10Tier2Fidelity::Capped,
             stage_parallelism: 1,
+            flare_ratio: None,
+            length_range_m: None,
+            pin_interior_mouth: false,
+            pin_exterior_mouth: false,
+        }
+    }
+
+    /// Fixed-mouths flare search: 1.4·bore flare cap, both mouths pinned
+    /// to the bore, port length fixed, and a 5-level grid (125 Tier-0
+    /// points in the resulting 3-variable interior-knot space).
+    pub fn flare_search() -> Self {
+        Self {
+            grid_levels: 5,
+            flare_ratio: Some(1.4),
+            pin_interior_mouth: true,
+            pin_exterior_mouth: true,
+            ..Self::bounded()
         }
     }
 
@@ -149,6 +179,20 @@ impl Step10GateConfig {
             return Err(bad(
                 "Step-10 Tier-2 verification needs the Tier-1 re-ranked winner".to_string(),
             ));
+        }
+        if let Some(ratio) = self.flare_ratio
+            && (!ratio.is_finite() || ratio <= 1.0)
+        {
+            return Err(bad(format!(
+                "Step-10 flare ratio must be finite and above 1, got {ratio}"
+            )));
+        }
+        if let Some((min_m, max_m)) = self.length_range_m
+            && (!min_m.is_finite() || !max_m.is_finite() || min_m <= 0.0 || max_m <= min_m)
+        {
+            return Err(bad(format!(
+                "Step-10 length range ({min_m}, {max_m}) must satisfy 0 < min < max"
+            )));
         }
         Ok(())
     }
@@ -313,7 +357,8 @@ impl Step10GateReport {
         let Some(first) = self.tier0.quota.first() else {
             return Err(bad("Step-10 quota is empty".to_string()));
         };
-        if first.iter().any(|u| *u != 0.0) {
+        let straight_u = gate_template(&self.config, &self.case).straight_u();
+        if *first != straight_u {
             return Err(bad(format!(
                 "Step-10 quota must lead with the straight tube, got {first:?}"
             )));
@@ -386,8 +431,19 @@ impl Step10GateReport {
     }
 }
 
-fn is_straight(u: &[f64]) -> bool {
-    u.iter().all(|value| *value == 0.0)
+/// Campaign template behind a gate config (flare/length applied).
+fn gate_template(
+    config: &Step10GateConfig,
+    case: &PortOptimReferenceCase,
+) -> super::optimize::ProfileTemplate {
+    let mut template = campaign_template(case, config.n_control_points, campaign_profile_options());
+    template.flare_max_radius_m = config
+        .flare_ratio
+        .map(|ratio| ratio * case.port_radius_r0_m);
+    template.length_range_m = config.length_range_m;
+    template.pin_interior_mouth = config.pin_interior_mouth;
+    template.pin_exterior_mouth = config.pin_exterior_mouth;
+    template
 }
 
 fn min_j_feasible(rows: &[RankedCandidate]) -> Option<&RankedCandidate> {
@@ -479,7 +535,8 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
     let case = PortOptimReferenceCase::default();
     case.validate()?;
     let options = campaign_profile_options();
-    let template = campaign_template(&case, config.n_control_points, options);
+    let template = gate_template(config, &case);
+    let straight_u = template.straight_u();
     let f_target = campaign_f_target_hz(&case, &template)?;
     let tier0 = Duct1dTier0Evaluator {
         medium: case.medium(),
@@ -523,12 +580,28 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
     )?;
 
     // ---- Tier 0: full screen + refinement + quota. ----
-    let grid = grid_candidates(template.n_free(), config.grid_levels);
+    let bounds = template.variable_bounds();
+    let mut grid: Vec<Vec<f64>> = grid_candidates(template.n_free(), config.grid_levels)
+        .iter()
+        .map(|point| {
+            point
+                .iter()
+                .zip(&bounds)
+                .map(|(g, bound)| {
+                    let lo = bound.lower.unwrap_or(0.0);
+                    lo + g * (bound.upper.unwrap_or(1.0) - lo)
+                })
+                .collect()
+        })
+        .collect();
+    if !grid.contains(&straight_u) {
+        grid.push(straight_u.clone());
+    }
     let screen = funnel.screen_tier0(&grid);
     let straight_row = screen
         .ranking
         .iter()
-        .find(|row| is_straight(&row.u))
+        .find(|row| row.u == straight_u)
         .ok_or_else(|| {
             PortOptimError::InvalidConfig("straight tube missing from Tier-0 screen".to_string())
         })?;
@@ -545,7 +618,7 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
         },
     )?;
     let feasible0 = feasible_tier0(&funnel);
-    let quota = quota_selection(&feasible0, config.quota);
+    let quota = quota_selection_with_straight(&feasible0, config.quota, &straight_u);
     if quota.is_empty() {
         return Err(PortOptimError::InvalidConfig(
             "Tier-0 quota selection came back empty".to_string(),
@@ -570,7 +643,7 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
         let straight_tier1 = rerank
             .ranking
             .iter()
-            .find(|row| is_straight(&row.u))
+            .find(|row| row.u == straight_u)
             .ok_or_else(|| {
                 PortOptimError::InvalidConfig(
                     "straight tube missing from Tier-1 re-rank".to_string(),
@@ -579,14 +652,14 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
         let winner_row = rerank
             .ranking
             .iter()
-            .filter(|row| row.feasible && !is_straight(&row.u) && row.objective_j.is_some())
+            .filter(|row| row.feasible && row.u != straight_u && row.objective_j.is_some())
             .min_by(|a, b| {
                 a.objective_j
                     .partial_cmp(&b.objective_j)
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
-        let winner_u = winner_row.map_or_else(|| vec![0.0; template.n_free()], |row| row.u.clone());
-        let winner_is_straight = is_straight(&winner_u);
+        let winner_u = winner_row.map_or_else(|| straight_u.clone(), |row| row.u.clone());
+        let winner_is_straight = winner_u == straight_u;
         let winner_tier0 = feasible0.iter().find(|c| c.u == winner_u).ok_or_else(|| {
             PortOptimError::InvalidConfig(format!("winner {winner_u:?} has no Tier-0 record"))
         })?;
@@ -595,7 +668,7 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
             .records
             .iter()
             .filter_map(|record| record.candidate.clone())
-            .find(|c| c.tier == EvalTier::Tier1 && is_straight(&c.u))
+            .find(|c| c.tier == EvalTier::Tier1 && c.u == straight_u)
             .map(|c| c.q_rms_m3s / c.q_baseline_m3s)
             .unwrap_or(f64::NAN);
         tier1_stage = Some(Step10Tier1Stage {
@@ -626,13 +699,15 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
         } else {
             production_fidelity(&case)
         };
-        let straight_profile = context.candidate_profile(
-            config.n_control_points,
-            &vec![0.0; template.n_free()],
-            options,
-        )?;
-        let winner_profile =
-            context.candidate_profile(config.n_control_points, &tier1.winner_u, options)?;
+        let mut slot_template = tier2_slot_template(&case, config.n_control_points, options);
+        slot_template.flare_max_radius_m = config
+            .flare_ratio
+            .map(|ratio| ratio * slot_template.bore_radius_m);
+        slot_template.pin_interior_mouth = config.pin_interior_mouth;
+        slot_template.pin_exterior_mouth = config.pin_exterior_mouth;
+        let straight_profile = slot_template.straight()?;
+        let winner_radii = &tier1.winner_u[..slot_template.n_free().min(tier1.winner_u.len())];
+        let winner_profile = slot_template.unpack(winner_radii)?;
         let drives: Vec<f64> = STEP7_TIER2_DRIVES_V_PEAK.to_vec();
         let run = |profile: &super::profile::SplinePortProfile,
                    voltage: f64,
@@ -743,7 +818,7 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
     let t0_ok = tier0_stage.straight_feasible
         && tier0_stage.feasible_count >= STEP10_MIN_TIER0_FEASIBLE
         && tier0_stage.refined_feasible
-        && tier0_stage.quota.first().is_some_and(|u| is_straight(u));
+        && tier0_stage.quota.first().is_some_and(|u| u == &straight_u);
     let t1_ok = tier1_stage.as_ref().is_none_or(|t| t.straight_feasible);
     let improves = tier2_stage.as_ref().is_some_and(|t| {
         !t.equal_airflow.is_empty()
@@ -841,6 +916,35 @@ pub fn run_step10_gate(config: &Step10GateConfig) -> Result<Step10GateReport, Po
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flare_length_gate_tier0_screen_explores_signed_space() {
+        let config = Step10GateConfig {
+            run_tier1: false,
+            tier2: Step10Tier2Fidelity::Skip,
+            ..Step10GateConfig::flare_search()
+        };
+        let report = run_step10_gate(&config).expect("flare gate Tier-0 screen must run");
+        report.validate().expect("flare gate report must validate");
+        assert!(
+            report.tier0.straight_feasible,
+            "straight tube must screen feasible"
+        );
+        assert!(
+            report
+                .tier0
+                .screen
+                .ranking
+                .iter()
+                .any(|row| row.u.len() == 3 && row.u.iter().any(|v| *v < 0.0)),
+            "screen must explore negative (flare) interior radii"
+        );
+        assert_eq!(
+            report.tier0.quota.first().map(Vec::as_slice),
+            Some(gate_template(&config, &report.case).straight_u().as_slice()),
+            "quota must lead with the template straight vector"
+        );
+    }
 
     #[test]
     fn tier2_without_tier1_is_rejected_before_any_solve() {

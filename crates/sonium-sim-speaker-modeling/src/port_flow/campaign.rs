@@ -270,10 +270,27 @@ pub fn resample_winner_u(
 /// Pareto front needs. Returns at most `quota` vectors; fewer when fewer
 /// survivors exist. Returns an empty vector for `quota == 0`.
 pub fn quota_selection(feasible: &[EvaluatedCandidate], quota: usize) -> Vec<Vec<f64>> {
+    let straight = feasible
+        .first()
+        .map_or_else(Vec::new, |c| vec![0.0; c.u.len()]);
+    quota_selection_with_straight(feasible, quota, &straight)
+}
+
+/// Quota selection with an explicit straight-tube vector.
+///
+/// Same policy as [`quota_selection`] (straight first, then best `J`,
+/// then airflow spread), but the straight vector is supplied by the
+/// caller so templates whose straight point is not all-zero (length
+/// variable at its nominal coordinate) still lead with the straight tube.
+pub fn quota_selection_with_straight(
+    feasible: &[EvaluatedCandidate],
+    quota: usize,
+    straight_u: &[f64],
+) -> Vec<Vec<f64>> {
     if quota == 0 || feasible.is_empty() {
         return Vec::new();
     }
-    let is_straight = |c: &EvaluatedCandidate| c.u.iter().all(|v| *v == 0.0);
+    let is_straight = |c: &EvaluatedCandidate| c.u == straight_u;
     let contains = |picked: &[Vec<f64>], u: &[f64]| picked.iter().any(|p| p == u);
     let mut picked: Vec<Vec<f64>> = Vec::new();
 
@@ -819,6 +836,7 @@ mod tests {
             noise_proxy: None,
             compression_db: None,
             peak_mach: None,
+            separation_fraction: None,
             curvature_m3: 0.1,
             max_slope: 0.01,
             constraints: vec![ConstraintValue {
@@ -1064,6 +1082,10 @@ mod tests {
             length_m: 0.1,
             bore_radius_m: 0.025,
             throat_radius_m: 0.015,
+            flare_max_radius_m: None,
+            length_range_m: None,
+            pin_exterior_mouth: false,
+            pin_interior_mouth: false,
             options,
         };
         let source = source_template
