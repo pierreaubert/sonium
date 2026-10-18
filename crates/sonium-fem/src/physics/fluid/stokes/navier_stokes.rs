@@ -526,7 +526,9 @@ fn assemble_density_mass_triplet<VSpace: crate::spaces::FunctionSpace>(
             if !density.is_finite() || density <= 0.0 {
                 return Err("element density must be finite and positive");
             }
-            Ok(crate::forms::VectorMassForm { coefficient: density })
+            Ok(crate::forms::VectorMassForm {
+                coefficient: density,
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Some(crate::assembly::assemble_bilinear_per_element(
@@ -651,7 +653,10 @@ mod element_density_tests {
                 return false;
             }
         }
-        state.velocity.iter().all(|v| v.is_finite() && v.abs() < 10.0)
+        state
+            .velocity
+            .iter()
+            .all(|v| v.is_finite() && v.abs() < 10.0)
     }
 
     #[test]
@@ -715,7 +720,10 @@ mod element_density_tests {
             state.time
         );
         assert!(
-            state.velocity.iter().all(|v| v.is_finite() && v.abs() < 10.0),
+            state
+                .velocity
+                .iter()
+                .all(|v| v.is_finite() && v.abs() < 10.0),
             "variable-step BDF2 produced unbounded velocity"
         );
     }
@@ -1549,6 +1557,10 @@ where
     let velocity_topology = std::sync::Arc::new(super::workspace::ElementVelocityTopology::new(
         mesh, v_space,
     ));
+    // Backend CSR structure plan, built on the first iterative solve and
+    // reused while the monolithic sparsity stays fixed across Picard
+    // iterations (rebuilt automatically when the structure changes).
+    let mut csr_structure_plan: Option<CsrStructurePlan> = None;
 
     for iter in 0..config.max_picard_iterations {
         let iter_start = std::time::Instant::now();
@@ -1992,13 +2004,20 @@ where
                         pin_pressure.then_some(pressure_pin),
                     )
                 });
-            match solve_iterative_linear_system(
+            if csr_structure_plan
+                .as_ref()
+                .is_none_or(|plan| !plan.matches_structure(&csr))
+            {
+                csr_structure_plan = CsrStructurePlan::try_from_csr(&csr);
+            }
+            match solve_iterative_linear_system_with_plan(
                 config,
                 &csr,
                 &b,
                 Some(&x0),
                 n_v,
                 schur_csr.as_ref(),
+                csr_structure_plan.as_ref(),
             ) {
                 Some((x, backend, iterations)) => {
                     if backend != requested_backend {
@@ -3502,6 +3521,74 @@ fn apply_local_dirichlet_to_csr(csr: &mut sonium_solvers::CsrMatrix<f64>, dof: u
     }
 }
 
+/// Reusable `i32` sparsity structure for backend CSR uploads.
+///
+/// Backend paths convert CSR row pointers and column indices from
+/// `usize` to `i32` on every solve. Picard and time-stepping loops whose
+/// sparsity is fixed can build this plan once and pass it to
+/// `solve_iterative_linear_system_with_plan`, so only the values are
+/// re-converted and re-uploaded per iteration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CsrStructurePlan {
+    num_rows: usize,
+    num_cols: usize,
+    row_ptr_i32: Vec<i32>,
+    col_idx_i32: Vec<i32>,
+}
+
+impl CsrStructurePlan {
+    /// Builds a plan from a host CSR matrix, if its indices fit in `i32`.
+    pub fn try_from_csr(csr: &sonium_solvers::CsrMatrix<f64>) -> Option<Self> {
+        let row_ptr_i32 = csr
+            .row_ptrs
+            .iter()
+            .map(|&v| i32::try_from(v).ok())
+            .collect::<Option<Vec<_>>>()?;
+        let col_idx_i32 = csr
+            .col_indices
+            .iter()
+            .map(|&v| i32::try_from(v).ok())
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self {
+            num_rows: csr.num_rows,
+            num_cols: csr.num_cols,
+            row_ptr_i32,
+            col_idx_i32,
+        })
+    }
+
+    /// Returns true when `csr` has exactly this plan's sparsity structure.
+    ///
+    /// Values are ignored: they are re-uploaded on every solve, so value
+    /// changes do not invalidate the structure plan.
+    pub fn matches_structure(&self, csr: &sonium_solvers::CsrMatrix<f64>) -> bool {
+        self.num_rows == csr.num_rows
+            && self.num_cols == csr.num_cols
+            && self.row_ptr_i32.len() == csr.row_ptrs.len()
+            && self.col_idx_i32.len() == csr.col_indices.len()
+            && self
+                .row_ptr_i32
+                .iter()
+                .zip(csr.row_ptrs.iter())
+                .all(|(&plan, &csr)| usize::try_from(plan).is_ok_and(|p| p == csr))
+            && self
+                .col_idx_i32
+                .iter()
+                .zip(csr.col_indices.iter())
+                .all(|(&plan, &csr)| usize::try_from(plan).is_ok_and(|p| p == csr))
+    }
+
+    /// Converted `i32` row pointers for backend uploads.
+    pub fn row_ptr_i32(&self) -> &[i32] {
+        &self.row_ptr_i32
+    }
+
+    /// Converted `i32` column indices for backend uploads.
+    pub fn col_idx_i32(&self) -> &[i32] {
+        &self.col_idx_i32
+    }
+}
+
 /// Dispatch the per-Picard linear solve onto either the legacy CPU
 /// path (in-house BLAS-1 + ILU(0)) or a `sonium_compute::Backend` path
 /// (BLAS-1 + SpMV via the trait, point-Jacobi preconditioner). Returns
@@ -3509,9 +3596,9 @@ fn apply_local_dirichlet_to_csr(csr: &mut sonium_solvers::CsrMatrix<f64>, dof: u
 ///
 /// CSR row pointers and column indices are converted from the Rust
 /// `usize` representation to `i32` on the GPU path, matching cuSPARSE's
-/// expected layout. The cost of the CSR upload is `O(nnz)` per Picard
-/// iteration; for typical fan-CFD grids (10–100k DOFs, ~10× nnz) this
-/// is sub-millisecond and dwarfed by the solve.
+/// expected layout; pass a [`CsrStructurePlan`] via
+/// `solve_iterative_linear_system_with_plan` to reuse that conversion
+/// across iterations with fixed sparsity.
 ///
 /// `Cuda` and `Metal` selections fall back to `Cpu` with a warning when
 /// the corresponding `sonium-compute` feature is not built.
@@ -3523,6 +3610,34 @@ fn solve_iterative_linear_system(
     velocity_block_size: usize,
     pressure_schur: Option<&sonium_solvers::CsrMatrix<f64>>,
 ) -> Option<(Vec<f64>, LinearSolverBackend, usize)> {
+    solve_iterative_linear_system_with_plan(
+        config,
+        csr,
+        b,
+        x0,
+        velocity_block_size,
+        pressure_schur,
+        None,
+    )
+}
+
+/// [`solve_iterative_linear_system`] with an optional reusable CSR plan.
+///
+/// When `plan` matches the CSR sparsity, the backend path reuses its
+/// converted `i32` structure instead of re-converting on every call.
+#[allow(clippy::too_many_arguments)]
+fn solve_iterative_linear_system_with_plan(
+    config: &NavierStokesConfig,
+    csr: &sonium_solvers::CsrMatrix<f64>,
+    b: &[f64],
+    x0: Option<&[f64]>,
+    velocity_block_size: usize,
+    pressure_schur: Option<&sonium_solvers::CsrMatrix<f64>>,
+    plan: Option<&CsrStructurePlan>,
+) -> Option<(Vec<f64>, LinearSolverBackend, usize)> {
+    // Consumed only by the accelerator arms; referenced here so
+    // CPU-only builds do not warn about the unused parameter.
+    let _ = plan;
     let resolved = match config.linear_solver_backend {
         LinearSolverBackend::Auto => LinearSolverBackend::resolve_auto(),
         other => other,
@@ -3563,6 +3678,7 @@ fn solve_iterative_linear_system(
                     x0,
                     velocity_block_size,
                     pressure_schur,
+                    plan,
                 )
                 .map(|(solution, used_accelerator, iterations)| {
                     (
@@ -3616,6 +3732,7 @@ fn solve_iterative_linear_system(
                     x0,
                     velocity_block_size,
                     pressure_schur,
+                    plan,
                 )
                 .map(|(solution, used_accelerator, iterations)| {
                     (
@@ -3696,7 +3813,10 @@ fn solve_iterative_cpu(
                     result.converged,
                     preconditioner.diagnostics().skipped_pivots,
                     preconditioner.diagnostics().non_finite_entries,
-                    preconditioner.diagnostics().min_abs_pivot.unwrap_or(f64::NAN),
+                    preconditioner
+                        .diagnostics()
+                        .min_abs_pivot
+                        .unwrap_or(f64::NAN),
                 );
             }
             let iterations = result.iterations;
@@ -3787,6 +3907,7 @@ fn finite_converged_solution(x: Vec<f64>, converged: bool) -> Option<Vec<f64>> {
     not(any(feature = "cuda", feature = "metal")),
     allow(dead_code, reason = "only callable from cuda/metal-gated arms")
 )]
+#[allow(clippy::too_many_arguments)]
 fn solve_iterative_via_backend<B: sonium_compute::Backend>(
     backend: &B,
     config: &NavierStokesConfig,
@@ -3795,6 +3916,7 @@ fn solve_iterative_via_backend<B: sonium_compute::Backend>(
     x0: Option<&[f64]>,
     velocity_block_size: usize,
     pressure_schur: Option<&sonium_solvers::CsrMatrix<f64>>,
+    plan: Option<&CsrStructurePlan>,
 ) -> Option<(Vec<f64>, bool, usize)> {
     use sonium_compute::gmres::{
         BackendCsr, BackendPreconditioner, GmresBackendConfig, gmres_backend_preconditioned,
@@ -3819,35 +3941,57 @@ fn solve_iterative_via_backend<B: sonium_compute::Backend>(
         return solve_iterative_cpu(config, csr, b, x0, velocity_block_size, pressure_schur);
     }
 
-    // Convert usize indices to i32 (the cuSPARSE / Backend convention).
+    // Convert usize indices to i32 (the cuSPARSE / Backend convention),
+    // reusing the caller's structure plan when its sparsity matches.
     // On 64-bit hosts a usize index could overflow i32 in pathological
     // cases (>2 G entries); guard explicitly and fall back to CPU.
-    let row_ptr_host: Vec<i32> = match csr
-        .row_ptrs
-        .iter()
-        .map(|&v| i32::try_from(v))
-        .collect::<Result<Vec<_>, _>>()
-    {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!(
-                "WARNING: CSR row pointers overflow i32 ({} entries); falling back to CPU",
-                csr.row_ptrs.last().copied().unwrap_or(0)
-            );
-            return solve_iterative_cpu(config, csr, b, x0, velocity_block_size, pressure_schur);
-        }
+    let reusable_plan = plan.filter(|candidate| candidate.matches_structure(csr));
+    let row_ptr_host: Vec<i32> = match reusable_plan {
+        Some(candidate) => candidate.row_ptr_i32().to_vec(),
+        None => match csr
+            .row_ptrs
+            .iter()
+            .map(|&v| i32::try_from(v))
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!(
+                    "WARNING: CSR row pointers overflow i32 ({} entries); falling back to CPU",
+                    csr.row_ptrs.last().copied().unwrap_or(0)
+                );
+                return solve_iterative_cpu(
+                    config,
+                    csr,
+                    b,
+                    x0,
+                    velocity_block_size,
+                    pressure_schur,
+                );
+            }
+        },
     };
-    let col_idx_host: Vec<i32> = match csr
-        .col_indices
-        .iter()
-        .map(|&v| i32::try_from(v))
-        .collect::<Result<Vec<_>, _>>()
-    {
-        Ok(v) => v,
-        Err(_) => {
-            eprintln!("WARNING: CSR column indices overflow i32; falling back to CPU");
-            return solve_iterative_cpu(config, csr, b, x0, velocity_block_size, pressure_schur);
-        }
+    let col_idx_host: Vec<i32> = match reusable_plan {
+        Some(candidate) => candidate.col_idx_i32().to_vec(),
+        None => match csr
+            .col_indices
+            .iter()
+            .map(|&v| i32::try_from(v))
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!("WARNING: CSR column indices overflow i32; falling back to CPU");
+                return solve_iterative_cpu(
+                    config,
+                    csr,
+                    b,
+                    x0,
+                    velocity_block_size,
+                    pressure_schur,
+                );
+            }
+        },
     };
 
     // Upload CSR matrix and Jacobi preconditioner.
@@ -4560,11 +4704,11 @@ where
     let u_star = extrapolate_velocity_variable(state, bdf.order, step_ratio);
     // Element-local density (optional): per-element mass block and a
     // matching convection assembly replace the scalar-rho blocks.
-    let density_mass = match assemble_density_mass_triplet(mesh, v_space, config, workspace.quad_order)
-    {
-        Ok(field) => field,
-        Err(_) => return false,
-    };
+    let density_mass =
+        match assemble_density_mass_triplet(mesh, v_space, config, workspace.quad_order) {
+            Ok(field) => field,
+            Err(_) => return false,
+        };
     let density_mass_csr = density_mass.as_ref().map(|triplet| triplet.to_csr());
     let conv_triplet = assemble_bdf_convection(mesh, v_space, workspace, &u_star, config, dim);
 
@@ -5412,8 +5556,7 @@ fn assemble_bdf_convection<VSpace: crate::spaces::FunctionSpace>(
                 OseenConvectionForm::new(density, |coords: [f64; 3]| {
                     velocity_field
                         .velocity_at(coords)
-                        .expect("BDF quadrature point was not located in its velocity mesh")
-                        [..dim]
+                        .expect("BDF quadrature point was not located in its velocity mesh")[..dim]
                         .to_vec()
                 })
             })
@@ -5516,14 +5659,8 @@ pub fn audit_bdf_step<VSpace: crate::spaces::FunctionSpace>(
     let un = &previous.velocity;
     let unm1 = &previous.velocity_prev;
     let u_star = extrapolate_velocity_variable(previous, bdf.order, step_ratio);
-    let convection = assemble_bdf_convection(
-        mesh,
-        v_space,
-        workspace,
-        &u_star,
-        config,
-        mesh.dimension,
-    );
+    let convection =
+        assemble_bdf_convection(mesh, v_space, workspace, &u_star, config, mesh.dimension);
     // With an element-density field the mass triplet already carries
     // rho per element; otherwise the unit mass is scaled by `rho`.
     let density_mass = assemble_density_mass_triplet(mesh, v_space, config, workspace.quad_order)
@@ -6799,7 +6936,7 @@ mod tests {
 
         let backend = sonium_compute::CpuBackend::new();
         let (x_dispatch, dispatched_backend, _) =
-            solve_iterative_via_backend(&backend, &config, &csr, &b, None, n, None)
+            solve_iterative_via_backend(&backend, &config, &csr, &b, None, n, None, None)
                 .expect("backend GMRES must converge on diag-dominant system");
         assert!(dispatched_backend);
 
@@ -6836,6 +6973,30 @@ mod tests {
                 x_dispatch[i]
             );
         }
+    }
+
+    #[test]
+    fn csr_structure_plan_matches_only_identical_sparsity() {
+        let dense =
+            sonium_solvers::dense::DenseMatrix::from_row_major_vec(2, 2, vec![2.0, 0.0, 0.0, 4.0]);
+        let csr = sonium_solvers::CsrMatrix::from_dense(&dense, 1.0e-14);
+        let plan = CsrStructurePlan::try_from_csr(&csr).expect("i32-convertible plan");
+        assert!(plan.matches_structure(&csr));
+        assert_eq!(plan.row_ptr_i32(), &[0, 1, 2]);
+        assert_eq!(plan.col_idx_i32(), &[0, 1]);
+
+        // Same sparsity, different values: still a match (values are
+        // re-uploaded; only the structure conversion is reused).
+        let dense2 =
+            sonium_solvers::dense::DenseMatrix::from_row_major_vec(2, 2, vec![3.0, 0.0, 0.0, 5.0]);
+        let csr2 = sonium_solvers::CsrMatrix::from_dense(&dense2, 1.0e-14);
+        assert!(plan.matches_structure(&csr2));
+
+        // Different sparsity: not a match.
+        let dense3 =
+            sonium_solvers::dense::DenseMatrix::from_row_major_vec(2, 2, vec![1.0, 1.0, 0.0, 1.0]);
+        let csr3 = sonium_solvers::CsrMatrix::from_dense(&dense3, 1.0e-14);
+        assert!(!plan.matches_structure(&csr3));
     }
 
     #[cfg(not(feature = "cuda"))]

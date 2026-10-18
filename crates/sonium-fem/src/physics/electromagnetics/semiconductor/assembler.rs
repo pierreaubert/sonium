@@ -39,6 +39,9 @@ pub fn build_semiconductor_assembler_with_boundaries(
 ) -> SemiconductorAssembler {
     let space = H1Space::new(degree);
     let quad_stiffness = quadrature::required_order_for_stiffness(degree.degree());
+    // Drift is test-value times trial-gradient: degree 2p-1, one more
+    // than the diffusion (gradient-gradient) stiffness integrand.
+    let quad_drift = quadrature::required_order_for_drift(degree.degree());
     let quad_mass = quadrature::required_order_for_mass(degree.degree());
 
     let diffusion = crate::assembly::assemble_bilinear(
@@ -56,7 +59,7 @@ pub fn build_semiconductor_assembler_with_boundaries(
         &space,
         &space,
         mesh,
-        quad_stiffness,
+        quad_drift,
     );
     let recombination = crate::assembly::assemble_bilinear(
         &CarrierRecombinationForm {
@@ -150,5 +153,46 @@ mod tests {
             },
         );
         assert_eq!(rhs.len(), mesh.num_nodes());
+    }
+
+    #[test]
+    fn p2_drift_component_matches_high_order_reference() {
+        // The drift integrand (test value x trial gradient) is degree
+        // 2p-1 = 3 at P2; assembling it with the stiffness order 2p-2 = 2
+        // under-integrates it.
+        let mesh = unit_square_triangles(2);
+        let carrier = CarrierMaterial {
+            mobility: 0.14,
+            lifetime: 1.0e-6,
+            temperature: 300.0,
+            kind: super::super::CarrierKind::Electron,
+        };
+        let field = [1.3, -0.7, 0.0];
+        let assembler = build_semiconductor_assembler(&mesh, PolynomialDegree::P2, carrier, field);
+        let drift = assembler.assemble_real(&[0.0, 1.0, 0.0]);
+
+        let space = H1Space::new(PolynomialDegree::P2);
+        let reference = crate::assembly::assemble_bilinear(
+            &CarrierDriftForm {
+                electric_field: field,
+                drift_coefficient: carrier.drift_coefficient(),
+            },
+            &space,
+            &space,
+            &mesh,
+            6,
+        )
+        .to_csr();
+
+        assert_eq!(drift.num_rows, reference.num_rows);
+        assert_eq!(drift.col_indices, reference.col_indices);
+        for (index, (actual, expected)) in
+            drift.values.iter().zip(reference.values.iter()).enumerate()
+        {
+            assert!(
+                (actual - expected).abs() < 1e-10,
+                "drift entry {index}: {actual:e} != {expected:e}"
+            );
+        }
     }
 }

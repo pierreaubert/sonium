@@ -26,7 +26,9 @@ pub enum ViscoelasticError {
     #[error("frequency must be finite and positive, got {0} Hz")]
     InvalidFrequency(f64),
     /// Tabulated query fell outside the measured frequency range.
-    #[error("frequency {frequency_hz} Hz is outside the tabulated range [{min_hz}, {max_hz}] Hz; extrapolation is refused")]
+    #[error(
+        "frequency {frequency_hz} Hz is outside the tabulated range [{min_hz}, {max_hz}] Hz; extrapolation is refused"
+    )]
     OutsideTabulatedRange {
         /// Queried frequency in Hz.
         frequency_hz: f64,
@@ -124,7 +126,11 @@ impl ConstantLossModulus {
             });
         }
         check_poisson(poisson_ratio)?;
-        Ok(Self { youngs_modulus_pa, loss_factor, poisson_ratio })
+        Ok(Self {
+            youngs_modulus_pa,
+            loss_factor,
+            poisson_ratio,
+        })
     }
 }
 
@@ -199,7 +205,10 @@ impl TabulatedComplexModulus {
                 });
             }
         }
-        Ok(Self { points, poisson_ratio })
+        Ok(Self {
+            points,
+            poisson_ratio,
+        })
     }
 
     /// Tabulated points in increasing-frequency order.
@@ -210,8 +219,14 @@ impl TabulatedComplexModulus {
     /// Covered frequency range `(min_hz, max_hz)`.
     pub fn frequency_range_hz(&self) -> (f64, f64) {
         (
-            self.points.first().expect("validated non-empty").frequency_hz,
-            self.points.last().expect("validated non-empty").frequency_hz,
+            self.points
+                .first()
+                .expect("validated non-empty")
+                .frequency_hz,
+            self.points
+                .last()
+                .expect("validated non-empty")
+                .frequency_hz,
         )
     }
 }
@@ -310,7 +325,11 @@ impl PronyComplexModulus {
                 });
             }
         }
-        Ok(Self { equilibrium_modulus_pa, branches, poisson_ratio })
+        Ok(Self {
+            equilibrium_modulus_pa,
+            branches,
+            poisson_ratio,
+        })
     }
 
     /// Prony branches.
@@ -321,7 +340,11 @@ impl PronyComplexModulus {
     /// High-frequency (glassy) modulus `E∞ + Σᵢ Eᵢ` in Pa.
     pub fn glassy_modulus_pa(&self) -> f64 {
         self.equilibrium_modulus_pa
-            + self.branches.iter().map(|branch| branch.modulus_pa).sum::<f64>()
+            + self
+                .branches
+                .iter()
+                .map(|branch| branch.modulus_pa)
+                .sum::<f64>()
     }
 }
 
@@ -350,9 +373,21 @@ mod tests {
     fn tabulated() -> TabulatedComplexModulus {
         TabulatedComplexModulus::new(
             vec![
-                ModulusPoint { frequency_hz: 20.0, storage_pa: 2.0e6, loss_pa: 0.6e6 },
-                ModulusPoint { frequency_hz: 200.0, storage_pa: 4.0e6, loss_pa: 1.6e6 },
-                ModulusPoint { frequency_hz: 2_000.0, storage_pa: 8.0e6, loss_pa: 2.4e6 },
+                ModulusPoint {
+                    frequency_hz: 20.0,
+                    storage_pa: 2.0e6,
+                    loss_pa: 0.6e6,
+                },
+                ModulusPoint {
+                    frequency_hz: 200.0,
+                    storage_pa: 4.0e6,
+                    loss_pa: 1.6e6,
+                },
+                ModulusPoint {
+                    frequency_hz: 2_000.0,
+                    storage_pa: 8.0e6,
+                    loss_pa: 2.4e6,
+                },
             ],
             0.45,
         )
@@ -384,22 +419,42 @@ mod tests {
             model.complex_youngs_modulus_pa(20_000.0),
             Err(ViscoelasticError::OutsideTabulatedRange { .. })
         ));
-        assert!(TabulatedComplexModulus::new(
-            vec![
-                ModulusPoint { frequency_hz: 100.0, storage_pa: 1.0e6, loss_pa: 0.0 },
-                ModulusPoint { frequency_hz: 100.0, storage_pa: 1.0e6, loss_pa: 0.0 },
-            ],
-            0.4,
-        )
-        .is_err());
-        assert!(TabulatedComplexModulus::new(
-            vec![
-                ModulusPoint { frequency_hz: 100.0, storage_pa: 1.0e6, loss_pa: -1.0 },
-                ModulusPoint { frequency_hz: 200.0, storage_pa: 1.0e6, loss_pa: 0.0 },
-            ],
-            0.4,
-        )
-        .is_err());
+        assert!(
+            TabulatedComplexModulus::new(
+                vec![
+                    ModulusPoint {
+                        frequency_hz: 100.0,
+                        storage_pa: 1.0e6,
+                        loss_pa: 0.0
+                    },
+                    ModulusPoint {
+                        frequency_hz: 100.0,
+                        storage_pa: 1.0e6,
+                        loss_pa: 0.0
+                    },
+                ],
+                0.4,
+            )
+            .is_err()
+        );
+        assert!(
+            TabulatedComplexModulus::new(
+                vec![
+                    ModulusPoint {
+                        frequency_hz: 100.0,
+                        storage_pa: 1.0e6,
+                        loss_pa: -1.0
+                    },
+                    ModulusPoint {
+                        frequency_hz: 200.0,
+                        storage_pa: 1.0e6,
+                        loss_pa: 0.0
+                    },
+                ],
+                0.4,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -407,8 +462,14 @@ mod tests {
         let model = PronyComplexModulus::new(
             2.0e6,
             vec![
-                PronyBranch { modulus_pa: 3.0e6, relaxation_time_s: 1.0e-3 },
-                PronyBranch { modulus_pa: 5.0e6, relaxation_time_s: 1.0e-5 },
+                PronyBranch {
+                    modulus_pa: 3.0e6,
+                    relaxation_time_s: 1.0e-3,
+                },
+                PronyBranch {
+                    modulus_pa: 5.0e6,
+                    relaxation_time_s: 1.0e-5,
+                },
             ],
             0.45,
         )
@@ -423,12 +484,17 @@ mod tests {
             assert!(modulus.re >= 2.0e6 && modulus.re <= model.glassy_modulus_pa());
         }
         assert!(PronyComplexModulus::new(1.0e6, vec![], 0.4).is_err());
-        assert!(PronyComplexModulus::new(
-            1.0e6,
-            vec![PronyBranch { modulus_pa: 1.0e6, relaxation_time_s: 0.0 }],
-            0.4,
-        )
-        .is_err());
+        assert!(
+            PronyComplexModulus::new(
+                1.0e6,
+                vec![PronyBranch {
+                    modulus_pa: 1.0e6,
+                    relaxation_time_s: 0.0
+                }],
+                0.4,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -436,7 +502,10 @@ mod tests {
         let model = ConstantLossModulus::new(5.0e6, 0.4, 0.45).unwrap();
         let modulus = model.complex_youngs_modulus_pa(440.0).unwrap();
         assert_eq!(modulus, Complex64::new(5.0e6, 2.0e6));
-        assert!((model.stiffness_factor(440.0, 5.0e6).unwrap() - Complex64::new(1.0, 0.4)).norm() < 1e-15);
+        assert!(
+            (model.stiffness_factor(440.0, 5.0e6).unwrap() - Complex64::new(1.0, 0.4)).norm()
+                < 1e-15
+        );
         assert!(ConstantLossModulus::new(5.0e6, -0.1, 0.45).is_err());
         assert!(model.complex_youngs_modulus_pa(0.0).is_err());
     }
@@ -447,8 +516,16 @@ mod tests {
         // clamp to the last measured point.
         let model = TabulatedComplexModulus::new(
             vec![
-                ModulusPoint { frequency_hz: 50.0, storage_pa: 1.0e6, loss_pa: 0.2e6 },
-                ModulusPoint { frequency_hz: 500.0, storage_pa: 2.0e6, loss_pa: 0.5e6 },
+                ModulusPoint {
+                    frequency_hz: 50.0,
+                    storage_pa: 1.0e6,
+                    loss_pa: 0.2e6,
+                },
+                ModulusPoint {
+                    frequency_hz: 500.0,
+                    storage_pa: 2.0e6,
+                    loss_pa: 0.5e6,
+                },
             ],
             0.49,
         )

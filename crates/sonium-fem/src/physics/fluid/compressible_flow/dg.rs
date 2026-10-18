@@ -4,9 +4,11 @@ use std::collections::HashMap;
 
 use crate::basis::PolynomialDegree;
 use crate::mesh::{ElementType, Mesh};
+use crate::parallelism::ParallelPolicy;
 use crate::quadrature::QuadratureRule;
 use crate::spaces::dg::{DGSpace, InteriorFacet, build_interior_facets, element_diameter};
 use crate::spaces::{BasisTabulation, FunctionSpace};
+use rayon::prelude::*;
 
 use super::{ConservativeState, IdealGas, ViscosityModel, hllc_flux, rusanov_flux};
 
@@ -175,11 +177,7 @@ fn local_node_count(element_type: ElementType, degree: PolynomialDegree) -> usiz
 /// Physical positions of the local Lagrange nodes of one element: vertices
 /// first, then (P2) edge midpoints in `local_edges` order. Geometry is
 /// affine (P1-mapped), so midpoints are exact.
-fn local_node_positions(
-    mesh: &Mesh,
-    element: usize,
-    degree: PolynomialDegree,
-) -> Vec<[f64; 3]> {
+fn local_node_positions(mesh: &Mesh, element: usize, degree: PolynomialDegree) -> Vec<[f64; 3]> {
     let cell = &mesh.elements[element];
     let vertices = cell.vertices();
     let mut positions: Vec<[f64; 3]> = vertices
@@ -350,6 +348,12 @@ pub struct CompressibleDgOperator<'a> {
     /// consumed a fresh `build_interior_facets` (a hash-map pass over the
     /// whole mesh) on every SSPRK3 stage before this cache existed.
     interior_facets: Vec<InteriorFacet>,
+    /// Per-element interior-facet indices (ascending), for the
+    /// element-centric parallel facet gather.
+    element_facets: Vec<Vec<usize>>,
+    /// Per-element boundary-face indices into `mesh.boundaries`
+    /// (ascending), for the element-centric parallel boundary gather.
+    element_boundary_faces: Vec<Vec<usize>>,
 }
 
 /// Volume quadrature order for the operator at `degree`.
@@ -367,7 +371,11 @@ fn invert_small(matrix: &[f64], n: usize) -> Option<Vec<f64>> {
         .map(|row| matrix[row * n..(row + 1) * n].to_vec())
         .collect();
     let mut inv: Vec<Vec<f64>> = (0..n)
-        .map(|row| (0..n).map(|col| if row == col { 1.0 } else { 0.0 }).collect())
+        .map(|row| {
+            (0..n)
+                .map(|col| if row == col { 1.0 } else { 0.0 })
+                .collect()
+        })
         .collect();
     for col in 0..n {
         let pivot = (col..n).max_by(|&r1, &r2| {
@@ -435,19 +443,46 @@ impl<'a> CompressibleDgOperator<'a> {
             let inverse = invert_small(&mass, n).ok_or(CompressibleDgError::UnsupportedMesh)?;
             mass_inverses.push(inverse);
         }
+        let interior_facets = build_interior_facets(mesh);
+        let mut element_facets: Vec<Vec<usize>> = vec![Vec::new(); mesh.num_elements()];
+        for (index, facet) in interior_facets.iter().enumerate() {
+            element_facets[facet.elem_plus].push(index);
+            element_facets[facet.elem_minus].push(index);
+        }
+        let mut element_boundary_faces: Vec<Vec<usize>> = vec![Vec::new(); mesh.num_elements()];
+        for (index, face) in mesh.boundaries.iter().enumerate() {
+            element_boundary_faces[face.element_idx].push(index);
+        }
         Ok(Self {
             mesh,
             space,
             config,
             mass_inverses,
-            interior_facets: build_interior_facets(mesh),
+            interior_facets,
+            element_facets,
+            element_boundary_faces,
         })
     }
 
-    fn check_state_degree(
-        &self,
-        state: &CompressibleDgState,
-    ) -> Result<(), CompressibleDgError> {
+    /// Map `work` over all elements, in parallel when the crate policy
+    /// allows. Results are collected in element order, and every element
+    /// block is computed with the same arithmetic order as the serial
+    /// loops this replaces, so parallel and serial results agree bitwise
+    /// (the `SONIUM_SERIAL=1` escape hatch selects the serial path).
+    fn map_elements<T, F>(&self, work: F) -> Vec<T>
+    where
+        T: Send,
+        F: Fn(usize) -> T + Sync + Send,
+    {
+        let count = self.mesh.num_elements();
+        if ParallelPolicy::from_env().decide(count, 8) {
+            (0..count).into_par_iter().map(work).collect()
+        } else {
+            (0..count).map(work).collect()
+        }
+    }
+
+    fn check_state_degree(&self, state: &CompressibleDgState) -> Result<(), CompressibleDgError> {
         state.validate_layout(self.mesh)?;
         if state.degree != self.config.degree {
             return Err(CompressibleDgError::StateSizeMismatch);
@@ -467,7 +502,9 @@ impl<'a> CompressibleDgOperator<'a> {
         } else {
             (lambda[1], lambda[2], lambda[3])
         };
-        self.space.tabulate(self.mesh, element, xi, eta, zeta).values
+        self.space
+            .tabulate(self.mesh, element, xi, eta, zeta)
+            .values
     }
 
     pub fn spatial_operator(
@@ -476,9 +513,30 @@ impl<'a> CompressibleDgOperator<'a> {
     ) -> Result<Vec<ConservativeState>, CompressibleDgError> {
         self.check_state_degree(state)?;
         let mut integrated = vec![[0.0; 5]; state.values.len()];
-        self.add_volume_terms(state, &mut integrated)?;
-        self.add_interior_facet_terms(state, &mut integrated)?;
-        self.add_boundary_terms(state, &mut integrated)?;
+        // Element-block stages: each element's contribution is computed
+        // independently (the layout a future GPU kernel-per-element port
+        // will reuse), then merged in element order.
+        for stage in [
+            Self::volume_block
+                as fn(
+                    &Self,
+                    &CompressibleDgState,
+                    usize,
+                ) -> Result<Vec<[f64; 5]>, CompressibleDgError>,
+            Self::facet_block,
+            Self::boundary_block,
+        ] {
+            let blocks = self.map_elements(|element| stage(self, state, element));
+            for (element, block) in blocks.into_iter().enumerate() {
+                let block = block?;
+                let offset = state.element_offsets[element];
+                for (local, value) in block.into_iter().enumerate() {
+                    for equation in 0..5 {
+                        integrated[offset + local][equation] += value[equation];
+                    }
+                }
+            }
+        }
         Ok(self.apply_inverse_mass(&integrated))
     }
 
@@ -487,8 +545,7 @@ impl<'a> CompressibleDgOperator<'a> {
         state: &CompressibleDgState,
     ) -> Result<f64, CompressibleDgError> {
         self.check_state_degree(state)?;
-        let mut dt = f64::INFINITY;
-        for element in 0..self.mesh.num_elements() {
+        let locals = self.map_elements(|element| {
             let average = state.cell_average(element);
             if !average.is_physical(
                 self.config.gas,
@@ -521,7 +578,11 @@ impl<'a> CompressibleDgOperator<'a> {
             // DG spectral radius grows like (2p + 1); scale the P1-tuned
             // CFL by 3 / (2p + 1) so `cfl` keeps its meaning across degrees.
             let degree_factor = 3.0 / (2.0 * self.config.degree.degree() as f64 + 1.0);
-            dt = dt.min(self.config.cfl * degree_factor * convective.min(viscous));
+            Ok(self.config.cfl * degree_factor * convective.min(viscous))
+        });
+        let mut dt = f64::INFINITY;
+        for local in locals {
+            dt = dt.min(local?);
         }
         Ok(dt)
     }
@@ -538,92 +599,110 @@ impl<'a> CompressibleDgOperator<'a> {
         totals
     }
 
-    fn add_volume_terms(
+    fn volume_block(
         &self,
         state: &CompressibleDgState,
-        residual: &mut [[f64; 5]],
-    ) -> Result<(), CompressibleDgError> {
-        for element in 0..self.mesh.num_elements() {
-            let cell = state.element(element);
-            let gradients = primitive_gradients(
-                cell,
-                &self.space.tabulate(self.mesh, element, 0.25, 0.25, 0.25),
+        element: usize,
+    ) -> Result<Vec<[f64; 5]>, CompressibleDgError> {
+        let cell = state.element(element);
+        let mut residual = vec![[0.0; 5]; cell.len()];
+        let gradients = primitive_gradients(
+            cell,
+            &self.space.tabulate(self.mesh, element, 0.25, 0.25, 0.25),
+            self.config.gas,
+        );
+        let rule = QuadratureRule::new(
+            self.mesh.elements[element].element_type,
+            volume_quadrature_order(self.config.degree),
+        );
+        for point in rule.iter() {
+            let tab = self.space.tabulate(
+                self.mesh,
+                element,
+                point.coords[0],
+                point.coords[1],
+                point.coords[2],
+            );
+            let value = interpolate_with_basis(cell, &tab.values);
+            if !value.is_physical(
                 self.config.gas,
+                self.config.density_floor,
+                self.config.pressure_floor,
+            ) {
+                return Err(CompressibleDgError::NonPhysicalQuadratureState);
+            }
+            let viscous = viscous_flux_tensor(
+                value,
+                gradients,
+                self.config.gas,
+                self.config.viscosity,
+                self.config.prandtl,
             );
-            let rule = QuadratureRule::new(
-                self.mesh.elements[element].element_type,
-                volume_quadrature_order(self.config.degree),
-            );
-            let offset = state.element_offsets[element];
-            for point in rule.iter() {
-                let tab = self.space.tabulate(
-                    self.mesh,
-                    element,
-                    point.coords[0],
-                    point.coords[1],
-                    point.coords[2],
-                );
-                let value = interpolate_with_basis(cell, &tab.values);
-                if !value.is_physical(
-                    self.config.gas,
-                    self.config.density_floor,
-                    self.config.pressure_floor,
-                ) {
-                    return Err(CompressibleDgError::NonPhysicalQuadratureState);
-                }
-                let viscous = viscous_flux_tensor(
-                    value,
-                    gradients,
-                    self.config.gas,
-                    self.config.viscosity,
-                    self.config.prandtl,
-                );
-                let weight = point.weight * tab.det_j;
-                for local in 0..tab.n_dofs {
-                    for direction in 0..self.mesh.dimension {
-                        let mut normal = [0.0; 3];
-                        normal[direction] = 1.0;
-                        let inviscid = value.euler_flux(self.config.gas, normal);
-                        for equation in 0..5 {
-                            residual[offset + local][equation] += tab.grad(local, direction)
-                                * (inviscid[equation] - viscous[direction][equation])
-                                * weight;
-                        }
+            let weight = point.weight * tab.det_j;
+            for (local, res) in residual.iter_mut().enumerate().take(tab.n_dofs) {
+                for direction in 0..self.mesh.dimension {
+                    let mut normal = [0.0; 3];
+                    normal[direction] = 1.0;
+                    let inviscid = value.euler_flux(self.config.gas, normal);
+                    for equation in 0..5 {
+                        res[equation] += tab.grad(local, direction)
+                            * (inviscid[equation] - viscous[direction][equation])
+                            * weight;
                     }
                 }
             }
         }
-        Ok(())
+        Ok(residual)
     }
 
-    fn add_interior_facet_terms(
+    /// Element-centric interior-facet gather: each element accumulates
+    /// its own facet contributions (sign -1 as facet plus side, +1 as
+    /// minus side), in ascending facet order, matching the accumulation
+    /// order of the former facet-major loop exactly.
+    fn facet_block(
         &self,
         state: &CompressibleDgState,
-        residual: &mut [[f64; 5]],
-    ) -> Result<(), CompressibleDgError> {
-        for facet in &self.interior_facets {
+        element: usize,
+    ) -> Result<Vec<[f64; 5]>, CompressibleDgError> {
+        let cell = state.element(element);
+        let mut residual = vec![[0.0; 5]; cell.len()];
+        let own_gradients = primitive_gradients(
+            cell,
+            &self.space.tabulate(self.mesh, element, 0.25, 0.25, 0.25),
+            self.config.gas,
+        );
+        for &facet_index in &self.element_facets[element] {
+            let facet = &self.interior_facets[facet_index];
+            let is_plus = facet.elem_plus == element;
+            let other_element = if is_plus {
+                facet.elem_minus
+            } else {
+                facet.elem_plus
+            };
+            let other = state.element(other_element);
+            let other_gradients = primitive_gradients(
+                other,
+                &self
+                    .space
+                    .tabulate(self.mesh, other_element, 0.25, 0.25, 0.25),
+                self.config.gas,
+            );
             let plus_centroid = element_centroid(self.mesh, facet.elem_plus);
             let minus_centroid = element_centroid(self.mesh, facet.elem_minus);
             let mut normal = facet.normal;
             if dot3(normal, sub3(minus_centroid, plus_centroid)) < 0.0 {
                 normal = scale3(normal, -1.0);
             }
-            let plus = state.element(facet.elem_plus);
-            let minus = state.element(facet.elem_minus);
-            let plus_gradients = primitive_gradients(
-                plus,
-                &self
-                    .space
-                    .tabulate(self.mesh, facet.elem_plus, 0.25, 0.25, 0.25),
-                self.config.gas,
-            );
-            let minus_gradients = primitive_gradients(
-                minus,
-                &self
-                    .space
-                    .tabulate(self.mesh, facet.elem_minus, 0.25, 0.25, 0.25),
-                self.config.gas,
-            );
+            let (plus, minus) = if is_plus {
+                (cell, other)
+            } else {
+                (other, cell)
+            };
+            let (plus_gradients, minus_gradients) = if is_plus {
+                (own_gradients, other_gradients)
+            } else {
+                (other_gradients, own_gradients)
+            };
             let h = 0.5
                 * (element_diameter(self.mesh, facet.elem_plus)
                     + element_diameter(self.mesh, facet.elem_minus));
@@ -636,44 +715,44 @@ impl<'a> CompressibleDgOperator<'a> {
                 let right = interpolate_with_basis(minus, &minus_basis);
                 let flux =
                     self.numerical_flux(left, right, plus_gradients, minus_gradients, normal, h)?;
-                let plus_offset = state.element_offsets[facet.elem_plus];
-                let minus_offset = state.element_offsets[facet.elem_minus];
-                for local in 0..plus.len() {
+                let (basis, sign) = if is_plus {
+                    (&plus_basis, -1.0)
+                } else {
+                    (&minus_basis, 1.0)
+                };
+                for local in 0..cell.len() {
                     for equation in 0..5 {
-                        residual[plus_offset + local][equation] -=
-                            plus_basis[local] * flux[equation] * weight;
-                    }
-                }
-                for local in 0..minus.len() {
-                    for equation in 0..5 {
-                        residual[minus_offset + local][equation] +=
-                            minus_basis[local] * flux[equation] * weight;
+                        residual[local][equation] += sign * basis[local] * flux[equation] * weight;
                     }
                 }
             }
         }
-        Ok(())
+        Ok(residual)
     }
 
-    fn add_boundary_terms(
+    fn boundary_block(
         &self,
         state: &CompressibleDgState,
-        residual: &mut [[f64; 5]],
-    ) -> Result<(), CompressibleDgError> {
-        for face in &self.mesh.boundaries {
+        element: usize,
+    ) -> Result<Vec<[f64; 5]>, CompressibleDgError> {
+        let cell = state.element(element);
+        let mut residual = vec![[0.0; 5]; cell.len()];
+        if self.element_boundary_faces[element].is_empty() {
+            return Ok(residual);
+        }
+        let gradients = primitive_gradients(
+            cell,
+            &self.space.tabulate(self.mesh, element, 0.25, 0.25, 0.25),
+            self.config.gas,
+        );
+        for &face_index in &self.element_boundary_faces[element] {
+            let face = &self.mesh.boundaries[face_index];
             let condition = self
                 .config
                 .boundaries
                 .get(&face.marker)
                 .copied()
                 .ok_or(CompressibleDgError::MissingBoundaryCondition)?;
-            let element = face.element_idx;
-            let cell = state.element(element);
-            let gradients = primitive_gradients(
-                cell,
-                &self.space.tabulate(self.mesh, element, 0.25, 0.25, 0.25),
-                self.config.gas,
-            );
             let mut normal = facet_normal(self.mesh, &face.nodes);
             let face_centroid = points_centroid(self.mesh, &face.nodes);
             if dot3(
@@ -684,9 +763,7 @@ impl<'a> CompressibleDgOperator<'a> {
                 normal = scale3(normal, -1.0);
             }
             let h = element_diameter(self.mesh, element);
-            let offset = state.element_offsets[element];
-            for (point, weight) in facet_quadrature(self.mesh, &face.nodes, self.config.degree)
-            {
+            for (point, weight) in facet_quadrature(self.mesh, &face.nodes, self.config.degree) {
                 let basis = self.facet_basis(element, point);
                 let interior = interpolate_with_basis(cell, &basis);
                 let exterior = boundary_state(condition, interior, normal, self.config.gas)?;
@@ -694,13 +771,12 @@ impl<'a> CompressibleDgOperator<'a> {
                     self.numerical_flux(interior, exterior, gradients, gradients, normal, h)?;
                 for local in 0..cell.len() {
                     for equation in 0..5 {
-                        residual[offset + local][equation] -=
-                            basis[local] * flux[equation] * weight;
+                        residual[local][equation] -= basis[local] * flux[equation] * weight;
                     }
                 }
             }
         }
-        Ok(())
+        Ok(residual)
     }
 
     fn numerical_flux(
@@ -769,28 +845,373 @@ impl<'a> CompressibleDgOperator<'a> {
     }
 
     fn apply_inverse_mass(&self, integrated: &[[f64; 5]]) -> Vec<ConservativeState> {
-        let mut derivative = vec![ConservativeState::from_array([0.0; 5]); integrated.len()];
-        let mut offset = 0;
+        // Element offsets, identical layout to the state's.
+        let mut offsets = Vec::with_capacity(self.mesh.num_elements());
+        let mut running = 0usize;
         for element in 0..self.mesh.num_elements() {
-            let n = local_node_count(
-                self.mesh.elements[element].element_type,
-                self.config.degree,
-            );
+            offsets.push(running);
+            running +=
+                local_node_count(self.mesh.elements[element].element_type, self.config.degree);
+        }
+        let blocks = self.map_elements(|element| {
+            let n = local_node_count(self.mesh.elements[element].element_type, self.config.degree);
+            let offset = offsets[element];
             let inverse = &self.mass_inverses[element];
+            let mut block = vec![ConservativeState::from_array([0.0; 5]); n];
             for equation in 0..5 {
                 for local in 0..n {
                     let value: f64 = (0..n)
-                        .map(|other| inverse[local * n + other] * integrated[offset + other][equation])
+                        .map(|other| {
+                            inverse[local * n + other] * integrated[offset + other][equation]
+                        })
                         .sum();
-                    let mut array = derivative[offset + local].as_array();
+                    let mut array = block[local].as_array();
                     array[equation] = value;
-                    derivative[offset + local] = ConservativeState::from_array(array);
+                    block[local] = ConservativeState::from_array(array);
                 }
             }
-            offset += n;
-        }
-        derivative
+            block
+        });
+        blocks.into_iter().flatten().collect()
     }
+}
+
+#[cfg(feature = "cuda")]
+impl<'a> CompressibleDgOperator<'a> {
+    /// Stage this operator as flat device tables for
+    /// `sonium_compute::cuda::dg`.
+    ///
+    /// Every table is produced by the same CPU helpers the operator
+    /// itself uses (quadrature tabulations, facet quadrature, Persson
+    /// matrices), so the device kernels consume identical numbers.
+    /// Boundary-condition parameters are validated here with the same
+    /// checks `boundary_state` applies per evaluation.
+    pub(crate) fn build_cuda_problem(
+        &self,
+        state: &CompressibleDgState,
+    ) -> Result<sonium_compute::cuda::dg::CudaDgProblem, CompressibleDgError> {
+        use sonium_compute::cuda::dg::{CudaDgProblem, DgParams};
+        self.check_state_degree(state)?;
+        let mesh = self.mesh;
+        let degree = self.config.degree;
+        let element_type = mesh.elements[0].element_type;
+        let n = local_node_count(element_type, degree);
+        let dim = mesh.dimension;
+        let average_weights = if state.average_weights.len() == n {
+            state.average_weights.clone()
+        } else {
+            vec![1.0 / n as f64; n]
+        };
+        let (flux_kind, sensor_mode, persson) = {
+            let flux_kind = match self.config.flux {
+                CompressibleFluxKind::Rusanov => 0,
+                CompressibleFluxKind::Hllc => 1,
+            };
+            if self.config.persson_threshold.is_finite() {
+                match persson_matrices(element_type, degree) {
+                    Some(matrices) => (flux_kind, 0, Some(matrices)),
+                    None => (flux_kind, 2, None),
+                }
+            } else if self.config.troubled_cell_threshold.is_finite() {
+                (flux_kind, 1, None)
+            } else {
+                (flux_kind, 2, None)
+            }
+        };
+        let (visc_kind, visc_a, visc_b, visc_c) = match self.config.viscosity {
+            ViscosityModel::Constant(mu) => (0, mu, 0.0, 0.0),
+            ViscosityModel::Sutherland {
+                reference_viscosity,
+                reference_temperature,
+                sutherland_temperature,
+            } => (
+                1,
+                reference_viscosity,
+                reference_temperature,
+                sutherland_temperature,
+            ),
+        };
+        let params = DgParams {
+            dim: dim as i32,
+            n: n as i32,
+            flux_kind,
+            visc_kind,
+            sensor_mode,
+            persson_highest: persson
+                .as_ref()
+                .map_or(0, |matrices| matrices.highest_start as i32),
+            gamma: self.config.gas.gamma,
+            gas_constant: self.config.gas.gas_constant,
+            prandtl: self.config.prandtl,
+            visc_a,
+            visc_b,
+            visc_c,
+            density_floor: self.config.density_floor,
+            pressure_floor: self.config.pressure_floor,
+            sipg_penalty: self.config.sipg_penalty,
+            cfl_scaled: self.config.cfl * 3.0 / (2.0 * degree.degree() as f64 + 1.0),
+            relaxation: self.config.troubled_cell_relaxation,
+            threshold: self.config.troubled_cell_threshold,
+            persson_threshold: self.config.persson_threshold,
+        };
+        // Volume quadrature tables: basis values are reference-based
+        // (shared), gradients and weights are per element.
+        let rule = QuadratureRule::new(element_type, volume_quadrature_order(degree));
+        let points: Vec<_> = rule.iter().collect();
+        let nq_vol = points.len();
+        let mut vol_basis = Vec::with_capacity(nq_vol * n);
+        for point in &points {
+            let tab =
+                self.space
+                    .tabulate(mesh, 0, point.coords[0], point.coords[1], point.coords[2]);
+            vol_basis.extend_from_slice(&tab.values[..n]);
+        }
+        let mut vol_grad = Vec::with_capacity(mesh.num_elements() * nq_vol * n * 3);
+        let mut vol_wdet = Vec::with_capacity(mesh.num_elements() * nq_vol);
+        let mut cent_grad = Vec::with_capacity(mesh.num_elements() * n * 3);
+        for element in 0..mesh.num_elements() {
+            for point in &points {
+                let tab = self.space.tabulate(
+                    mesh,
+                    element,
+                    point.coords[0],
+                    point.coords[1],
+                    point.coords[2],
+                );
+                for local in 0..n {
+                    for direction in 0..3 {
+                        vol_grad.push(if direction < tab.spatial_dim {
+                            tab.grad(local, direction)
+                        } else {
+                            0.0
+                        });
+                    }
+                }
+                vol_wdet.push(point.weight * tab.det_j);
+            }
+            let tab = self.space.tabulate(mesh, element, 0.25, 0.25, 0.25);
+            for local in 0..n {
+                for direction in 0..3 {
+                    cent_grad.push(if direction < tab.spatial_dim {
+                        tab.grad(local, direction)
+                    } else {
+                        0.0
+                    });
+                }
+            }
+        }
+        // Interior-facet CSR in the element-centric gather order.
+        let mut facet_elem_offsets = vec![0i32];
+        let mut facet_neighbor = Vec::new();
+        let mut facet_is_plus = Vec::new();
+        let mut facet_normals = Vec::new();
+        let mut facet_h = Vec::new();
+        let mut facet_quad_offsets = vec![0i32];
+        let mut facet_basis_own = Vec::new();
+        let mut facet_basis_other = Vec::new();
+        let mut facet_weights = Vec::new();
+        for element in 0..mesh.num_elements() {
+            for &facet_index in &self.element_facets[element] {
+                let facet = &self.interior_facets[facet_index];
+                let is_plus = facet.elem_plus == element;
+                let other = if is_plus {
+                    facet.elem_minus
+                } else {
+                    facet.elem_plus
+                };
+                let plus_centroid = element_centroid(mesh, facet.elem_plus);
+                let minus_centroid = element_centroid(mesh, facet.elem_minus);
+                let mut normal = facet.normal;
+                if dot3(normal, sub3(minus_centroid, plus_centroid)) < 0.0 {
+                    normal = scale3(normal, -1.0);
+                }
+                facet_neighbor.push(other as i32);
+                facet_is_plus.push(i32::from(is_plus));
+                facet_normals.extend_from_slice(&normal);
+                facet_h.push(
+                    0.5 * (element_diameter(mesh, facet.elem_plus)
+                        + element_diameter(mesh, facet.elem_minus)),
+                );
+                for (point, weight) in facet_quadrature(mesh, &facet.shared_nodes, degree) {
+                    let plus_basis = self.facet_basis(facet.elem_plus, point);
+                    let minus_basis = self.facet_basis(facet.elem_minus, point);
+                    let (own, other_basis) = if is_plus {
+                        (&plus_basis, &minus_basis)
+                    } else {
+                        (&minus_basis, &plus_basis)
+                    };
+                    facet_basis_own.extend_from_slice(&own[..n]);
+                    facet_basis_other.extend_from_slice(&other_basis[..n]);
+                    facet_weights.push(weight);
+                }
+                facet_quad_offsets.push(facet_weights.len() as i32);
+            }
+            facet_elem_offsets.push(facet_neighbor.len() as i32);
+        }
+        // Boundary-face CSR with conditions resolved to kernel kinds.
+        let mut bnd_elem_offsets = vec![0i32];
+        let mut bnd_kind = Vec::new();
+        let mut bnd_params = Vec::new();
+        let mut bnd_normal = Vec::new();
+        let mut bnd_h = Vec::new();
+        let mut bnd_quad_offsets = vec![0i32];
+        let mut bnd_basis = Vec::new();
+        let mut bnd_weights = Vec::new();
+        for element in 0..mesh.num_elements() {
+            for &face_index in &self.element_boundary_faces[element] {
+                let face = &mesh.boundaries[face_index];
+                let condition = self
+                    .config
+                    .boundaries
+                    .get(&face.marker)
+                    .copied()
+                    .ok_or(CompressibleDgError::MissingBoundaryCondition)?;
+                let (kind, params8) = encode_boundary_condition(condition)?;
+                let mut normal = facet_normal(mesh, &face.nodes);
+                let face_centroid = points_centroid(mesh, &face.nodes);
+                if dot3(normal, sub3(face_centroid, element_centroid(mesh, element))) < 0.0 {
+                    normal = scale3(normal, -1.0);
+                }
+                bnd_kind.push(kind);
+                bnd_params.extend_from_slice(&params8);
+                bnd_normal.extend_from_slice(&normal);
+                bnd_h.push(element_diameter(mesh, element));
+                for (point, weight) in facet_quadrature(mesh, &face.nodes, degree) {
+                    bnd_basis.extend_from_slice(&self.facet_basis(element, point)[..n]);
+                    bnd_weights.push(weight);
+                }
+                bnd_quad_offsets.push(bnd_weights.len() as i32);
+            }
+            bnd_elem_offsets.push(bnd_kind.len() as i32);
+        }
+        // Limiter neighbour CSR, built exactly as the CPU limiter does.
+        let mut neighbours: Vec<Vec<(usize, [f64; 3])>> = vec![Vec::new(); mesh.num_elements()];
+        for facet in &self.interior_facets {
+            let mut normal = facet.normal;
+            if dot3(
+                normal,
+                sub3(
+                    element_centroid(mesh, facet.elem_minus),
+                    element_centroid(mesh, facet.elem_plus),
+                ),
+            ) < 0.0
+            {
+                normal = scale3(normal, -1.0);
+            }
+            neighbours[facet.elem_plus].push((facet.elem_minus, normal));
+            neighbours[facet.elem_minus].push((facet.elem_plus, scale3(normal, -1.0)));
+        }
+        let mut lim_offsets = vec![0i32];
+        let mut lim_neighbor = Vec::new();
+        let mut lim_normal = Vec::new();
+        for element_neighbours in &neighbours {
+            for &(neighbour, normal) in element_neighbours {
+                lim_neighbor.push(neighbour as i32);
+                lim_normal.extend_from_slice(&normal);
+            }
+            lim_offsets.push(lim_neighbor.len() as i32);
+        }
+        Ok(CudaDgProblem {
+            params,
+            num_elements: mesh.num_elements(),
+            nq_vol,
+            vol_basis,
+            vol_grad,
+            vol_wdet,
+            cent_grad,
+            mass_inv: self.mass_inverses.concat(),
+            avg_weights: average_weights,
+            elem_min_altitude: (0..mesh.num_elements())
+                .map(|element| element_min_altitude(mesh, element))
+                .collect(),
+            elem_volume: (0..mesh.num_elements())
+                .map(|element| cell_volume(mesh, element))
+                .collect(),
+            facet_elem_offsets,
+            facet_neighbor,
+            facet_is_plus,
+            facet_normal: facet_normals,
+            facet_h,
+            facet_quad_offsets,
+            facet_basis_own,
+            facet_basis_other,
+            facet_weights,
+            bnd_elem_offsets,
+            bnd_kind,
+            bnd_params,
+            bnd_normal,
+            bnd_h,
+            bnd_quad_offsets,
+            bnd_basis,
+            bnd_weights,
+            lim_offsets,
+            lim_neighbor,
+            lim_normal,
+            persson_vinv: persson
+                .as_ref()
+                .map_or_else(Vec::new, |matrices| matrices.vandermonde_inverse.clone()),
+            persson_gram: persson
+                .as_ref()
+                .map_or_else(Vec::new, |matrices| matrices.gram.clone()),
+        })
+    }
+}
+
+/// Encode a boundary condition as `(kind, params[8])` for the device
+/// kernels, applying the same validation `boundary_state` performs.
+#[cfg(feature = "cuda")]
+fn encode_boundary_condition(
+    condition: CompressibleBoundaryCondition,
+) -> Result<(i32, [f64; 8]), CompressibleDgError> {
+    let mut params = [0.0; 8];
+    let kind = match condition {
+        CompressibleBoundaryCondition::SlipWall => 0,
+        CompressibleBoundaryCondition::NoSlipAdiabatic { wall_velocity } => {
+            params[..3].copy_from_slice(&wall_velocity);
+            1
+        }
+        CompressibleBoundaryCondition::NoSlipIsothermal {
+            wall_velocity,
+            temperature,
+        } => {
+            if !temperature.is_finite() || temperature <= 0.0 {
+                return Err(CompressibleDgError::InvalidConfiguration);
+            }
+            params[..3].copy_from_slice(&wall_velocity);
+            params[3] = temperature;
+            2
+        }
+        CompressibleBoundaryCondition::FarField(far_field) => {
+            params[..5].copy_from_slice(&far_field.as_array());
+            3
+        }
+        CompressibleBoundaryCondition::SupersonicState(prescribed) => {
+            params[..5].copy_from_slice(&prescribed.as_array());
+            4
+        }
+        CompressibleBoundaryCondition::SubsonicTotalInlet {
+            total_pressure,
+            total_temperature,
+            direction,
+        } => {
+            if total_pressure <= 0.0 || total_temperature <= 0.0 || norm3(direction) <= f64::EPSILON
+            {
+                return Err(CompressibleDgError::InvalidConfiguration);
+            }
+            params[0] = total_pressure;
+            params[1] = total_temperature;
+            params[2..5].copy_from_slice(&direction);
+            5
+        }
+        CompressibleBoundaryCondition::StaticPressureOutlet { pressure } => {
+            if pressure <= 0.0 || !pressure.is_finite() {
+                return Err(CompressibleDgError::InvalidConfiguration);
+            }
+            params[0] = pressure;
+            6
+        }
+    };
+    Ok((kind, params))
 }
 
 pub struct CompressibleDgSolver<'a> {
@@ -1127,7 +1548,10 @@ struct PerssonMatrices {
     highest_start: usize,
 }
 
-fn persson_matrices(element_type: ElementType, degree: PolynomialDegree) -> Option<PerssonMatrices> {
+fn persson_matrices(
+    element_type: ElementType,
+    degree: PolynomialDegree,
+) -> Option<PerssonMatrices> {
     let dim = element_type.dimension();
     let degree_value = degree.degree();
     let exponents = monomial_exponents(dim, degree_value);
@@ -1148,7 +1572,9 @@ fn persson_matrices(element_type: ElementType, degree: PolynomialDegree) -> Opti
     let mut nodes: Vec<[f64; 3]> = corners[..element_type.num_vertices()].to_vec();
     if degree == PolynomialDegree::P2 {
         for &(a, b) in element_type.local_edges() {
-            nodes.push(std::array::from_fn(|axis| 0.5 * (corners[a][axis] + corners[b][axis])));
+            nodes.push(std::array::from_fn(|axis| {
+                0.5 * (corners[a][axis] + corners[b][axis])
+            }));
         }
     }
     if nodes.len() != n {
@@ -1292,9 +1718,11 @@ fn apply_characteristic_vertex_limiter(
         neighbors[facet.elem_plus].push((facet.elem_minus, normal));
         neighbors[facet.elem_minus].push((facet.elem_plus, scale3(normal, -1.0)));
     }
-    for element in 0..mesh.num_elements() {
+    // Per-element limiter factors, computed in parallel (each element
+    // reads only the frozen original state), then applied in order.
+    let element_theta = |element: usize| -> Option<f64> {
         if neighbors[element].is_empty() {
-            continue;
+            return None;
         }
         let average = averages[element];
         // Troubled-cell decision. With a finite Persson--Peraire
@@ -1308,13 +1736,12 @@ fn apply_characteristic_vertex_limiter(
                 .iter()
                 .map(|nodal| nodal.density)
                 .collect();
-            let smooth = persson_matrices.as_ref().is_some_and(|matrices| {
-                persson_indicator(&density, matrices) <= persson_threshold
-            });
+            let smooth = persson_matrices
+                .as_ref()
+                .is_some_and(|matrices| persson_indicator(&density, matrices) <= persson_threshold);
             let strong_jump = neighbors[element].iter().any(|&(neighbor, _)| {
                 let other = averages[neighbor];
-                (other.density - average.density).abs() / average.density.abs().max(1.0e-300)
-                    > 0.5
+                (other.density - average.density).abs() / average.density.abs().max(1.0e-300) > 0.5
                     || (other.pressure(gas) - average.pressure(gas)).abs()
                         / average.pressure(gas).abs().max(1.0e-300)
                         > 0.5
@@ -1333,7 +1760,7 @@ fn apply_characteristic_vertex_limiter(
             true
         };
         if !troubled {
-            continue;
+            return None;
         }
         let mut theta = 1.0_f64;
         for &(neighbor, normal) in &neighbors[element] {
@@ -1359,6 +1786,19 @@ fn apply_characteristic_vertex_limiter(
                 }
             }
         }
+        Some(theta)
+    };
+    let thetas: Vec<Option<f64>> = if ParallelPolicy::from_env().decide(mesh.num_elements(), 8) {
+        (0..mesh.num_elements())
+            .into_par_iter()
+            .map(&element_theta)
+            .collect()
+    } else {
+        (0..mesh.num_elements()).map(&element_theta).collect()
+    };
+    for (element, theta) in thetas.into_iter().enumerate() {
+        let Some(theta) = theta else { continue };
+        let average = averages[element];
         let average_array = average.as_array();
         for nodal in state.element_mut(element) {
             let values = nodal.as_array();
@@ -1378,7 +1818,9 @@ fn apply_zhang_shu_positivity(
     density_floor: f64,
     pressure_floor: f64,
 ) -> Result<(), CompressibleDgError> {
-    for element in 0..state.element_offsets.len() - 1 {
+    // Per-element scaling factors in parallel; application in order.
+    let count = state.element_offsets.len() - 1;
+    let compute_theta = |element: usize| -> Result<f64, CompressibleDgError> {
         let average = state.cell_average(element);
         if !average.is_physical(gas, density_floor, pressure_floor) {
             return Err(CompressibleDgError::NonPhysicalCellAverage);
@@ -1415,6 +1857,18 @@ fn apply_zhang_shu_positivity(
                 theta = theta.min(lower);
             }
         }
+        Ok(theta)
+    };
+    let thetas: Vec<Result<f64, CompressibleDgError>> =
+        if ParallelPolicy::from_env().decide(count, 8) {
+            (0..count).into_par_iter().map(&compute_theta).collect()
+        } else {
+            (0..count).map(&compute_theta).collect()
+        };
+    for (element, theta) in thetas.into_iter().enumerate() {
+        let theta = theta?;
+        let average = state.cell_average(element);
+        let average_array = average.as_array();
         for nodal in state.element_mut(element) {
             let values = nodal.as_array();
             let mut limited = [0.0; 5];
@@ -1837,12 +2291,9 @@ mod tests {
     fn p2_uniform_flow_residual_vanishes_on_triangles_and_tetrahedra() {
         let reference = uniform_state();
         let tri = unit_square_triangles(2);
-        let state = CompressibleDgState::from_function_degree(
-            &tri,
-            PolynomialDegree::P2,
-            |_| reference,
-        )
-        .unwrap();
+        let state =
+            CompressibleDgState::from_function_degree(&tri, PolynomialDegree::P2, |_| reference)
+                .unwrap();
         assert_eq!(state.element(0).len(), 6);
         let operator =
             CompressibleDgOperator::new(&tri, config_p2_far_field(&tri, reference)).unwrap();
@@ -1855,12 +2306,9 @@ mod tests {
         assert!(maximum < 1.0e-5, "P2 triangle residual={maximum:e}");
 
         let tet = unit_cube_tetrahedra(1);
-        let state = CompressibleDgState::from_function_degree(
-            &tet,
-            PolynomialDegree::P2,
-            |_| reference,
-        )
-        .unwrap();
+        let state =
+            CompressibleDgState::from_function_degree(&tet, PolynomialDegree::P2, |_| reference)
+                .unwrap();
         assert_eq!(state.element(0).len(), 10);
         let operator =
             CompressibleDgOperator::new(&tet, config_p2_far_field(&tet, reference)).unwrap();
@@ -1931,12 +2379,9 @@ mod tests {
     fn p2_ssprk3_advances_physical_uniform_state() {
         let mesh = unit_square_triangles(1);
         let reference = uniform_state();
-        let mut state = CompressibleDgState::from_function_degree(
-            &mesh,
-            PolynomialDegree::P2,
-            |_| reference,
-        )
-        .unwrap();
+        let mut state =
+            CompressibleDgState::from_function_degree(&mesh, PolynomialDegree::P2, |_| reference)
+                .unwrap();
         let solver =
             CompressibleDgSolver::new(&mesh, config_p2_far_field(&mesh, reference)).unwrap();
         let report = solver.step(&mut state, 1.0e-5).unwrap();
@@ -1953,23 +2398,38 @@ mod tests {
             gamma: 1.4,
             gas_constant: 1.0,
         };
-        let mut state = CompressibleDgState::from_function_degree(
-            &mesh,
-            PolynomialDegree::P2,
-            |point| ConservativeState {
-                density: 1.0 + 0.1 * point[0],
-                momentum: [0.0; 3],
-                total_energy: 2.5,
-            },
-        )
-        .unwrap();
+        let mut state =
+            CompressibleDgState::from_function_degree(&mesh, PolynomialDegree::P2, |point| {
+                ConservativeState {
+                    density: 1.0 + 0.1 * point[0],
+                    momentum: [0.0; 3],
+                    total_energy: 2.5,
+                }
+            })
+            .unwrap();
         let before = state.clone();
-        apply_characteristic_vertex_limiter(&mesh, &mut state, gas, 0.5, 0.5, f64::INFINITY, &build_interior_facets(&mesh));
+        apply_characteristic_vertex_limiter(
+            &mesh,
+            &mut state,
+            gas,
+            0.5,
+            0.5,
+            f64::INFINITY,
+            &build_interior_facets(&mesh),
+        );
         assert_eq!(state, before, "smooth field must not be limited");
         // With the sensor disabled (infinite threshold) the same field IS
         // flattened somewhere: this is the legacy behaviour being gated.
         let mut legacy = before.clone();
-        apply_characteristic_vertex_limiter(&mesh, &mut legacy, gas, 0.5, f64::INFINITY, f64::INFINITY, &build_interior_facets(&mesh));
+        apply_characteristic_vertex_limiter(
+            &mesh,
+            &mut legacy,
+            gas,
+            0.5,
+            f64::INFINITY,
+            f64::INFINITY,
+            &build_interior_facets(&mesh),
+        );
         assert_ne!(legacy, before, "legacy limiter should alter the ramp");
     }
 
@@ -1987,14 +2447,18 @@ mod tests {
             momentum: [0.0; 3],
             total_energy: 2.5,
         };
-        let mut state = CompressibleDgState::from_function_degree(
-            &mesh,
-            PolynomialDegree::P2,
-            field,
-        )
-        .unwrap();
+        let mut state =
+            CompressibleDgState::from_function_degree(&mesh, PolynomialDegree::P2, field).unwrap();
         let before = state.clone();
-        apply_characteristic_vertex_limiter(&mesh, &mut state, gas, 0.05, 0.1, f64::INFINITY, &build_interior_facets(&mesh));
+        apply_characteristic_vertex_limiter(
+            &mesh,
+            &mut state,
+            gas,
+            0.05,
+            0.1,
+            f64::INFINITY,
+            &build_interior_facets(&mesh),
+        );
         // Find an element whose centroid is far upstream (smooth) and one
         // adjacent to the jump.
         let mut smooth_changed = false;
@@ -2009,34 +2473,33 @@ mod tests {
                 shocked_changed |= changed;
             }
         }
-        assert!(!smooth_changed, "smooth upstream element must stay unlimited");
+        assert!(
+            !smooth_changed,
+            "smooth upstream element must stay unlimited"
+        );
         assert!(shocked_changed, "element at the jump must be limited");
     }
 
     #[test]
     fn persson_indicator_separates_smooth_from_discontinuous() {
         let mesh = unit_square_triangles(4);
-        let matrices = persson_matrices(
-            mesh.elements[0].element_type,
-            PolynomialDegree::P2,
-        )
-        .expect("P2 Persson matrices");
+        let matrices = persson_matrices(mesh.elements[0].element_type, PolynomialDegree::P2)
+            .expect("P2 Persson matrices");
         let gas = IdealGas {
             gamma: 1.4,
             gas_constant: 1.0,
         };
         let _ = gas;
         let indicator_of = |field: &dyn Fn([f64; 3]) -> f64| -> f64 {
-            let state = CompressibleDgState::from_function_degree(
-                &mesh,
-                PolynomialDegree::P2,
-                |point| ConservativeState {
-                    density: field(point),
-                    momentum: [0.0; 3],
-                    total_energy: 2.5,
-                },
-            )
-            .unwrap();
+            let state =
+                CompressibleDgState::from_function_degree(&mesh, PolynomialDegree::P2, |point| {
+                    ConservativeState {
+                        density: field(point),
+                        momentum: [0.0; 3],
+                        total_energy: 2.5,
+                    }
+                })
+                .unwrap();
             // Worst (largest) indicator across elements.
             (0..mesh.num_elements())
                 .map(|element| {
@@ -2052,7 +2515,10 @@ mod tests {
         let linear = indicator_of(&|point| 1.0 + 0.1 * point[0] - 0.05 * point[1]);
         let quadratic = indicator_of(&|point| 1.0 + 0.3 * point[0] * point[0]);
         let step = indicator_of(&|point| if point[0] < 0.5 { 1.0 } else { 0.3 });
-        assert!(linear < -8.0, "linear field indicator {linear} should be tiny");
+        assert!(
+            linear < -8.0,
+            "linear field indicator {linear} should be tiny"
+        );
         assert!(
             step > -1.5,
             "step field indicator {step} should approach 0 (all energy in top modes)"
@@ -2070,16 +2536,15 @@ mod tests {
             gamma: 1.4,
             gas_constant: 1.0,
         };
-        let mut state = CompressibleDgState::from_function_degree(
-            &mesh,
-            PolynomialDegree::P2,
-            |point| ConservativeState {
-                density: 1.0 + 0.4 * point[0] * point[0],
-                momentum: [0.0; 3],
-                total_energy: 2.5,
-            },
-        )
-        .unwrap();
+        let mut state =
+            CompressibleDgState::from_function_degree(&mesh, PolynomialDegree::P2, |point| {
+                ConservativeState {
+                    density: 1.0 + 0.4 * point[0] * point[0],
+                    momentum: [0.0; 3],
+                    total_energy: 2.5,
+                }
+            })
+            .unwrap();
         let before = state.clone();
         // PP threshold -1 flags only near-discontinuous elements; the
         // legacy jump sensor stays out of the decision in PP mode.
@@ -2092,19 +2557,19 @@ mod tests {
             -1.0,
             &build_interior_facets(&mesh),
         );
-        assert_eq!(state, before, "smooth quadratic field must not be limited in PP mode");
+        assert_eq!(
+            state, before,
+            "smooth quadratic field must not be limited in PP mode"
+        );
     }
 
     #[test]
     fn p2_state_rejected_by_p1_operator() {
         let mesh = unit_square_triangles(1);
         let reference = uniform_state();
-        let state = CompressibleDgState::from_function_degree(
-            &mesh,
-            PolynomialDegree::P2,
-            |_| reference,
-        )
-        .unwrap();
+        let state =
+            CompressibleDgState::from_function_degree(&mesh, PolynomialDegree::P2, |_| reference)
+                .unwrap();
         let operator =
             CompressibleDgOperator::new(&mesh, config_with_far_field(&mesh, reference)).unwrap();
         assert!(operator.spatial_operator(&state).is_err());

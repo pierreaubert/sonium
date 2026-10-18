@@ -8,6 +8,8 @@
 #[cfg(feature = "cuda")]
 mod cublas;
 #[cfg(feature = "cuda")]
+pub mod dg;
+#[cfg(feature = "cuda")]
 pub mod explicit;
 #[cfg(feature = "cuda")]
 mod hmatrix;

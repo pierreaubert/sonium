@@ -7,14 +7,14 @@ validated cases, not every runnable QA binary.
 
 ## Summary
 
-- Registered Cargo QA binaries: 990
-- Manifest-backed validation cases: 810
+- Registered Cargo QA binaries: 991
+- Manifest-backed validation cases: 811
 
 | Tier | Cases |
 | --- | ---: |
 | accelerator-gate | 8 |
 | contract-gate | 41 |
-| physics-gate | 398 |
+| physics-gate | 399 |
 | reference-only | 100 |
 | smoke | 157 |
 | solver-gate | 106 |
@@ -230,6 +230,7 @@ validated cases, not every runnable QA binary.
 | fem.biharmonic-mms-3d.v1 | fem | `qa-fem-biharmonic-mms-3d` | physics-gate | solved P1 mixed Navier biharmonic manufactured-solution refinement |
 | fem.biharmonic-validation.v1 | fem | `qa-fem-biharmonic-validation` | physics-gate | 2D mixed biharmonic solve of u = sin(pi x) sin(pi y) on n=4/8 plus uniform-load Navier plate |
 | fem.complex-dirichlet-elimination.v1 | sonium-fem | `qa-fem-complex-dirichlet-elimination` | physics-gate | transactional prescribed-value column correction and row/column elimination |
+| fem.compressible-airfoil-naca0012.v1 | fem | `qa-fem-compressible-airfoil-naca0012` | physics-gate | explicit P2-DG compressible Euler (HLLC, Persson-Peraire -3.0) past NACA 0012: AGARD inviscid M0.80 alpha 1.25 gate case and M1.0 alpha 0 headline with lift/drag/moment pressure integration |
 | fem.compressible-conservation-3d.v1 | fem | `qa-fem-compressible-conservation-3d` | physics-gate | nonuniform smooth P1 DG state advanced by SSPRK3 in a closed slip-wall box |
 | fem.compressible-cylinder-mach1.v1 | fem | `qa-fem-compressible-cylinder-mach1` | physics-gate | explicit P2-DG compressible flow (characteristic far-field, HLLC flux, Persson-Peraire troubled-cell indicator at -3.0 with relaxation 0.5 and jump-sensor fallback), SSPRK3 positivity limiting: Mach 0.1 low-Mach control, 0.4 -> 0.8 -> 1.0 continuation, fresh Mach 1 transonic gate, Mach 1.2 bracket, viscous Re=100 no-slip adiabatic Mach 1; SONIUM_CYL_CONVERGENCE=1 three-mesh drag convergence; env-reversible to P1/Rusanov |
 | fem.compressible-navier-stokes-3d.v1 | fem | `qa-fem-compressible-ns-3d` | physics-gate | P1 DG free-stream, SSPRK3 positivity, and Sutherland transport gate |

@@ -14,6 +14,12 @@ use crate::core::bem_solver::AssemblyMethod;
 
 const COMPLEX64_BYTES: usize = std::mem::size_of::<num_complex::Complex64>();
 const POINTER_BYTES: usize = std::mem::size_of::<usize>();
+/// Default H-matrix rank cap used when the caller sets no explicit cap.
+///
+/// Admission charges compressed operators at this capped rank instead of
+/// the previous `n/4` default, whose `n * rank` workspace grew
+/// quadratically and refused otherwise feasible compressed problems.
+pub const DEFAULT_MAX_RANK: usize = 64;
 
 /// Resource limits for one high-level BEM work item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,11 +134,20 @@ impl BemResourceRequest {
         }
 
         let n = self.active_dofs;
-        let dense_operator_bytes = checked_product(
-            &[n, n, COMPLEX64_BYTES],
-            BemResource::HostMemory,
-            "dense operator size",
-        )?;
+        // Staged operator bound: only the dense method is charged the
+        // full n^2 operator. Compressed/FMM methods are charged their
+        // capped-rank factor storage (computed below once the rank cap
+        // is known), so a feasible compressed problem is not refused by
+        // a dense bound it will never allocate.
+        let dense_operator_bytes = if matches!(self.method, AssemblyMethod::Tbem) {
+            checked_product(
+                &[n, n, COMPLEX64_BYTES],
+                BemResource::HostMemory,
+                "dense operator size",
+            )?
+        } else {
+            0
+        };
         let rhs_bytes = checked_product(
             &[n, self.rhs_count, COMPLEX64_BYTES],
             BemResource::HostMemory,
@@ -144,12 +159,10 @@ impl BemResourceRequest {
             "frequency/RHS work count",
         )?;
 
-        // The dense bound is also a valid upper bound for the near-field part
-        // of compressed/FMM operators.  The additional linear scratch term
-        // covers cluster metadata, expansion vectors, and Krylov workspaces.
-        // Keeping this conservative is intentional: the actual H-matrix
-        // memory_bytes value is checked again after construction where it is
-        // available, but admission must happen before construction.
+        // Linear scratch covers cluster metadata, expansion vectors, and
+        // Krylov workspaces. The actual H-matrix memory_bytes value is
+        // checked again after construction where available; admission
+        // here is the staged pre-construction bound.
         let scratch_per_dof = match self.method {
             AssemblyMethod::Tbem => 4 * COMPLEX64_BYTES + POINTER_BYTES,
             AssemblyMethod::Hmatrix => 16 * COMPLEX64_BYTES + 4 * POINTER_BYTES,
@@ -165,11 +178,31 @@ impl BemResourceRequest {
             "assembly scratch size",
         )?;
         let rank = if self.max_rank == 0 {
-            n / 4 + 1
+            DEFAULT_MAX_RANK
         } else {
             self.max_rank
         }
         .clamp(1, n);
+        let compressed_operator_bytes = if matches!(self.method, AssemblyMethod::Tbem) {
+            dense_operator_bytes
+        } else {
+            checked_sum(
+                &[
+                    checked_product(
+                        &[n, rank, 2 * COMPLEX64_BYTES],
+                        BemResource::HostMemory,
+                        "compressed operator factor size",
+                    )?,
+                    checked_product(
+                        &[n, COMPLEX64_BYTES],
+                        BemResource::HostMemory,
+                        "compressed operator diagonal size",
+                    )?,
+                ],
+                BemResource::HostMemory,
+                "compressed operator size",
+            )?
+        };
         let rank_bytes = if matches!(self.method, AssemblyMethod::Hmatrix) {
             checked_product(
                 &[n, rank, 2 * COMPLEX64_BYTES],
@@ -190,7 +223,7 @@ impl BemResourceRequest {
             "frequency right-hand-side size",
         )?;
         let host_bytes = checked_sum(
-            &[dense_operator_bytes, per_work_rhs, scratch_bytes],
+            &[compressed_operator_bytes, per_work_rhs, scratch_bytes],
             BemResource::HostMemory,
             "peak host allocation",
         )?;
@@ -199,7 +232,7 @@ impl BemResourceRequest {
             host_bytes,
             device_bytes: self.device_bytes,
             active_work: frequency_rhs,
-            operator_bytes: dense_operator_bytes,
+            operator_bytes: compressed_operator_bytes,
             rhs_bytes: per_work_rhs,
             scratch_bytes,
         })
@@ -372,6 +405,34 @@ mod tests {
         assert!(matches!(
             BemResourceRequest::new(AssemblyMethod::Tbem, usize::MAX, 2, 1).estimate(),
             Err(BemAdmissionError::ArithmeticOverflow { .. })
+        ));
+    }
+
+    #[test]
+    fn compressed_large_problem_is_not_charged_dense_memory() {
+        // At n = 100k the old bound charged 16*n^2 = 160 GB for every
+        // method, refusing compressed problems that fit in a few GB.
+        let request = BemResourceRequest::new(AssemblyMethod::Hmatrix, 100_000, 1, 1);
+        let estimate = request.estimate().expect("valid estimate");
+        assert!(
+            estimate.operator_bytes < 1_000_000_000,
+            "compressed operator estimate {} bytes",
+            estimate.operator_bytes
+        );
+        BemResourceBudget::new(8 * 1024 * 1024 * 1024, 0, 1)
+            .admit(request)
+            .expect("compressed problem fits an 8 GiB budget");
+    }
+
+    #[test]
+    fn dense_large_problem_is_still_refused() {
+        let request = BemResourceRequest::new(AssemblyMethod::Tbem, 100_000, 1, 1);
+        assert!(matches!(
+            BemResourceBudget::new(8 * 1024 * 1024 * 1024, 0, 1).admit(request),
+            Err(BemAdmissionError::LimitExceeded {
+                resource: BemResource::HostMemory,
+                ..
+            })
         ));
     }
 

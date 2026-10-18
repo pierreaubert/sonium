@@ -141,15 +141,71 @@ pub fn gauss_legendre_1d(order: usize) -> Vec<QuadraturePoint> {
     }
 }
 
+/// Error returned when a quadrature order cannot be honoured exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnsupportedQuadratureOrder {
+    /// Requested polynomial exactness degree.
+    pub order: usize,
+}
+
+impl std::fmt::Display for UnsupportedQuadratureOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "quadrature order {} is not supported (order must be >= 1)",
+            self.order
+        )
+    }
+}
+
+impl std::error::Error for UnsupportedQuadratureOrder {}
+
+/// A quadrature rule together with its guaranteed exactness degree.
+#[derive(Debug, Clone)]
+pub struct CheckedQuadrature {
+    /// Quadrature points and weights.
+    pub points: Vec<QuadraturePoint>,
+    /// Polynomial degree the rule integrates exactly.
+    pub exactness_degree: usize,
+}
+
+/// Returns the triangle rule for `order`, reporting its exactness degree.
+///
+/// # Errors
+/// Returns [`UnsupportedQuadratureOrder`] when `order` is zero.
+pub fn gauss_triangle_checked(
+    order: usize,
+) -> Result<CheckedQuadrature, UnsupportedQuadratureOrder> {
+    if order == 0 {
+        return Err(UnsupportedQuadratureOrder { order });
+    }
+    let exactness_degree = match order {
+        1 => 1,
+        2 => 2,
+        3 | 4 => 4,
+        5 => 5,
+        6 => 6,
+        _ => order,
+    };
+    Ok(CheckedQuadrature {
+        points: gauss_triangle(order),
+        exactness_degree,
+    })
+}
+
 /// Gauss quadrature for triangles (area coordinates)
 /// Reference triangle: (0,0), (1,0), (0,1)
+///
+/// The returned rule integrates polynomials of degree at least `order`
+/// exactly for every positive `order`; use [`gauss_triangle_checked`] to
+/// read the guaranteed exactness degree or reject order zero explicitly.
 pub fn gauss_triangle(order: usize) -> Vec<QuadraturePoint> {
     match order {
         1 => {
             // 1-point rule (degree 1)
             vec![QuadraturePoint::new_2d(1.0 / 3.0, 1.0 / 3.0, 0.5)]
         }
-        2 | 3 => {
+        2 => {
             // 3-point rule (degree 2)
             let a = 1.0 / 6.0;
             let b = 2.0 / 3.0;
@@ -160,7 +216,24 @@ pub fn gauss_triangle(order: usize) -> Vec<QuadraturePoint> {
                 QuadraturePoint::new_2d(a, b, w),
             ]
         }
-        4 | 5 => {
+        3 | 4 => {
+            // 6-point Dunavant rule (degree 4)
+            let a1 = 0.445_948_490_915_965;
+            let b1 = 0.108_103_018_168_070;
+            let w1 = 0.111_690_794_839_006;
+            let a2 = 0.091_576_213_509_771;
+            let b2 = 0.816_847_572_980_459;
+            let w2 = 0.054_975_871_827_661;
+            vec![
+                QuadraturePoint::new_2d(a1, a1, w1),
+                QuadraturePoint::new_2d(a1, b1, w1),
+                QuadraturePoint::new_2d(b1, a1, w1),
+                QuadraturePoint::new_2d(a2, a2, w2),
+                QuadraturePoint::new_2d(a2, b2, w2),
+                QuadraturePoint::new_2d(b2, a2, w2),
+            ]
+        }
+        5 => {
             // 7-point rule (degree 5)
             let a1 = 1.0 / 3.0;
             let w1 = 9.0 / 80.0;
@@ -183,7 +256,7 @@ pub fn gauss_triangle(order: usize) -> Vec<QuadraturePoint> {
                 QuadraturePoint::new_2d(a3, b3, w3),
             ]
         }
-        _ => {
+        6 => {
             // 12-point rule (degree 6)
             let a1 = 0.063089014491502;
             let b1 = 0.873821971016996;
@@ -212,6 +285,26 @@ pub fn gauss_triangle(order: usize) -> Vec<QuadraturePoint> {
                 QuadraturePoint::new_2d(b3, c3, w3),
                 QuadraturePoint::new_2d(c3, b3, w3),
             ]
+        }
+        _ => {
+            // Duffy-mapped tensor-product rule for orders above six:
+            // x = u, y = (1-u)*v maps [0,1]^2 onto the reference triangle
+            // with Jacobian (1-u), so no silent exactness ceiling remains.
+            let one_d = gauss_legendre_1d(order.max(2));
+            let unit = |point: &QuadraturePoint| ((point.xi() + 1.0) * 0.5, point.weight * 0.5);
+            let mut result = Vec::with_capacity(one_d.len() * one_d.len());
+            for u_point in &one_d {
+                let (u, wu) = unit(u_point);
+                for v_point in &one_d {
+                    let (v, wv) = unit(v_point);
+                    result.push(QuadraturePoint::new_2d(
+                        u,
+                        (1.0 - u) * v,
+                        wu * wv * (1.0 - u),
+                    ));
+                }
+            }
+            result
         }
     }
 }
@@ -467,6 +560,48 @@ mod tests {
         assert!((integral - expected).abs() < 1.0e-13);
         let volume = points.iter().map(|point| point.weight).sum::<f64>();
         assert!((volume - 1.0 / 6.0).abs() < 1.0e-13);
+    }
+
+    #[test]
+    fn triangle_rule_integrates_monomials_through_advertised_degree() {
+        // Exact integral of x^a*y^b over the reference triangle is
+        // a!*b!/(a+b+2)!.
+        let factorial = |n: usize| (1..=n).product::<usize>() as f64;
+        for order in 1..=8usize {
+            let pts = gauss_triangle(order);
+            for a in 0..=order {
+                for b in 0..=order - a {
+                    let numerical: f64 = pts
+                        .iter()
+                        .map(|p| p.xi().powi(a as i32) * p.eta().powi(b as i32) * p.weight)
+                        .sum();
+                    let exact = factorial(a) * factorial(b) / factorial(a + b + 2);
+                    assert!(
+                        (numerical - exact).abs() < 1e-12,
+                        "order {order} monomial x^{a} y^{b}: {numerical:e} != {exact:e}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn triangle_degree_three_request_integrates_cubic_counterexample() {
+        // Audit counterexample: integral of 2*x^3 over the reference
+        // triangle is exactly 0.1; the old degree-two rule gave ~0.10185.
+        let pts = gauss_triangle(3);
+        let numerical: f64 = pts.iter().map(|p| 2.0 * p.xi().powi(3) * p.weight).sum();
+        assert!((numerical - 0.1).abs() < 1e-12, "got {numerical}");
+    }
+
+    #[test]
+    fn checked_triangle_rule_reports_exactness_degree() {
+        for order in 1..=8usize {
+            let rule = gauss_triangle_checked(order).expect("supported order");
+            assert!(rule.exactness_degree >= order);
+            assert_eq!(rule.points.len(), gauss_triangle(order).len());
+        }
+        assert!(gauss_triangle_checked(0).is_err());
     }
 
     #[test]

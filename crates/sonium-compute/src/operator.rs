@@ -92,6 +92,30 @@ impl<B: Backend, T: DeviceScalar> DeviceCsr<B, T> {
         })
     }
 
+    /// Replaces only the values buffer from the host.
+    ///
+    /// The sparsity structure (row pointers and column indices) stays
+    /// resident, so repeated solves with changing values avoid the
+    /// structure re-upload that `try_from_host` performs.
+    ///
+    /// # Errors
+    /// Returns [`crate::BackendError`] when `values_host` does not hold
+    /// exactly `nnz` entries or the copy fails.
+    pub fn update_values(&mut self, backend: &B, values_host: &[T]) -> crate::BackendResult<()> {
+        if values_host.len() != self.nnz {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "device_csr_update_values",
+                reason: format!(
+                    "expected {} values for the resident sparsity, found {}",
+                    self.nnz,
+                    values_host.len()
+                ),
+            });
+        }
+        backend.try_copy_h2d(values_host, &mut self.values)?;
+        Ok(())
+    }
+
     /// Upload a borrowed host CSR matrix to the device.
     ///
     /// The host interchange type uses `usize` indices; backend CSR storage
@@ -2487,6 +2511,27 @@ mod tests {
         ) {
             panic!("simulated legacy operator failure");
         }
+    }
+
+    #[test]
+    fn device_csr_update_values_replaces_values_without_reupload() {
+        let backend = CpuBackend::new();
+        let mut csr =
+            DeviceCsr::try_from_host(&backend, 2, 2, &[0, 1, 2], &[0, 1], &[2.0_f64, 3.0])
+                .expect("initial upload");
+        csr.update_values(&backend, &[4.0_f64, 5.0])
+            .expect("values-only update");
+
+        let mut x = backend.raw_alloc::<f64>(2).expect("x alloc");
+        backend.copy_h2d(&[1.0_f64, 1.0], &mut x);
+        let mut y = backend.raw_alloc::<f64>(2).expect("y alloc");
+        let prebaked = csr.prebake(&backend);
+        backend.spmv_prebaked::<f64>(&prebaked, &x, &mut y);
+        let mut host = vec![0.0; 2];
+        backend.copy_d2h(&y, &mut host);
+        assert_eq!(host, vec![4.0, 5.0]);
+
+        assert!(csr.update_values(&backend, &[1.0]).is_err());
     }
 
     #[test]

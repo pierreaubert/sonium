@@ -244,6 +244,87 @@ fn build_solver(
         .map_err(|error| format!("solver construction: {error:?}"))
 }
 
+/// GPU twin of `advance`: the state is uploaded once, every step runs
+/// on the device, and the state is downloaded once for probing.
+#[cfg(feature = "cuda")]
+fn advance_gpu(
+    mesh: &sonium_fem::mesh::Mesh,
+    state: &mut CompressibleDgState,
+    mach: f64,
+    t_end: f64,
+    wall: Wall,
+    viscosity: ViscosityModel,
+) -> Result<CaseResult, String> {
+    use sonium_fem::physics::fluid::compressible_flow::CompressibleDgGpuSolver;
+    // Rebuild the same config `build_solver` uses by round-tripping
+    // through its constructor inputs.
+    let free = freestream(mach);
+    let mut boundaries: HashMap<i32, CompressibleBoundaryCondition> = HashMap::new();
+    boundaries.insert(1, CompressibleBoundaryCondition::FarField(free));
+    boundaries.insert(2, CompressibleBoundaryCondition::FarField(free));
+    boundaries.insert(3, CompressibleBoundaryCondition::FarField(free));
+    boundaries.insert(
+        4,
+        match wall {
+            Wall::Slip => CompressibleBoundaryCondition::SlipWall,
+            Wall::NoSlipAdiabatic => CompressibleBoundaryCondition::NoSlipAdiabatic {
+                wall_velocity: [0.0, 0.0, 0.0],
+            },
+        },
+    );
+    let numerics = numerics();
+    let config = CompressibleDgConfig {
+        gas: GAS,
+        viscosity,
+        boundaries,
+        degree: numerics.degree,
+        flux: numerics.flux,
+        troubled_cell_relaxation: numerics.relaxation,
+        troubled_cell_threshold: numerics.troubled_threshold,
+        persson_threshold: numerics.persson,
+        ..CompressibleDgConfig::default()
+    };
+    let mut solver = CompressibleDgGpuSolver::new(mesh, config)
+        .map_err(|error| format!("GPU solver construction: {error}"))?;
+    solver
+        .set_state(state)
+        .map_err(|error| format!("GPU state upload: {error}"))?;
+    let mut time = 0.0;
+    let mut steps = 0usize;
+    let mut retries = 0usize;
+    let mut min_density = f64::INFINITY;
+    let mut min_pressure = f64::INFINITY;
+    while time < t_end {
+        let report = solver
+            .step(f64::INFINITY)
+            .map_err(|error| format!("GPU DG step at t={time:.3}: {error}"))?;
+        time += report.accepted_time_step;
+        steps += 1;
+        retries += report.retries;
+        min_density = min_density.min(report.minimum_density);
+        min_pressure = min_pressure.min(report.minimum_pressure);
+        if steps.is_multiple_of(400) {
+            println!("  Mach {mach:.2}: t={time:.2} steps={steps} retries={retries}");
+        }
+    }
+    solver
+        .fetch_state(state)
+        .map_err(|error| format!("GPU state download: {error}"))?;
+    Ok(probe(mesh, state, mach, steps, retries, time, min_density, min_pressure))
+}
+
+#[cfg(not(feature = "cuda"))]
+fn advance_gpu(
+    _mesh: &sonium_fem::mesh::Mesh,
+    _state: &mut CompressibleDgState,
+    _mach: f64,
+    _t_end: f64,
+    _wall: Wall,
+    _viscosity: ViscosityModel,
+) -> Result<CaseResult, String> {
+    Err("SONIUM_DG_BACKEND=cuda requires building with --features cuda".to_string())
+}
+
 /// Advance `state` at one Mach/wall/viscosity setting and probe the result.
 fn advance(
     mesh: &sonium_fem::mesh::Mesh,
@@ -253,6 +334,9 @@ fn advance(
     wall: Wall,
     viscosity: ViscosityModel,
 ) -> Result<CaseResult, String> {
+    if std::env::var("SONIUM_DG_BACKEND").as_deref() == Ok("cuda") {
+        return advance_gpu(mesh, state, mach, t_end, wall, viscosity);
+    }
     let solver = build_solver(mesh, mach, wall, viscosity)?;
     let mut time = 0.0;
     let mut steps = 0usize;

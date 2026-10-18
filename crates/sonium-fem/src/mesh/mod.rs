@@ -16,10 +16,10 @@ pub use sonium_mesher::mesh::{
 pub use sonium_mesher::mesh::generators::{
     annular_mesh_triangles, backward_facing_step_triangles, box_mesh_hexahedra,
     box_mesh_tetrahedra, box_mesh_tetrahedra_symmetric, channel_with_airfoil_triangles,
-    channel_with_cylinder_triangles, naca0012_polygon,
-    circular_mesh_triangles, duct_profile_mesh, layered_spherical_shell_mesh_tetrahedra,
-    rectangular_mesh_quads, rectangular_mesh_triangles, spherical_shell_mesh_tetrahedra,
-    unit_cube_hexahedra, unit_cube_tetrahedra, unit_square_quads, unit_square_triangles,
+    channel_with_cylinder_triangles, circular_mesh_triangles, duct_profile_mesh,
+    layered_spherical_shell_mesh_tetrahedra, naca0012_polygon, rectangular_mesh_quads,
+    rectangular_mesh_triangles, spherical_shell_mesh_tetrahedra, unit_cube_hexahedra,
+    unit_cube_tetrahedra, unit_square_quads, unit_square_triangles,
 };
 
 // Re-export partition

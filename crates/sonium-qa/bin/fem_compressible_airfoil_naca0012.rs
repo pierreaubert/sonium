@@ -161,6 +161,66 @@ fn upper_shock_location(mesh: &sonium_fem::mesh::Mesh, state: &CompressibleDgSta
     best_x
 }
 
+/// GPU twin of the `run_case` time loop: one upload, device steps,
+/// one download before probing.
+#[cfg(feature = "cuda")]
+#[allow(clippy::too_many_arguments)]
+fn run_case_gpu(
+    mesh: &sonium_fem::mesh::Mesh,
+    config: CompressibleDgConfig,
+    state: &mut CompressibleDgState,
+    mach: f64,
+    alpha_deg: f64,
+    t_end: f64,
+    time: &mut f64,
+    steps: &mut usize,
+    retries: &mut usize,
+    min_density: &mut f64,
+    min_pressure: &mut f64,
+) -> Result<(), String> {
+    use sonium_fem::physics::fluid::compressible_flow::CompressibleDgGpuSolver;
+    let mut solver = CompressibleDgGpuSolver::new(mesh, config)
+        .map_err(|error| format!("GPU solver construction: {error}"))?;
+    solver
+        .set_state(state)
+        .map_err(|error| format!("GPU state upload: {error}"))?;
+    while *time < t_end {
+        let report = solver
+            .step(f64::INFINITY)
+            .map_err(|error| format!("GPU DG step at t={time:.3}: {error}"))?;
+        *time += report.accepted_time_step;
+        *steps += 1;
+        *retries += report.retries;
+        *min_density = min_density.min(report.minimum_density);
+        *min_pressure = min_pressure.min(report.minimum_pressure);
+        if steps.is_multiple_of(400) {
+            println!("  M{mach:.2} a{alpha_deg:.2}: t={time:.2} steps={steps} retries={retries}");
+        }
+    }
+    solver
+        .fetch_state(state)
+        .map_err(|error| format!("GPU state download: {error}"))?;
+    Ok(())
+}
+
+#[cfg(not(feature = "cuda"))]
+#[allow(clippy::too_many_arguments)]
+fn run_case_gpu(
+    _mesh: &sonium_fem::mesh::Mesh,
+    _config: CompressibleDgConfig,
+    _state: &mut CompressibleDgState,
+    _mach: f64,
+    _alpha_deg: f64,
+    _t_end: f64,
+    _time: &mut f64,
+    _steps: &mut usize,
+    _retries: &mut usize,
+    _min_density: &mut f64,
+    _min_pressure: &mut f64,
+) -> Result<(), String> {
+    Err("SONIUM_DG_BACKEND=cuda requires building with --features cuda".to_string())
+}
+
 fn run_case(
     mesh: &sonium_fem::mesh::Mesh,
     mach: f64,
@@ -184,8 +244,6 @@ fn run_case(
         persson_threshold: -3.0,
         ..CompressibleDgConfig::default()
     };
-    let solver = CompressibleDgSolver::new(mesh, config)
-        .map_err(|error| format!("solver construction: {error:?}"))?;
     let mut state =
         CompressibleDgState::from_function_degree(mesh, PolynomialDegree::P2, |_| free)
             .map_err(|error| format!("initial state: {error:?}"))?;
@@ -194,21 +252,39 @@ fn run_case(
     let mut retries = 0usize;
     let mut min_density = f64::INFINITY;
     let mut min_pressure = f64::INFINITY;
-    while time < t_end {
-        let stable = solver
-            .operator
-            .stable_time_step(&state)
-            .map_err(|error| format!("stable time step at t={time:.3}: {error:?}"))?;
-        let report = solver
-            .step(&mut state, stable)
-            .map_err(|error| format!("DG step at t={time:.3}: {error:?}"))?;
-        time += report.accepted_time_step;
-        steps += 1;
-        retries += report.retries;
-        min_density = min_density.min(report.minimum_density);
-        min_pressure = min_pressure.min(report.minimum_pressure);
-        if steps.is_multiple_of(400) {
-            println!("  M{mach:.2} a{alpha_deg:.2}: t={time:.2} steps={steps} retries={retries}");
+    if std::env::var("SONIUM_DG_BACKEND").as_deref() == Ok("cuda") {
+        run_case_gpu(
+            mesh,
+            config,
+            &mut state,
+            mach,
+            alpha_deg,
+            t_end,
+            &mut time,
+            &mut steps,
+            &mut retries,
+            &mut min_density,
+            &mut min_pressure,
+        )?;
+    } else {
+        let solver = CompressibleDgSolver::new(mesh, config)
+            .map_err(|error| format!("solver construction: {error:?}"))?;
+        while time < t_end {
+            let stable = solver
+                .operator
+                .stable_time_step(&state)
+                .map_err(|error| format!("stable time step at t={time:.3}: {error:?}"))?;
+            let report = solver
+                .step(&mut state, stable)
+                .map_err(|error| format!("DG step at t={time:.3}: {error:?}"))?;
+            time += report.accepted_time_step;
+            steps += 1;
+            retries += report.retries;
+            min_density = min_density.min(report.minimum_density);
+            min_pressure = min_pressure.min(report.minimum_pressure);
+            if steps.is_multiple_of(400) {
+                println!("  M{mach:.2} a{alpha_deg:.2}: t={time:.2} steps={steps} retries={retries}");
+            }
         }
     }
     // Probes.

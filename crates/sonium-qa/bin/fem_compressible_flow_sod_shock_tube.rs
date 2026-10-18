@@ -289,23 +289,27 @@ fn test_sod_dg_time_marched() {
             persson_threshold: -3.0,
             ..CompressibleDgConfig::default()
         };
-        let solver = CompressibleDgSolver::new(&mesh, config).expect("Sod DG solver");
         let mut state = CompressibleDgState::from_function_degree(&mesh, degree, |point| {
             if point[0] < 0.5 { left } else { right }
         })
         .expect("Sod DG initial state");
         let mut time = 0.0;
-        while time < t_end {
-            let stable = solver
-                .operator
-                .stable_time_step(&state)
-                .expect("Sod CFL");
-            let report = solver.step(&mut state, stable).expect("Sod DG step");
-            time += report.accepted_time_step;
-            assert!(
-                report.minimum_density > 0.0 && report.minimum_pressure > 0.0,
-                "Sod DG lost positivity at t={time:.3}"
-            );
+        if std::env::var("SONIUM_DG_BACKEND").as_deref() == Ok("cuda") {
+            run_sod_gpu(&mesh, config, &mut state, t_end, &mut time);
+        } else {
+            let solver = CompressibleDgSolver::new(&mesh, config).expect("Sod DG solver");
+            while time < t_end {
+                let stable = solver
+                    .operator
+                    .stable_time_step(&state)
+                    .expect("Sod CFL");
+                let report = solver.step(&mut state, stable).expect("Sod DG step");
+                time += report.accepted_time_step;
+                assert!(
+                    report.minimum_density > 0.0 && report.minimum_pressure > 0.0,
+                    "Sod DG lost positivity at t={time:.3}"
+                );
+            }
         }
         // Density L1 error and shock position from cell averages.
         let mut l1 = 0.0;
@@ -364,6 +368,41 @@ fn test_sod_dg_time_marched() {
         l1_errors[1]
     );
     println!("Sod DG time-marched: PASSED");
+}
+
+/// GPU twin of the Sod DG time loop: one upload, device steps, one
+/// download before the L1/shock probes.
+#[cfg(feature = "cuda")]
+fn run_sod_gpu(
+    mesh: &sonium_fem::mesh::Mesh,
+    config: CompressibleDgConfig,
+    state: &mut CompressibleDgState,
+    t_end: f64,
+    time: &mut f64,
+) {
+    use sonium_fem::physics::fluid::compressible_flow::CompressibleDgGpuSolver;
+    let mut solver = CompressibleDgGpuSolver::new(mesh, config).expect("Sod GPU solver");
+    solver.set_state(state).expect("Sod GPU upload");
+    while *time < t_end {
+        let report = solver.step(f64::INFINITY).expect("Sod GPU step");
+        *time += report.accepted_time_step;
+        assert!(
+            report.minimum_density > 0.0 && report.minimum_pressure > 0.0,
+            "Sod DG lost positivity at t={time:.3}"
+        );
+    }
+    solver.fetch_state(state).expect("Sod GPU download");
+}
+
+#[cfg(not(feature = "cuda"))]
+fn run_sod_gpu(
+    _mesh: &sonium_fem::mesh::Mesh,
+    _config: CompressibleDgConfig,
+    _state: &mut CompressibleDgState,
+    _t_end: f64,
+    _time: &mut f64,
+) {
+    panic!("SONIUM_DG_BACKEND=cuda requires building with --features cuda");
 }
 
 fn main() {

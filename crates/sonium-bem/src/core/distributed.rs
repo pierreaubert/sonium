@@ -457,6 +457,137 @@ impl<T: ComplexField> DistributedVectorExchange<T> for InProcessVectorExchange<T
     }
 }
 
+/// Operator that evaluates only a selected set of global rows.
+///
+/// Unlike a full [`LinearOperator`] action, a row-block action lets a
+/// distributed rank evaluate exactly the rows it owns, so operator work
+/// and memory scale with the local partition instead of replicating the
+/// global action on every rank.
+pub trait RowBlockOperator<T: ComplexField>: Send + Sync {
+    /// Evaluates `rows` of the operator against the global input vector.
+    ///
+    /// # Errors
+    /// Returns [`BemError`] when a row cannot be evaluated.
+    fn apply_rows(&self, rows: &[usize], global_values: &[T]) -> Result<Vec<T>, BemError>;
+
+    /// Number of global input columns the operator expects.
+    fn num_cols(&self) -> usize;
+}
+
+/// Rank-local operator view backed by a [`RowBlockOperator`].
+///
+/// The input is all-gathered through the exchange, but only the rows
+/// owned by `local_rank` are evaluated. Prefer this over
+/// [`DistributedLinearOperator`] (which evaluates the full global action
+/// on every rank) whenever the operator can apply selected rows.
+pub struct DistributedRowOperator<'a, T, O: ?Sized, X: ?Sized> {
+    plan: &'a DistributedRowPlan,
+    local_rank: usize,
+    operator: &'a O,
+    exchange: &'a X,
+    local_dimension: usize,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<'a, T, O: ?Sized, X: ?Sized> DistributedRowOperator<'a, T, O, X>
+where
+    T: ComplexField,
+    O: RowBlockOperator<T>,
+    X: DistributedVectorExchange<T>,
+{
+    /// Validates dimensions and constructs a rank-local row operator.
+    ///
+    /// # Errors
+    /// Returns [`BemError`] for an invalid plan, unknown rank, or an
+    /// operator whose column count differs from the plan's DOF count.
+    pub fn try_new(
+        plan: &'a DistributedRowPlan,
+        local_rank: usize,
+        operator: &'a O,
+        exchange: &'a X,
+    ) -> Result<Self, BemError> {
+        plan.validate()?;
+        let partition = plan.local(local_rank).ok_or_else(|| {
+            BemError::InvalidParameters(format!(
+                "distributed row operator rank {local_rank} has no partition"
+            ))
+        })?;
+        if operator.num_cols() != plan.num_dofs {
+            return Err(BemError::InvalidParameters(format!(
+                "distributed row operator expects {} global columns, found {}",
+                plan.num_dofs,
+                operator.num_cols()
+            )));
+        }
+        Ok(Self {
+            plan,
+            local_rank,
+            operator,
+            exchange,
+            local_dimension: partition.dof_indices.len(),
+            _marker: std::marker::PhantomData,
+        })
+    }
+
+    /// Number of rows owned by this rank.
+    pub fn local_dimension(&self) -> usize {
+        self.local_dimension
+    }
+
+    /// Checked rank-local action evaluating only this rank's rows.
+    ///
+    /// # Errors
+    /// Returns [`BemError`] on dimension mismatch, non-finite values,
+    /// exchange failure, or operator failure.
+    pub fn try_apply_local(&self, local_values: &[T]) -> Result<Vec<T>, BemError> {
+        if local_values.len() != self.local_dimension {
+            return Err(BemError::InvalidParameters(format!(
+                "distributed row operator rank {} expects {} values, found {}",
+                self.local_rank,
+                self.local_dimension,
+                local_values.len()
+            )));
+        }
+        if local_values.iter().any(|value| !value.norm().is_finite()) {
+            return Err(BemError::InvalidParameters(
+                "distributed row operator received non-finite values".to_string(),
+            ));
+        }
+        let global_values = self
+            .exchange
+            .all_gather(self.plan, self.local_rank, local_values)?;
+        if global_values.len() != self.plan.num_dofs {
+            return Err(BemError::InvalidParameters(format!(
+                "distributed exchange returned {} values, expected {}",
+                global_values.len(),
+                self.plan.num_dofs
+            )));
+        }
+        let partition = self.plan.local(self.local_rank).ok_or_else(|| {
+            BemError::InvalidParameters(format!(
+                "distributed row operator rank {} has no partition",
+                self.local_rank
+            ))
+        })?;
+        let local_action = self
+            .operator
+            .apply_rows(&partition.dof_indices, &global_values)?;
+        if local_action.len() != self.local_dimension {
+            return Err(BemError::InvalidParameters(format!(
+                "distributed row operator returned {} rows, expected {}",
+                local_action.len(),
+                self.local_dimension
+            )));
+        }
+        if local_action.iter().any(|value| !value.norm().is_finite()) {
+            return Err(BemError::SolverFailed(
+                "distributed row operator produced non-finite output".to_string(),
+            ));
+        }
+        Ok(local_action)
+    }
+}
+
 /// A rank-local matrix-free view of a global BEM operator.
 ///
 /// Every action performs a checked all-gather, evaluates the global operator,
@@ -464,6 +595,9 @@ impl<T: ComplexField> DistributedVectorExchange<T> for InProcessVectorExchange<T
 /// between deterministic ownership metadata and a distributed Krylov method;
 /// applications provide the transport (MPI, shared memory, or another
 /// collective implementation) without changing the BEM operator itself.
+/// Operators that can evaluate selected rows should use
+/// [`DistributedRowOperator`] instead: this adapter replicates the global
+/// action on every rank and does not scale in work or memory.
 pub struct DistributedLinearOperator<'a, T, O: ?Sized, X: ?Sized> {
     plan: &'a DistributedRowPlan,
     local_rank: usize,
@@ -1742,6 +1876,81 @@ mod tests {
         let mut malformed = plan.clone();
         malformed.partitions[1].dof_indices[0] = malformed.partitions[0].dof_indices[0];
         assert!(malformed.owner_of_dof(0).is_err());
+    }
+
+    #[test]
+    fn row_operator_evaluates_only_owned_rows() {
+        struct CountingRows {
+            matrix: Vec<Vec<Complex64>>,
+            requested: Mutex<Vec<usize>>,
+        }
+        impl RowBlockOperator<Complex64> for CountingRows {
+            fn apply_rows(
+                &self,
+                rows: &[usize],
+                global_values: &[Complex64],
+            ) -> Result<Vec<Complex64>, BemError> {
+                self.requested.lock().unwrap().extend_from_slice(rows);
+                Ok(rows
+                    .iter()
+                    .map(|&row| {
+                        self.matrix[row]
+                            .iter()
+                            .zip(global_values)
+                            .map(|(a, x)| a * x)
+                            .sum()
+                    })
+                    .collect())
+            }
+            fn num_cols(&self) -> usize {
+                self.matrix.len()
+            }
+        }
+
+        let elements = active_elements();
+        let plan = plan_distributed_rows(&elements, 3).expect("row plan");
+        let n = plan.num_dofs;
+        let matrix: Vec<Vec<Complex64>> = (0..n)
+            .map(|i| {
+                (0..n)
+                    .map(|j| Complex64::new((i * 10 + j) as f64, 0.0))
+                    .collect()
+            })
+            .collect();
+        let global_x: Vec<Complex64> = (0..n)
+            .map(|j| Complex64::new(1.0 + j as f64, 0.0))
+            .collect();
+        let expected: Vec<Complex64> = matrix
+            .iter()
+            .map(|row| row.iter().zip(&global_x).map(|(a, x)| a * x).sum())
+            .collect();
+
+        let operator = CountingRows {
+            matrix,
+            requested: Mutex::new(Vec::new()),
+        };
+        let exchange = InProcessVectorExchange::new(global_x.clone());
+        let local_slices = plan.scatter_dof_values(&global_x).expect("scatter");
+        for rank in 0..3 {
+            let partition = plan.local(rank).unwrap();
+            let local_op =
+                DistributedRowOperator::try_new(&plan, rank, &operator, &exchange).unwrap();
+            let result = local_op
+                .try_apply_local(&local_slices[rank])
+                .expect("row-local apply");
+            let expected_local: Vec<Complex64> = partition
+                .dof_indices
+                .iter()
+                .map(|&dof| expected[dof])
+                .collect();
+            assert_eq!(result, expected_local, "rank {rank}");
+        }
+        let requested = operator.requested.lock().unwrap().clone();
+        assert_eq!(
+            requested.len(),
+            n,
+            "each row evaluated exactly once: {requested:?}"
+        );
     }
 
     #[test]

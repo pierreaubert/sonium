@@ -151,6 +151,58 @@ fn simple_mesh_from_fem(mesh: &Mesh) -> Result<SimpleMesh, String> {
     Ok(SimpleMesh { points, cells })
 }
 
+/// Exact Taylor-Green Dirichlet velocity at `time` (decaying vortex).
+fn taylor_green_dirichlet(x: f64, y: f64, time: f64, nu: f64) -> [f64; 2] {
+    let (u, v, _) = ns_taylor_green_vortex(x, y, time, nu);
+    [u, v]
+}
+
+/// One damped explicit wave step: `damping * (2p - prev - dt^2 c^2 K p / m + dt^2 f / m)`.
+///
+/// The sponge factor is applied once to the whole update; `previous` is
+/// the already-damped state produced by the preceding step, so damping
+/// the history buffer again would double-count the sponge.
+#[allow(clippy::too_many_arguments)]
+fn damped_wave_next(
+    pressure: &[f64],
+    previous: &[f64],
+    stiffness_action: &[f64],
+    lumped_mass: &[f64],
+    force: &[f64],
+    dt: f64,
+    wave_speed: f64,
+    damping: &[f64],
+) -> Vec<f64> {
+    (0..pressure.len())
+        .map(|i| {
+            damping[i]
+                * (2.0 * pressure[i]
+                    - previous[i]
+                    - dt * dt * wave_speed * wave_speed * stiffness_action[i] / lumped_mass[i]
+                    + dt * dt * force[i] / lumped_mass[i])
+        })
+        .collect()
+}
+
+/// Rejects a melting time step whose Picard iteration exhausted its budget.
+///
+/// # Errors
+/// Returns an error naming the step when `converged` is false.
+fn require_picard_converged(converged: bool, step: usize) -> Result<(), String> {
+    if converged {
+        Ok(())
+    } else {
+        Err(format!(
+            "melting-plate Picard iteration did not converge at step {step}; step rejected"
+        ))
+    }
+}
+
+/// Quadrature degree for the thermal capacity (mass) matrix: degree 2 for P1.
+fn thermal_capacity_quadrature_order() -> usize {
+    sonium_fem::quadrature::required_order_for_mass(1)
+}
+
 /// Taylor-Green vortex decay (mirrors the gated NS benchmark setup).
 fn taylor_green(out_dir: &Path) -> Result<(), String> {
     // Demo parameters: coarser than the QA gate, larger viscosity so the
@@ -216,10 +268,12 @@ fn taylor_green(out_dir: &Path) -> Result<(), String> {
         dof_pair_node[pair] = node;
     }
 
-    let bc = |x: f64, y: f64, _z: f64| {
-        let (u, v, _) = ns_taylor_green_vortex(x, y, 0.0, nu);
-        vec![u, v]
-    };
+    // The solver's BC callback carries no time argument, so the current
+    // step time is shared through a cell and advanced before each step:
+    // the boundary must follow the decaying exact solution, not freeze
+    // at its t = 0 values.
+    let bc_time = std::cell::Cell::new(0.0f64);
+    let bc = |x: f64, y: f64, _z: f64| taylor_green_dirichlet(x, y, bc_time.get(), nu).to_vec();
     let mut state = BdfState::from_rest(n_v, n_p);
     for (dof, point) in velocity_coords.iter().enumerate() {
         let (u, v, _) = ns_taylor_green_vortex(point[0], point[1], 0.0, nu);
@@ -253,6 +307,7 @@ fn taylor_green(out_dir: &Path) -> Result<(), String> {
     frames.push(dump(&state, 0, 0.0, &mut max_speed)?);
     times.push(0.0);
     for step in 0..steps {
+        bc_time.set(dt * (step + 1) as f64);
         if !solve_bdf_step_cached(
             &mesh,
             &v_space,
@@ -2143,10 +2198,26 @@ fn lumped_wave_tets(mesh: &Mesh) -> Result<(Vec<WaveTet>, Vec<f64>), String> {
             element.nodes[3],
         ];
         let p: [[f64; 3]; 4] = [
-            [mesh.nodes[idx[0]].x, mesh.nodes[idx[0]].y, mesh.nodes[idx[0]].z],
-            [mesh.nodes[idx[1]].x, mesh.nodes[idx[1]].y, mesh.nodes[idx[1]].z],
-            [mesh.nodes[idx[2]].x, mesh.nodes[idx[2]].y, mesh.nodes[idx[2]].z],
-            [mesh.nodes[idx[3]].x, mesh.nodes[idx[3]].y, mesh.nodes[idx[3]].z],
+            [
+                mesh.nodes[idx[0]].x,
+                mesh.nodes[idx[0]].y,
+                mesh.nodes[idx[0]].z,
+            ],
+            [
+                mesh.nodes[idx[1]].x,
+                mesh.nodes[idx[1]].y,
+                mesh.nodes[idx[1]].z,
+            ],
+            [
+                mesh.nodes[idx[2]].x,
+                mesh.nodes[idx[2]].y,
+                mesh.nodes[idx[2]].z,
+            ],
+            [
+                mesh.nodes[idx[3]].x,
+                mesh.nodes[idx[3]].y,
+                mesh.nodes[idx[3]].z,
+            ],
         ];
         // Jacobian of the affine map from the reference tet.
         let j = [
@@ -2303,7 +2374,12 @@ fn propeller_noise(out_dir: &Path) -> Result<(), String> {
                 point_vectors: Vec::new(),
                 cell_scalars: Vec::new(),
             };
-            write_frame(out_dir, &format!("frame_{frame_index:04}"), &simple, &fields)
+            write_frame(
+                out_dir,
+                &format!("frame_{frame_index:04}"),
+                &simple,
+                &fields,
+            )
         };
 
     frames.push(dump(&pressure, 0, &mut max_pressure)?);
@@ -2338,17 +2414,10 @@ fn propeller_noise(out_dir: &Path) -> Result<(), String> {
             force[plus] += strength * load;
             force[minus] -= strength * load;
         }
-        let mut next = vec![0.0f64; n];
-        for i in 0..n {
-            next[i] = 2.0 * pressure[i] - previous[i] - dt * dt * c * c * kp[i] / lumped[i]
-                + dt * dt * force[i] / lumped[i];
-            next[i] *= damping[i];
-        }
-        // The sponge must damp the history term too, else the boundary
-        // keeps ringing from the undamped previous state.
-        for i in 0..n {
-            previous[i] *= damping[i];
-        }
+        // Single sponge application per step: damping the history buffer
+        // here would be discarded by the buffer rotation below and, if it
+        // survived, would damp the same state twice.
+        let next = damped_wave_next(&pressure, &previous, &kp, &lumped, &force, dt, c, &damping);
         previous = std::mem::replace(&mut pressure, next);
         if step % frame_every == 0 || step == steps {
             frames.push(dump(&pressure, frame_index, &mut max_pressure)?);
@@ -2427,25 +2496,42 @@ fn thermal_spreading(out_dir: &Path) -> Result<(), String> {
     let dof_coords = space
         .dof_coordinates(&mesh)
         .ok_or("P1 space did not expose nodal coordinates")?;
+    // One-time coordinate index: a per-DOF linear scan over ~103k nodes
+    // would cost billions of comparisons on this mesh.
+    let coord_key = |x: f64, y: f64, z: f64| {
+        (
+            (x * 1.0e9).round() as i64,
+            (y * 1.0e9).round() as i64,
+            (z * 1.0e9).round() as i64,
+        )
+    };
+    let node_by_coord: std::collections::HashMap<(i64, i64, i64), usize> = mesh
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (coord_key(node.x, node.y, node.z), index))
+        .collect();
     let mut dof_node = vec![usize::MAX; n_dofs];
     for (dof, point) in dof_coords.iter().enumerate() {
-        let node = mesh
-            .nodes
-            .iter()
-            .position(|candidate| {
-                (candidate.x - point[0]).abs() < 1e-9
-                    && (candidate.y - point[1]).abs() < 1e-9
-                    && (candidate.z - point[2]).abs() < 1e-9
-            })
+        dof_node[dof] = *node_by_coord
+            .get(&coord_key(point[0], point[1], point[2]))
             .ok_or("thermal dof has no matching mesh node")?;
-        dof_node[dof] = node;
     }
 
     let material = ThermalMaterial::new(167.0, 2700.0, 900.0);
     let conduction = ConductionForm::from_conductivity(167.0);
     let capacity = HeatCapacityForm::new(&material);
     let stiffness = assemble_bilinear(&conduction, &space, &space, &mesh, 1).to_csr();
-    let mass = assemble_bilinear(&capacity, &space, &space, &mesh, 1).to_csr();
+    // Capacity is a mass form: P1 needs degree 2, not the stiffness
+    // order 1 (the one-point rule gives a rank-one local matrix).
+    let mass = assemble_bilinear(
+        &capacity,
+        &space,
+        &space,
+        &mesh,
+        thermal_capacity_quadrature_order(),
+    )
+    .to_csr();
 
     // Lumped boundary area per node from exterior tet faces (faces owned
     // by exactly one element), for the convection/radiation Robin terms.
@@ -2488,8 +2574,7 @@ fn thermal_spreading(out_dir: &Path) -> Result<(), String> {
                 u[2] * v[0] - u[0] * v[2],
                 u[0] * v[1] - u[1] * v[0],
             ];
-            let area =
-                0.5 * (cross[0].powi(2) + cross[1].powi(2) + cross[2].powi(2)).sqrt();
+            let area = 0.5 * (cross[0].powi(2) + cross[1].powi(2) + cross[2].powi(2)).sqrt();
             for &node in &face {
                 node_area[node] += area / 3.0;
             }
@@ -2524,11 +2609,7 @@ fn thermal_spreading(out_dir: &Path) -> Result<(), String> {
                 }
             }
         }
-        sonium_solvers::CsrMatrix::from_triplets(
-            active_dofs.len(),
-            active_dofs.len(),
-            triplets,
-        )
+        sonium_solvers::CsrMatrix::from_triplets(active_dofs.len(), active_dofs.len(), triplets)
     };
     let stiffness = reduce(&stiffness);
     let mass = reduce(&mass);
@@ -2585,24 +2666,27 @@ fn thermal_spreading(out_dir: &Path) -> Result<(), String> {
     let mut frames = Vec::new();
     let mut times = Vec::new();
     let mut max_temp: f64 = t_ambient;
-    let dump = |temperature: &[f64],
-                frame_index: usize,
-                max_temp: &mut f64|
-     -> Result<String, String> {
-        *max_temp = (*max_temp).max(temperature.iter().fold(0.0, |acc: f64, v| acc.max(*v)));
-        // VTU point order follows mesh nodes, not DOFs; eliminated air
-        // nodes stay at ambient.
-        let mut nodal = vec![t_ambient; mesh.nodes.len()];
-        for (ri, &value) in temperature.iter().enumerate() {
-            nodal[dof_node[active_dofs[ri]]] = value;
-        }
-        let fields = FrameFields {
-            point_scalars: vec![("temperature", nodal)],
-            point_vectors: Vec::new(),
-            cell_scalars: Vec::new(),
+    let dump =
+        |temperature: &[f64], frame_index: usize, max_temp: &mut f64| -> Result<String, String> {
+            *max_temp = (*max_temp).max(temperature.iter().fold(0.0, |acc: f64, v| acc.max(*v)));
+            // VTU point order follows mesh nodes, not DOFs; eliminated air
+            // nodes stay at ambient.
+            let mut nodal = vec![t_ambient; mesh.nodes.len()];
+            for (ri, &value) in temperature.iter().enumerate() {
+                nodal[dof_node[active_dofs[ri]]] = value;
+            }
+            let fields = FrameFields {
+                point_scalars: vec![("temperature", nodal)],
+                point_vectors: Vec::new(),
+                cell_scalars: Vec::new(),
+            };
+            write_frame(
+                out_dir,
+                &format!("frame_{frame_index:04}"),
+                &simple,
+                &fields,
+            )
         };
-        write_frame(out_dir, &format!("frame_{frame_index:04}"), &simple, &fields)
-    };
 
     frames.push(dump(&temperature, 0, &mut max_temp)?);
     times.push(0.0);
@@ -2709,9 +2793,8 @@ fn melting_plate(out_dir: &Path) -> Result<(), String> {
     let liquid_fraction = |t: f64| ((t - t_solidus) / (t_liquidus - t_solidus)).clamp(0.0, 1.0);
     // Volumetric enthalpy up to an arbitrary reference (only
     // differences enter the time stepping).
-    let enthalpy = |t: f64| {
-        material.density * (material.specific_heat * t + latent_heat * liquid_fraction(t))
-    };
+    let enthalpy =
+        |t: f64| material.density * (material.specific_heat * t + latent_heat * liquid_fraction(t));
     let enthalpy_derivative = |t: f64| {
         let mushy = if t > t_solidus && t < t_liquidus {
             latent_heat / (t_liquidus - t_solidus)
@@ -2748,12 +2831,19 @@ fn melting_plate(out_dir: &Path) -> Result<(), String> {
     // (row sum / (rho * cp)); the Picard capacity scales these.
     let rho_cp = material.volumetric_heat_capacity();
     let dof_volume: Vec<f64> = (0..n_dofs)
-        .map(|dof| mass_full.row_entries(dof).map(|(_, value)| value).sum::<f64>() / rho_cp)
+        .map(|dof| {
+            mass_full
+                .row_entries(dof)
+                .map(|(_, value)| value)
+                .sum::<f64>()
+                / rho_cp
+        })
         .collect();
 
     // Lumped boundary area per node from exterior tet faces, for the
     // convection/radiation Robin terms (same scheme as the heatsink).
-    let mut face_use: std::collections::HashMap<[usize; 3], usize> = std::collections::HashMap::new();
+    let mut face_use: std::collections::HashMap<[usize; 3], usize> =
+        std::collections::HashMap::new();
     let mut face_nodes: std::collections::HashMap<[usize; 3], [usize; 3]> =
         std::collections::HashMap::new();
     for element in &mesh.elements {
@@ -2896,14 +2986,16 @@ fn melting_plate(out_dir: &Path) -> Result<(), String> {
             nodal_f[dof_node[active_dofs[ri]]] = liquid_fraction(value);
         }
         let fields = FrameFields {
-            point_scalars: vec![
-                ("temperature", nodal_t),
-                ("liquid_fraction", nodal_f),
-            ],
+            point_scalars: vec![("temperature", nodal_t), ("liquid_fraction", nodal_f)],
             point_vectors: Vec::new(),
             cell_scalars: Vec::new(),
         };
-        write_frame(out_dir, &format!("frame_{frame_index:04}"), &simple, &fields)
+        write_frame(
+            out_dir,
+            &format!("frame_{frame_index:04}"),
+            &simple,
+            &fields,
+        )
     };
 
     frames.push(dump(&temperature, 0)?);
@@ -2913,6 +3005,7 @@ fn melting_plate(out_dir: &Path) -> Result<(), String> {
     for step in 1..=steps {
         let previous = temperature.clone();
         let mut iterate = previous.clone();
+        let mut picard_converged = false;
         for _ in 0..max_picard {
             total_picard += 1;
             // Secant apparent capacity per node between the previous
@@ -2955,7 +3048,9 @@ fn melting_plate(out_dir: &Path) -> Result<(), String> {
             let result = solve_real(&effective, &rhs, &solve_config())
                 .map_err(|e| format!("melting-plate solve failed at step {step}: {e}"))?;
             if !result.converged {
-                return Err(format!("melting-plate solver did not converge at step {step}"));
+                return Err(format!(
+                    "melting-plate solver did not converge at step {step}"
+                ));
             }
             let delta = result
                 .x
@@ -2965,9 +3060,13 @@ fn melting_plate(out_dir: &Path) -> Result<(), String> {
                 .fold(0.0f64, f64::max);
             iterate = result.x;
             if delta < picard_tol {
+                picard_converged = true;
                 break;
             }
         }
+        // Accepting the last iterate after the budget is exhausted would
+        // publish a nonconverged nonlinear step as if it had converged.
+        require_picard_converged(picard_converged, step)?;
         temperature = iterate;
         if step % 2 == 0 || step == steps {
             frames.push(dump(&temperature, frame_index)?);
@@ -3757,10 +3856,7 @@ fn sloshing_core_model(
             // tangent at c = 0): -M g(c_iter) - beta M c_iter with
             // g(c) = beta (c^3 - c) in nodal-interpolated form.
             let mass_previous = mass.matvec(&previous);
-            let g_nodal: Vec<f64> = iterate
-                .iter()
-                .map(|c| beta * (c.powi(3) - c))
-                .collect();
+            let g_nodal: Vec<f64> = iterate.iter().map(|c| beta * (c.powi(3) - c)).collect();
             let mass_g = mass.matvec(&g_nodal);
             let mass_iterate = mass.matvec(&iterate);
             let mut rhs = Vec::with_capacity(2 * n_c);
@@ -3771,9 +3867,9 @@ fn sloshing_core_model(
                     .zip(mass_iterate.iter())
                     .map(|(g, mc)| -g - beta * mc),
             );
-            let solution = factor.solve(&rhs).map_err(|e| {
-                format!("sloshing Cahn-Hilliard solve failed at step {step}: {e}")
-            })?;
+            let solution = factor
+                .solve(&rhs)
+                .map_err(|e| format!("sloshing Cahn-Hilliard solve failed at step {step}: {e}"))?;
             iterate = solution[..n_c].to_vec();
         }
         phase = iterate;
@@ -3953,8 +4049,7 @@ fn sloshing_core_model(
                         let i = (parcel.x / dx).round() as usize;
                         let j = (parcel.y / dy).round() as usize;
                         let g = j.min(ny) * (nx + 1) + i.min(nx);
-                        grid_field[g] +=
-                            std::f64::consts::PI * parcel.radius * parcel.radius;
+                        grid_field[g] += std::f64::consts::PI * parcel.radius * parcel.radius;
                     }
                     let mut nodal = vec![0.0f64; n_nodes];
                     for node in 0..n_nodes {
@@ -3964,7 +4059,13 @@ fn sloshing_core_model(
                 } else {
                     None
                 };
-                frames.push(dump(&state, &phase, frame_index, out, bubble_field.as_deref())?);
+                frames.push(dump(
+                    &state,
+                    &phase,
+                    frame_index,
+                    out,
+                    bubble_field.as_deref(),
+                )?);
                 times.push(t_next);
                 frame_index += 1;
             }
@@ -3991,7 +4092,15 @@ fn sloshing_core_model(
         } else {
             ("sloshing-tank", "Sloshing water tank")
         };
-        write_manifest(out, slug, title, &frames, &times, "water_fraction", (0.0, 1.0))?;
+        write_manifest(
+            out,
+            slug,
+            title,
+            &frames,
+            &times,
+            "water_fraction",
+            (0.0, 1.0),
+        )?;
     }
     Ok(stats)
 }
@@ -4010,14 +4119,7 @@ fn sloshing_tank(out_dir: &Path) -> Result<(), String> {
 /// bubble parcels). The resolved `sloshing-tank` demo above is
 /// unchanged and remains the non-breaking reference.
 fn sloshing_turbulent(out_dir: &Path) -> Result<(), String> {
-    sloshing_core_model(
-        0.25,
-        120,
-        30,
-        928,
-        Some(out_dir),
-        &SloshModel::turbulent(),
-    )?;
+    sloshing_core_model(0.25, 120, 30, 928, Some(out_dir), &SloshModel::turbulent())?;
     Ok(())
 }
 
@@ -4040,8 +4142,7 @@ fn sloshing_sweep(out_dir: &Path) -> Result<(), String> {
             stats.max_eta_deviation, stats.max_speed, stats.final_water_fraction,
         ));
     }
-    std::fs::write(out_dir.join("sweep.csv"), csv)
-        .map_err(|e| format!("sweep write: {e}"))?;
+    std::fs::write(out_dir.join("sweep.csv"), csv).map_err(|e| format!("sweep write: {e}"))?;
     println!("sloshing sweep written to {}", out_dir.display());
     Ok(())
 }
@@ -4070,9 +4171,8 @@ fn cylinder_wake(out_dir: &Path) -> Result<(), String> {
     let n_v = v_space.num_global_dofs(&mesh);
     let n_p = p_space.num_global_dofs(&mesh);
     let geom_tol = 1e-9;
-    let inside = |x: f64, y: f64| {
-        (x - center.0).powi(2) + (y - center.1).powi(2) < (radius * 0.99).powi(2)
-    };
+    let inside =
+        |x: f64, y: f64| (x - center.0).powi(2) + (y - center.1).powi(2) < (radius * 0.99).powi(2);
     let bc_dofs = locate_dofs_geometrical(&mesh, &v_space, |x, y, _z| {
         x < geom_tol || y < geom_tol || (ly - y) < geom_tol || inside(x, y)
     });
@@ -4158,8 +4258,8 @@ fn cylinder_wake(out_dir: &Path) -> Result<(), String> {
                 .map_err(|_| "SONIUM_CYLINDER_RESTART_STEP not set".to_string())?
                 .parse()
                 .map_err(|_| "bad SONIUM_CYLINDER_RESTART_STEP".to_string())?;
-            let raw = std::fs::read(&bin_path)
-                .map_err(|e| format!("restart file {bin_path}: {e}"))?;
+            let raw =
+                std::fs::read(&bin_path).map_err(|e| format!("restart file {bin_path}: {e}"))?;
             if raw.len() != 32 * n_nodes {
                 return Err(format!(
                     "restart file has {} bytes, expected {}",
@@ -4310,7 +4410,7 @@ fn cylinder_mach1(out_dir: &Path) -> Result<(), String> {
         sonium_fem::basis::PolynomialDegree::P2,
         |_| free,
     )
-        .map_err(|error| format!("cylinder-mach1 initial state: {error:?}"))?;
+    .map_err(|error| format!("cylinder-mach1 initial state: {error:?}"))?;
 
     let dump = |state: &CompressibleDgState, step: usize| -> Result<String, String> {
         let mut mach = vec![0.0f64; mesh.num_nodes()];
@@ -4321,8 +4421,7 @@ fn cylinder_mach1(out_dir: &Path) -> Result<(), String> {
             let average = state.cell_average(element);
             let velocity = average.velocity();
             let speed = (velocity[0].powi(2) + velocity[1].powi(2)).sqrt();
-            let local_mach =
-                speed / gas.speed_of_sound(average.pressure(gas), average.density);
+            let local_mach = speed / gas.speed_of_sound(average.pressure(gas), average.density);
             for &node in mesh.elements[element].vertices() {
                 mach[node] += local_mach;
                 density[node] += average.density;
@@ -4404,9 +4503,8 @@ fn cylinder_mach1(out_dir: &Path) -> Result<(), String> {
                 let average = state.cell_average(element);
                 let velocity = average.velocity();
                 let speed = (velocity[0].powi(2) + velocity[1].powi(2)).sqrt();
-                max_mach = max_mach.max(
-                    speed / gas.speed_of_sound(average.pressure(gas), average.density),
-                );
+                max_mach = max_mach
+                    .max(speed / gas.speed_of_sound(average.pressure(gas), average.density));
             }
         }
     }
@@ -4481,8 +4579,7 @@ fn naca0012(out_dir: &Path) -> Result<(), String> {
             let average = state.cell_average(element);
             let velocity = average.velocity();
             let speed = (velocity[0].powi(2) + velocity[1].powi(2)).sqrt();
-            let local_mach =
-                speed / gas.speed_of_sound(average.pressure(gas), average.density);
+            let local_mach = speed / gas.speed_of_sound(average.pressure(gas), average.density);
             for &node in mesh.elements[element].vertices() {
                 mach_field[node] += local_mach;
                 density[node] += average.density;
@@ -4560,9 +4657,8 @@ fn naca0012(out_dir: &Path) -> Result<(), String> {
                 let average = state.cell_average(element);
                 let velocity = average.velocity();
                 let speed = (velocity[0].powi(2) + velocity[1].powi(2)).sqrt();
-                max_mach = max_mach.max(
-                    speed / gas.speed_of_sound(average.pressure(gas), average.density),
-                );
+                max_mach = max_mach
+                    .max(speed / gas.speed_of_sound(average.pressure(gas), average.density));
             }
         }
     }
@@ -4576,6 +4672,74 @@ fn naca0012(out_dir: &Path) -> Result<(), String> {
         "mach",
         (0.0, max_mach.max(1.0)),
     )
+}
+
+#[cfg(test)]
+mod audit_regression_tests {
+    use super::*;
+
+    #[test]
+    fn taylor_green_boundary_value_decays_with_time() {
+        // At (x, y) = (0, pi/2) the exact u velocity is -exp(-2*nu*t);
+        // with nu = 0.04 at t = 6 it must be ~-0.6188, not the t=0 value -1.
+        let value = taylor_green_dirichlet(0.0, std::f64::consts::FRAC_PI_2, 6.0, 0.04);
+        assert!((value[0] - (-0.618_783)).abs() < 1e-5, "got {}", value[0]);
+        let initial = taylor_green_dirichlet(0.0, std::f64::consts::FRAC_PI_2, 0.0, 0.04);
+        assert!((initial[0] + 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn damped_wave_step_damps_history_exactly_once() {
+        // With no stiffness or forcing, next = damping*(2p - prev): the
+        // sponge factor applies once to the whole update, and the old
+        // history buffer enters undamped (it was damped when produced).
+        let next = damped_wave_next(
+            &[1.0, 2.0],
+            &[0.5, -1.0],
+            &[0.0, 0.0],
+            &[1.0, 1.0],
+            &[0.0, 0.0],
+            0.1,
+            343.0,
+            &[0.9, 0.5],
+        );
+        assert!((next[0] - 0.9 * 1.5).abs() < 1e-12, "got {}", next[0]);
+        assert!((next[1] - 0.5 * 5.0).abs() < 1e-12, "got {}", next[1]);
+    }
+
+    #[test]
+    fn damped_wave_step_decays_free_pulse_energy() {
+        let pressure = vec![1.0; 8];
+        let previous = vec![0.0; 8];
+        let zeros = vec![0.0; 8];
+        let ones = vec![1.0; 8];
+        let damping = vec![0.9; 8];
+        let next = damped_wave_next(
+            &pressure, &previous, &zeros, &ones, &zeros, 0.01, 1.0, &damping,
+        );
+        let undamped = damped_wave_next(
+            &pressure, &previous, &zeros, &ones, &zeros, 0.01, 1.0, &ones,
+        );
+        let energy: f64 = next.iter().map(|v| v * v).sum();
+        let undamped_energy: f64 = undamped.iter().map(|v| v * v).sum();
+        assert!(
+            energy < undamped_energy,
+            "sponge step must decay energy: {energy} !< {undamped_energy}"
+        );
+        assert!((energy / undamped_energy - 0.81).abs() < 1e-12);
+    }
+
+    #[test]
+    fn melting_step_rejects_exhausted_picard_iterations() {
+        assert!(require_picard_converged(true, 3).is_ok());
+        let error = require_picard_converged(false, 3).unwrap_err();
+        assert!(error.contains("Picard"), "got: {error}");
+    }
+
+    #[test]
+    fn thermal_capacity_uses_mass_quadrature_order() {
+        assert_eq!(thermal_capacity_quadrature_order(), 2);
+    }
 }
 
 fn main() {

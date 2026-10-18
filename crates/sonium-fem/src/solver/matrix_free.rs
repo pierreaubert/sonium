@@ -72,14 +72,14 @@ impl std::error::Error for MatrixFreeError {}
 
 /// Matrix-free operator that computes `y = A*x` by element-level assembly.
 ///
-/// Quadrature rules are cached per [`ElementType`] at construction and a
-/// scratch element matrix is reused across elements, so repeated applications
-/// do not rebuild the rule tables or reallocate the dense local matrix.
-///
-/// Cost model: each application still re-tabulates basis functions and
-/// rebuilds every dense element matrix before scattering serially. This saves
-/// global storage but is not high-order partial assembly / sum factorization;
-/// do not infer competitiveness with assembled operators from the name alone.
+/// Quadrature rules are cached per [`ElementType`] at construction. Dense
+/// element matrices are integrated once, lazily on first use, and cached:
+/// the borrowed form, space, and mesh are immutable for the operator's
+/// lifetime, so re-integrating them on every application (the previous
+/// behaviour) repeated identical work in every Krylov iteration. The
+/// cache trades `sum_e (local_dofs_e)^2` storage for that repeated
+/// quadrature and basis tabulation; it is still not high-order partial
+/// assembly / sum factorization.
 pub struct MatrixFreeOperator<'a, T, F, S>
 where
     T: Copy + Default + std::ops::AddAssign + std::ops::Mul<Output = T> + Send + Sync,
@@ -92,6 +92,7 @@ where
     n_dofs: usize,
     validation: Result<(), MatrixFreeError>,
     quad_rules: HashMap<ElementType, QuadratureRule>,
+    element_matrices: std::sync::OnceLock<Vec<LocalMatrix<T>>>,
     _phantom: std::marker::PhantomData<T>,
 }
 
@@ -117,6 +118,7 @@ where
             n_dofs,
             validation,
             quad_rules,
+            element_matrices: std::sync::OnceLock::new(),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -179,6 +181,24 @@ where
         }
     }
 
+    /// Number of element matrices integrated and cached so far.
+    pub fn num_cached_element_matrices(&self) -> usize {
+        self.element_matrices.get().map_or(0, Vec::len)
+    }
+
+    /// Returns the cached dense element matrices, integrating them once.
+    fn element_matrices(&self) -> &[LocalMatrix<T>] {
+        self.element_matrices.get_or_init(|| {
+            let mut scratch = LocalMatrix::zeros(0);
+            (0..self.mesh.num_elements())
+                .map(|elem_idx| {
+                    self.assemble_element_matrix(elem_idx, &mut scratch);
+                    scratch.clone()
+                })
+                .collect()
+        })
+    }
+
     /// Compute y = A*x element-by-element without forming the global matrix.
     /// Panics on invalid setup or dimensions; use `try_apply_vec` for errors.
     pub fn apply_vec(&self, x: &[T]) -> Vec<T> {
@@ -200,11 +220,10 @@ where
 
     fn compute_apply_vec(&self, x: &[T]) -> Result<Vec<T>, MatrixFreeError> {
         let mut y = vec![T::default(); self.n_dofs];
-        let mut local_mat = LocalMatrix::zeros(0);
+        let matrices = self.element_matrices();
 
-        for elem_idx in 0..self.mesh.num_elements() {
+        for (elem_idx, local_mat) in matrices.iter().enumerate() {
             let dofs = self.space.local_to_global(self.mesh, elem_idx);
-            self.assemble_element_matrix(elem_idx, &mut local_mat);
 
             // y += K_e * x_e (element matvec, scatter to global)
             for (i, &gi) in dofs.iter().enumerate() {
@@ -253,11 +272,10 @@ where
 
     fn compute_apply_transpose_vec(&self, x: &[T]) -> Result<Vec<T>, MatrixFreeError> {
         let mut y = vec![T::default(); self.n_dofs];
-        let mut local_mat = LocalMatrix::zeros(0);
+        let matrices = self.element_matrices();
 
-        for elem_idx in 0..self.mesh.num_elements() {
+        for (elem_idx, local_mat) in matrices.iter().enumerate() {
             let dofs = self.space.local_to_global(self.mesh, elem_idx);
-            self.assemble_element_matrix(elem_idx, &mut local_mat);
 
             for (i, &gi) in dofs.iter().enumerate() {
                 if gi >= self.n_dofs {
@@ -292,11 +310,10 @@ where
     pub fn try_diagonal(&self) -> Result<Vec<T>, MatrixFreeError> {
         self.validate()?;
         let mut diag = vec![T::default(); self.n_dofs];
-        let mut local_mat = LocalMatrix::zeros(0);
+        let matrices = self.element_matrices();
 
-        for elem_idx in 0..self.mesh.num_elements() {
+        for (elem_idx, local_mat) in matrices.iter().enumerate() {
             let dofs = self.space.local_to_global(self.mesh, elem_idx);
-            self.assemble_element_matrix(elem_idx, &mut local_mat);
 
             for (i, &gi) in dofs.iter().enumerate() {
                 if gi >= self.n_dofs {
@@ -447,6 +464,27 @@ mod tests {
             (lhs - rhs).abs() < 1e-10,
             "transpose inner-product mismatch: lhs={lhs}, rhs={rhs}"
         );
+    }
+
+    #[test]
+    fn repeated_applies_reuse_cached_element_matrices() {
+        let mesh = unit_square_triangles(4);
+        let space = H1Space::new(PolynomialDegree::P1);
+        let op = MatrixFreeOperator::new(&LaplacianForm, &space, &mesh, 1);
+        let n = op.num_dofs();
+        let x: Vec<f64> = (0..n).map(|i| (i as f64 * 0.37).sin()).collect();
+
+        assert_eq!(op.num_cached_element_matrices(), 0);
+        let first = op.apply_vec(&x);
+        assert_eq!(op.num_cached_element_matrices(), mesh.num_elements());
+        let second = op.apply_vec(&x);
+        assert_eq!(first, second);
+
+        let triplet = crate::assembly::assemble_bilinear(&LaplacianForm, &space, &space, &mesh, 1);
+        let assembled = triplet.to_csr().matvec(&x);
+        for (index, (actual, expected)) in first.iter().zip(assembled.iter()).enumerate() {
+            assert!((actual - expected).abs() < 1e-10, "dof {index}");
+        }
     }
 
     #[test]

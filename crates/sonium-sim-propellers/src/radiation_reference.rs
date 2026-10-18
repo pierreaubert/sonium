@@ -197,6 +197,19 @@ impl RotatingDipoleComplexPressure {
 }
 
 impl RotatingDipoleReference {
+    /// Minimum `k*r` admitted by the far-field observer evaluation.
+    ///
+    /// Below this the dipole's reactive near-field terms (decaying as
+    /// `1/r^2` and faster) are comparable to the radiating `1/r` term,
+    /// so the far-field phasor and the progressive-wave intensity
+    /// relation derived from it are not valid.
+    pub const MIN_FAR_FIELD_KR: f64 = 1.0;
+
+    /// Returns the dimensionless observer distance `k*r` for this harmonic.
+    pub fn far_field_kr(self, observer_distance_m: f64) -> f64 {
+        2.0 * PI * self.frequency_hz / self.speed_of_sound_m_s * observer_distance_m
+    }
+
     /// Evaluate a phase-aware compact-dipole observer phasor.
     ///
     /// The source amplitude is scaled as `1/r`, the polar envelope is
@@ -211,6 +224,12 @@ impl RotatingDipoleReference {
         azimuth_angle_rad: f64,
     ) -> Result<RotatingDipoleComplexPressure, RotatingDipoleReferenceError> {
         validate_positive_finite("observer_distance_m", observer_distance_m)?;
+        if self.far_field_kr(observer_distance_m) < Self::MIN_FAR_FIELD_KR {
+            return Err(RotatingDipoleReferenceError::InvalidInput {
+                field: "observer_distance_m",
+                requirement: "in the far field (k*r >= 1) for this 1/r reference",
+            });
+        }
         if !polar_angle_rad.is_finite() || !(0.0..=PI).contains(&polar_angle_rad) {
             return Err(RotatingDipoleReferenceError::InvalidPolarAngle);
         }
@@ -469,6 +488,19 @@ mod phase_tests {
             (peak_power - reference.radiated_sound_power_w()).abs()
                 < 2.0e-5 * reference.radiated_sound_power_w().max(1.0)
         );
+    }
+
+    #[test]
+    fn complex_observer_rejects_near_field_distances() {
+        // 100 Hz in air: k = 1.83 rad/m, so r = 0.1 m gives kr = 0.18,
+        // far outside the 1/r far-field regime of this reference.
+        let reference = RotatingDipoleReference::try_from_equatorial_amplitude(
+            1, 100.0, 1.0, 0.25, 1.204, 343.0,
+        )
+        .unwrap();
+        assert!(reference.complex_pressure_pa(0.1, PI / 2.0, 0.0).is_err());
+        assert!(reference.complex_pressure_pa(1.0, PI / 2.0, 0.0).is_ok());
+        assert!((reference.far_field_kr(1.0) - 1.831).abs() < 0.01);
     }
 
     #[test]

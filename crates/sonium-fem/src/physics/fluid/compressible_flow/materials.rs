@@ -230,11 +230,7 @@ pub fn hllc_flux(
     let unpack = |state: ConservativeState| {
         let velocity = state.velocity();
         let pressure = state.pressure(gas);
-        let un: f64 = velocity
-            .iter()
-            .zip(normal.iter())
-            .map(|(u, n)| u * n)
-            .sum();
+        let un: f64 = velocity.iter().zip(normal.iter()).map(|(u, n)| u * n).sum();
         let sound = gas.speed_of_sound(pressure, state.density);
         let enthalpy = (state.total_energy + pressure) / state.density;
         (state.density, velocity, un, pressure, sound, enthalpy)
@@ -255,11 +251,7 @@ pub fn hllc_flux(
         return None;
     }
     let c_tilde = c_tilde_sq.sqrt();
-    let un_tilde: f64 = u_tilde
-        .iter()
-        .zip(normal.iter())
-        .map(|(u, n)| u * n)
-        .sum();
+    let un_tilde: f64 = u_tilde.iter().zip(normal.iter()).map(|(u, n)| u * n).sum();
     let s_l = (un_l - c_l).min(un_tilde - c_tilde);
     let s_r = (un_r + c_r).max(un_tilde + c_tilde);
     // Contact (middle) wave speed.
@@ -289,8 +281,7 @@ pub fn hllc_flux(
             *component += (s_m - un) * n;
         }
         let energy_star = factor
-            * (state.total_energy / rho
-                + (s_m - un) * (s_m + pressure / (rho * (s_k - un))));
+            * (state.total_energy / rho + (s_m - un) * (s_m + pressure / (rho * (s_k - un))));
         let candidate = ConservativeState {
             density: factor,
             momentum: [
@@ -308,11 +299,12 @@ pub fn hllc_flux(
     };
     let flux_l = left.euler_flux(gas, normal);
     let flux_r = right.euler_flux(gas, normal);
-    let add_scaled_flux = |flux: [f64; 5], star: ConservativeState, base: ConservativeState, s: f64| {
-        let star = star.as_array();
-        let base = base.as_array();
-        std::array::from_fn(|i| flux[i] + s * (star[i] - base[i]))
-    };
+    let add_scaled_flux =
+        |flux: [f64; 5], star: ConservativeState, base: ConservativeState, s: f64| {
+            let star = star.as_array();
+            let base = base.as_array();
+            std::array::from_fn(|i| flux[i] + s * (star[i] - base[i]))
+        };
     if s_l >= 0.0 {
         Some(flux_l)
     } else if s_m >= 0.0 {

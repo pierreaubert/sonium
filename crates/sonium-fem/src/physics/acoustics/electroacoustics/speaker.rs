@@ -258,8 +258,7 @@ pub fn resolve_thermoviscous_gap(
             None,
             Some(crate::physics::acoustics::pressure::thermal_wall_admittance(fluid, omega)),
         ),
-        SpeakerGapModel::FullThermoviscousRegion
-        | SpeakerGapModel::LumpedNarrowGapImpedance => {
+        SpeakerGapModel::FullThermoviscousRegion | SpeakerGapModel::LumpedNarrowGapImpedance => {
             let equivalent = crate::physics::acoustics::pressure::EquivalentFluid::new(
                 fluid.clone(),
                 crate::physics::acoustics::pressure::CrossSection::Slit {
@@ -515,13 +514,9 @@ mod tests {
         assert!(narrow.boundary_layer_admittance.is_none());
         assert!(!narrow.is_moving_wall());
         // Wide gap: boundary-layer-impedance payload, explicit moving wall.
-        let wide = resolve_thermoviscous_gap(
-            &fluid,
-            1_000.0,
-            5.0e-3,
-            Some(Complex64::new(0.01, 0.0)),
-        )
-        .unwrap();
+        let wide =
+            resolve_thermoviscous_gap(&fluid, 1_000.0, 5.0e-3, Some(Complex64::new(0.01, 0.0)))
+                .unwrap();
         assert!(wide.is_moving_wall());
         assert!(resolve_thermoviscous_gap(&fluid, 0.0, 1.0e-3, None).is_err());
         assert!(resolve_thermoviscous_gap(&fluid, 1_000.0, -1.0, None).is_err());

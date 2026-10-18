@@ -1,7 +1,8 @@
 //! Quadrature rule selection based on element type and polynomial degree
 
 use super::gauss::{
-    QuadraturePoint, gauss_hexahedron, gauss_quadrilateral, gauss_tetrahedron, gauss_triangle,
+    QuadraturePoint, UnsupportedQuadratureOrder, gauss_hexahedron, gauss_quadrilateral,
+    gauss_tetrahedron, gauss_triangle, gauss_triangle_checked,
 };
 use crate::mesh::ElementType;
 
@@ -33,6 +34,32 @@ impl QuadratureRule {
         }
     }
 
+    /// Creates a rule, rejecting orders that cannot be honoured exactly.
+    ///
+    /// # Errors
+    /// Returns [`UnsupportedQuadratureOrder`] for order zero, or when the
+    /// element rule's guaranteed exactness is below the requested degree.
+    pub fn try_new(
+        element_type: ElementType,
+        order: usize,
+    ) -> Result<Self, UnsupportedQuadratureOrder> {
+        if order == 0 {
+            return Err(UnsupportedQuadratureOrder { order });
+        }
+        if element_type == ElementType::Triangle {
+            let checked = gauss_triangle_checked(order)?;
+            if checked.exactness_degree < order {
+                return Err(UnsupportedQuadratureOrder { order });
+            }
+            return Ok(Self {
+                element_type,
+                order,
+                points: checked.points,
+            });
+        }
+        Ok(Self::new(element_type, order))
+    }
+
     /// Number of quadrature points
     pub fn num_points(&self) -> usize {
         self.points.len()
@@ -58,6 +85,14 @@ pub fn required_order_for_stiffness(polynomial_degree: usize) -> usize {
 
 pub fn required_order_for_mass(polynomial_degree: usize) -> usize {
     2 * polynomial_degree.max(1)
+}
+
+/// Returns the degree needed for a value-times-gradient drift integrand.
+///
+/// The test value (degree `p`) times a trial gradient (degree `p - 1`)
+/// gives degree `2p - 1` for a constant coefficient on an affine element.
+pub fn required_order_for_drift(polynomial_degree: usize) -> usize {
+    (2 * polynomial_degree.max(1)).saturating_sub(1)
 }
 
 /// Create quadrature rule for stiffness matrix integration
@@ -98,6 +133,23 @@ mod tests {
         // P3 elements
         assert_eq!(required_order_for_stiffness(3), 4);
         assert_eq!(required_order_for_mass(3), 6);
+    }
+
+    #[test]
+    fn drift_order_is_value_times_gradient_degree() {
+        assert_eq!(required_order_for_drift(1), 1);
+        assert_eq!(required_order_for_drift(2), 3);
+        assert_eq!(required_order_for_drift(3), 5);
+    }
+
+    #[test]
+    fn try_new_rejects_zero_and_honours_triangle_orders() {
+        assert!(QuadratureRule::try_new(ElementType::Triangle, 0).is_err());
+        for order in 1..=8 {
+            let rule = QuadratureRule::try_new(ElementType::Triangle, order).unwrap();
+            assert_eq!(rule.order, order);
+            assert!(!rule.points.is_empty());
+        }
     }
 
     #[test]
