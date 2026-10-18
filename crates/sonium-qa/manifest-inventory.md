@@ -7,14 +7,14 @@ validated cases, not every runnable QA binary.
 
 ## Summary
 
-- Registered Cargo QA binaries: 989
-- Manifest-backed validation cases: 807
+- Registered Cargo QA binaries: 990
+- Manifest-backed validation cases: 810
 
 | Tier | Cases |
 | --- | ---: |
 | accelerator-gate | 8 |
 | contract-gate | 41 |
-| physics-gate | 395 |
+| physics-gate | 398 |
 | reference-only | 100 |
 | smoke | 157 |
 | solver-gate | 106 |
@@ -231,8 +231,10 @@ validated cases, not every runnable QA binary.
 | fem.biharmonic-validation.v1 | fem | `qa-fem-biharmonic-validation` | physics-gate | 2D mixed biharmonic solve of u = sin(pi x) sin(pi y) on n=4/8 plus uniform-load Navier plate |
 | fem.complex-dirichlet-elimination.v1 | sonium-fem | `qa-fem-complex-dirichlet-elimination` | physics-gate | transactional prescribed-value column correction and row/column elimination |
 | fem.compressible-conservation-3d.v1 | fem | `qa-fem-compressible-conservation-3d` | physics-gate | nonuniform smooth P1 DG state advanced by SSPRK3 in a closed slip-wall box |
+| fem.compressible-cylinder-mach1.v1 | fem | `qa-fem-compressible-cylinder-mach1` | physics-gate | explicit P2-DG compressible flow (characteristic far-field, HLLC flux, Persson-Peraire troubled-cell indicator at -3.0 with relaxation 0.5 and jump-sensor fallback), SSPRK3 positivity limiting: Mach 0.1 low-Mach control, 0.4 -> 0.8 -> 1.0 continuation, fresh Mach 1 transonic gate, Mach 1.2 bracket, viscous Re=100 no-slip adiabatic Mach 1; SONIUM_CYL_CONVERGENCE=1 three-mesh drag convergence; env-reversible to P1/Rusanov |
 | fem.compressible-navier-stokes-3d.v1 | fem | `qa-fem-compressible-ns-3d` | physics-gate | P1 DG free-stream, SSPRK3 positivity, and Sutherland transport gate |
 | fem.compressible-shear-wave-3d.v1 | fem | `qa-fem-compressible-ns-3d` | physics-gate | nonlinear rotating shear decay: native DG spatial refinement and public SSPRK3 temporal refinement |
+| fem.compressible-sod-dg.v1 | fem | `qa-fem-compressible-flow-sod-shock-tube` | physics-gate | time-marched P2-DG Sod shock tube with HLLC flux (nx=100/200) against the exact Toro Riemann solution, plus flux-level Rusanov/HLLC/EOS unit checks; env-reversible to P1/Rusanov |
 | fem.conjugate-heat-transfer-3d-interface-mms.v1 | sonium-fem | `qa-fem-conjugate-heat-transfer-3d` | physics-gate | native region-routed conduction/capacity/fluid-advection blocks, CN history and sparse LU; independent two-sided interface gradient integration |
 | fem.conjugate-heat-transfer-3d.v1 | fem | `qa-fem-conjugate-heat-transfer-3d` | contract-gate | assembly-contract: prescribed x+y energy identities and row sums; no numerical field solve |
 | fem.crash-box-impact-harvest.v1 | sonium-qa | `qa-fem-crash-shells` | physics-gate | native original Q4 shell explicit dynamics, LAW2 layer evolution, tied contact, rigid-body constraints and original point mass |
@@ -403,6 +405,7 @@ validated cases, not every runnable QA binary.
 | fem.vector-laplacian-convergence.v1 | fem | `qa-fem-vector-laplacian-convergence` | physics-gate | P1 vector-H1 generic assembly, zero Dirichlet elimination, dense reference solve, quadrature errors |
 | fem.vector-natural-boundary-contract.v1 | sonium-fem | `qa-fem-vector-natural-boundary-contract` | physics-gate | transactional vector traction quadrature with typed callback, geometry, and boundary-topology validation |
 | fem.waveholtz-direct-reference.v1 | fem | `qa-fem-waveholtz-convergence` | physics-gate | production WaveHoltz time/filter/GMRES path versus assembled direct FEM solve |
+| fem.website-crush-regression.v1 | sonium-qa | `qa-website-demos` | physics-gate | native Q4 crash-shell explicit dynamics (Belytschko-Tsay, J2 layers), prescribed end-shortening, offset rigid-wall contact and thickness-aware fold self-contact with accounted projection work |
 | fft.checked-native-execution.v1 | sonium-fft | `qa-fft-checked-execution` | smoke | native FftPlan::try_process and try_process_with_scratch |
 | fft.family-contracts.v1 | sonium-fft | `qa-fft-family-contracts` | smoke | CPU 1-D forward/inverse, Parseval, adjoint, direct linear convolution, 2-D energy, and Hamming STFT reconstruction |
 | mesher.adaptive-refinement.v1 | mesher | `qa-mesher-adaptive-refinement` | smoke | deterministic local estimator on a 2×2 unit-square triangle mesh |

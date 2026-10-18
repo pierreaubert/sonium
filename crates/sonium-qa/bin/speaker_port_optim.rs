@@ -108,7 +108,13 @@ fn extract(report: &Step10GateReport) -> Result<GateNumbers, String> {
 }
 
 fn run() -> Result<(Step10GateReport, GateNumbers), String> {
-    let mut config = Step10GateConfig::bounded();
+    // `SPEAKER_PORT_OPTIM_FLARE=1` runs the fixed-mouths flare search space
+    // instead of the frozen legacy bounded gate.
+    let mut config = if std::env::var("SPEAKER_PORT_OPTIM_FLARE").is_ok_and(|v| v == "1") {
+        Step10GateConfig::flare_search()
+    } else {
+        Step10GateConfig::bounded()
+    };
     if let Ok(value) = std::env::var("SPEAKER_PORT_OPTIM_STAGE_PARALLELISM") {
         config.stage_parallelism = value.parse::<usize>().map_err(|_| {
             format!(

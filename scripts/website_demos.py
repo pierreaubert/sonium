@@ -253,6 +253,41 @@ DEMOS: dict[str, DemoSpec] = {
         distance_factor=3.4,
         poster_at=0.7,
     ),
+    "cylinder-mach1": DemoSpec(
+        slug="cylinder-mach1",
+        title="Cylinder at Mach 1",
+        capability="Compressible Navier-Stokes (explicit P1-DG, SSPRK3, ideal gas)",
+        blurb=(
+            "Sonic freestream past a cylinder, solved with the explicit "
+            "P1-DG compressible solver in conservative variables. A bow "
+            "shock stands ahead of the nose, the flow stays subsonic in "
+            "the pocket in front, then accelerates to locally supersonic "
+            "speed at the shoulders. Colour is local Mach number. The "
+            "incompressible cylinder demo cannot represent any of this: "
+            "it has no density, energy, or sound speed."
+        ),
+        field_mode="mach",
+        direction="0.04,-0.06,1",
+        distance_factor=3.4,
+        poster_at=0.7,
+    ),
+    "naca0012": DemoSpec(
+        slug="naca0012",
+        title="NACA 0012 at Mach 0.8",
+        capability="Compressible Navier-Stokes (explicit P2-DG, HLLC, ideal gas)",
+        blurb=(
+            "Transonic flow over the classical NACA 0012 airfoil at "
+            "Mach 0.8 and 1.25 degrees incidence (the AGARD inviscid "
+            "benchmark), solved with the explicit P2-DG compressible "
+            "solver. A supersonic pocket forms over the upper surface "
+            "and ends in a shock near mid-chord. Colour is local Mach "
+            "number."
+        ),
+        field_mode="mach",
+        direction="0.04,-0.06,1",
+        distance_factor=3.4,
+        poster_at=0.7,
+    ),
     "crush": DemoSpec(
         slug="crush",
         title="Thin-walled tube crush",

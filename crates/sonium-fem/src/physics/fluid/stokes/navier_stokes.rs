@@ -655,6 +655,72 @@ mod element_density_tests {
     }
 
     #[test]
+    fn variable_step_bdf2_steps_run_and_advance_time() {
+        // Changing `dt` between steps with `previous_dt` recorded must
+        // take the variable-step coefficients, keep solving, and
+        // advance `state.time` by the actual step sizes.
+        use crate::boundary::locate_dofs_geometrical;
+        use crate::physics::fluid::stokes::time_stepping::{BdfConfig, BdfState};
+        use crate::physics::fluid::stokes::workspace::BdfWorkspace;
+        use crate::spaces::FunctionSpace;
+
+        let mesh = crate::mesh::generators::rectangular_mesh_triangles(0.0, 1.0, 0.0, 1.0, 8, 8);
+        let v_space = crate::spaces::VectorH1Space::new(crate::basis::PolynomialDegree::P1, 2);
+        let p_space = crate::spaces::H1Space::new(crate::basis::PolynomialDegree::P1);
+        let n_v = v_space.num_global_dofs(&mesh);
+        let n_p = p_space.num_global_dofs(&mesh);
+        let config = NavierStokesConfig {
+            mu: 1.0e-3,
+            rho: 1000.0,
+            use_direct_solver: false,
+            linear_solver_max_iterations: 3000,
+            linear_solver_tolerance: 1e-8,
+            linear_solver_cpu_preconditioner:
+                crate::backend_selection::LinearSolverCpuPreconditionerKind::IlutSchur,
+            ..Default::default()
+        };
+        let bc_dofs = locate_dofs_geometrical(&mesh, &v_space, |x, y, _z| {
+            x < 1e-9 || (1.0 - x) < 1e-9 || y < 1e-9 || (1.0 - y) < 1e-9
+        });
+        let bc = |_x: f64, _y: f64, _z: f64| vec![0.0, 0.0];
+        let mut bdf = BdfConfig::bdf2(0.01, 3);
+        let mut workspace = BdfWorkspace::new(&mesh, &v_space, &p_space);
+        workspace.set_pressure_gauge(0, 0.0);
+        let mut state = BdfState::from_rest(n_v, n_p);
+        for (dt, previous_dt) in [(0.01, None), (0.02, Some(0.01)), (0.005, Some(0.02))] {
+            bdf.dt = dt;
+            bdf.previous_dt = previous_dt;
+            assert!(
+                solve_bdf_step_cached_with_force(
+                    &mesh,
+                    &v_space,
+                    &p_space,
+                    &config,
+                    &bdf,
+                    &mut state,
+                    &bc,
+                    &bc_dofs,
+                    &[],
+                    |_coords: [f64; 3]| vec![0.0, -1.0, 0.0],
+                    |_| [[0.0; 3]; 3],
+                    &workspace,
+                ),
+                "variable-step BDF2 step failed at dt={dt}"
+            );
+        }
+        assert_eq!(state.step, 3);
+        assert!(
+            (state.time - 0.035).abs() < 1e-12,
+            "time advanced to {} instead of 0.035",
+            state.time
+        );
+        assert!(
+            state.velocity.iter().all(|v| v.is_finite() && v.abs() < 10.0),
+            "variable-step BDF2 produced unbounded velocity"
+        );
+    }
+
+    #[test]
     fn scalar_density_bdf_control_case_runs() {
         assert!(run_two_density_case(false), "scalar control case failed");
     }
@@ -2533,7 +2599,10 @@ where
         workspace.quad_order,
     );
 
-    let coefficients = super::time_stepping::BdfCoefficients::for_order(bdf.order);
+    let coefficients = super::time_stepping::BdfCoefficients::for_order_variable(
+        bdf.order,
+        bdf.step_ratio(state.step),
+    );
     let mass = workspace.mass_triplet.to_csr();
     let mass_scale = config.rho * coefficients.a0 / bdf.dt;
     for entry in 0..workspace.mass_triplet.nnz() {
@@ -4469,7 +4538,7 @@ where
     ForceFn: Fn([f64; 3]) -> Vec<f64> + Send + Sync + 'static,
     ForceJacFn: Fn([f64; 3]) -> [[f64; 3]; 3] + Send + Sync + 'static,
 {
-    use super::time_stepping::{BdfCoefficients, extrapolate_velocity};
+    use super::time_stepping::{BdfCoefficients, extrapolate_velocity_variable};
 
     debug_assert_eq!(workspace.n_v, v_space.num_global_dofs(mesh));
     debug_assert_eq!(workspace.n_p, p_space.num_global_dofs(mesh));
@@ -4480,11 +4549,15 @@ where
     let n_total = n_v + n_p;
     let dim = mesh.dimension;
     let dt = bdf.dt;
-    let coeffs = BdfCoefficients::for_order(bdf.order);
+    // Variable-step coefficients: with `bdf.previous_dt` unset (or on
+    // the first step) the ratio is 1 and these are exactly the
+    // constant-step coefficients used before.
+    let step_ratio = bdf.step_ratio(state.step);
+    let coeffs = BdfCoefficients::for_order_variable(bdf.order, step_ratio);
 
     // Extrapolated advection velocity, evaluated as the exact P1/P2 finite-
     // element field through the workspace-owned element locator.
-    let u_star = extrapolate_velocity(state, bdf.order);
+    let u_star = extrapolate_velocity_variable(state, bdf.order, step_ratio);
     // Element-local density (optional): per-element mass block and a
     // matching convection assembly replace the scalar-rho blocks.
     let density_mass = match assemble_density_mass_triplet(mesh, v_space, config, workspace.quad_order)
@@ -5432,16 +5505,17 @@ pub fn audit_bdf_step<VSpace: crate::spaces::FunctionSpace>(
     exterior_marker: i32,
     workspace: &super::workspace::BdfWorkspace,
 ) -> BdfStepAudit {
-    use super::time_stepping::{BdfCoefficients, extrapolate_velocity};
+    use super::time_stepping::{BdfCoefficients, extrapolate_velocity_variable};
 
     let progress = std::env::var("SONIUM_BDF_SOLVER_PROGRESS").as_deref() == Ok("1");
     let audit_start = std::time::Instant::now();
     let h = bdf.dt;
-    let coeffs = BdfCoefficients::for_order(bdf.order);
+    let step_ratio = bdf.step_ratio(previous.step);
+    let coeffs = BdfCoefficients::for_order_variable(bdf.order, step_ratio);
     let u = &accepted.velocity;
     let un = &previous.velocity;
     let unm1 = &previous.velocity_prev;
-    let u_star = extrapolate_velocity(previous, bdf.order);
+    let u_star = extrapolate_velocity_variable(previous, bdf.order, step_ratio);
     let convection = assemble_bdf_convection(
         mesh,
         v_space,

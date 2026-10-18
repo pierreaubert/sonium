@@ -3114,6 +3114,44 @@ required_hardware = "cpu"
 artifacts = "QA_RESULT JSONL DG conservation/transport metrics"
 
 [[case]]
+id = "fem.compressible-sod-dg.v1"
+owner = "fem"
+crate = "sonium-qa"
+bin = "qa-fem-compressible-flow-sod-shock-tube"
+entry_point = "CompressibleDgSolver on rectangular_mesh_triangles"
+method = "time-marched P2-DG Sod shock tube with HLLC flux (nx=100/200) against the exact Toro Riemann solution, plus flux-level Rusanov/HLLC/EOS unit checks; env-reversible to P1/Rusanov"
+scalar = "f64"
+dimension = "2D triangles (quasi-1D strip)"
+reference = "exact Sod solution: p*=0.30313, u*=0.92745, shock speed 1.7522 at t=0.2"
+reference_checksum = "analytic"
+norm = "density L1 error, numerical shock position, thermodynamic minima"
+tolerance = "L1 decreases under refinement and fine L1 < 0.03; shock position within 0.06 of exact; positive density/pressure"
+tier = "physics-gate"
+timeout_seconds = 300
+required_hardware = "cpu"
+features = ["qa-binaries"]
+artifacts = "stdout metrics"
+
+[[case]]
+id = "fem.compressible-cylinder-mach1.v1"
+owner = "fem"
+crate = "sonium-qa"
+bin = "qa-fem-compressible-cylinder-mach1"
+entry_point = "CompressibleDgSolver on channel_with_cylinder_triangles"
+method = "explicit P2-DG compressible flow (characteristic far-field, HLLC flux, Persson-Peraire troubled-cell indicator at -3.0 with relaxation 0.5 and jump-sensor fallback), SSPRK3 positivity limiting: Mach 0.1 low-Mach control, 0.4 -> 0.8 -> 1.0 continuation, fresh Mach 1 transonic gate, Mach 1.2 bracket, viscous Re=100 no-slip adiabatic Mach 1; SONIUM_CYL_CONVERGENCE=1 three-mesh drag convergence; env-reversible to P1/Rusanov"
+scalar = "f64"
+dimension = "2D triangles"
+reference = "isentropic/Rayleigh total-pressure ratios (1.007 at Mach 0.1, 1.116 at 0.4, 1.893 at 1.0, 2.408 at 1.2); subsonic stage at Mach 0.4 below the cylinder critical Mach"
+reference_checksum = "analytic"
+norm = "stagnation pressure ratio, maximum local Mach, density deviation, schlieren-peak shock standoff, pressure drag coefficient, thermodynamic minima"
+tolerance = "stagnation within 8% (subsonic) / 18% (Mach 1) / 20% (Mach 1.2) of theory; Mach 0.1 density deviation < 0.03; fresh Mach 1 max Mach > 1.05; standoff in [0, 3]; drag in [0.05, 2.5] (viscous [0.05, 3.0]); positive density/pressure"
+tier = "physics-gate"
+timeout_seconds = 600
+required_hardware = "cpu"
+features = ["qa-binaries"]
+artifacts = "stdout metrics; optional VTU (SONIUM_CYL_WRITE_VTU=1)"
+
+[[case]]
 id = "fem.compressible-shear-wave-3d.v1"
 owner = "fem"
 crate = "sonium-qa"
@@ -14636,6 +14674,25 @@ timeout_seconds = 600
 required_hardware = "cpu"
 features = ["qa-binaries"]
 artifacts = "QA_RESULT JSONL; decks/crash_box_original/model.json; original CRASH golden"
+
+[[case]]
+id = "fem.website-crush-regression.v1"
+owner = "sonium-qa"
+crate = "sonium-qa"
+bin = "qa-website-demos"
+entry_point = "bin/website_demos.rs::crush (driven via tests/website_crush_gate.rs)"
+method = "native Q4 crash-shell explicit dynamics (Belytschko-Tsay, J2 layers), prescribed end-shortening, offset rigid-wall contact and thickness-aware fold self-contact with accounted projection work"
+scalar = "f64"
+dimension = "aluminium tube 90 mm diameter x 160 mm x 1.2 mm wall; shipped 40 x 24 quads and original 20 x 12 quads; 55 mm end-shortening"
+reference = "Alexander/Wierzbicki mean crush force 25.23 sigma_flow t^(3/2) D^(1/2) at sigma_flow = 300 MPa (analytical sanity band, diamond fold mode seeded); energy-balance closure from the driver accounts"
+reference_checksum = "analytic:alexander-wierzbicki-circular-tube-mean-force:v1"
+norm = "contact invariant (midsurface z >= t/2), hourglass/plastic fraction, energy closure including projection work, plastic-to-balance-absorbed ratio, coarse/shipped mean-force agreement"
+tolerance = "min z >= t/2 - 1e-9; corrected wall penetration < 1e-4 m; hourglass fraction < 5%; energy closure < 5%; plastic/absorbed within 0.5-1.6; coarse vs shipped mean force < 35%; mean force within 0.2-3.0x analytical"
+tier = "physics-gate"
+timeout_seconds = 900
+required_hardware = "cpu"
+features = ["qa-binaries"]
+artifacts = "crush_metrics.json per configuration; VTU frame series; tests/website_crush_gate.rs"
 
 [[case]]
 id = "solvers.nonlinear-independent-accuracy.v1"

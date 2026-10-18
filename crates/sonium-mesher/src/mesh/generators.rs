@@ -2721,6 +2721,207 @@ pub fn channel_with_cylinder_triangles(
     mesh
 }
 
+/// NACA 0012 airfoil polygon (unit chord, leading edge at origin, chord
+/// along +x), ordered counter-clockwise starting at the trailing edge.
+/// Uses the original finite-thickness trailing edge (last coefficient
+/// -0.1015, trailing-edge thickness 0.0025 chords, closed by a vertical
+/// segment): a sharp trailing-edge point makes Delaunay offset layers
+/// fan into sliver elements behind the trailing edge, where the
+/// expansion collapses the pressure to the positivity floor. Cosine
+/// spacing resolves the leading edge (radius ≈ 0.0159 chords).
+pub fn naca0012_polygon(n_per_surface: usize) -> Vec<(f64, f64)> {
+    let thickness = |x: f64| -> f64 {
+        5.0 * 0.12
+            * (0.2969 * x.sqrt() - 0.1260 * x - 0.3516 * x * x + 0.2843 * x * x * x
+                - 0.1015 * x * x * x * x)
+    };
+    let n = n_per_surface.max(16);
+    let station = |i: usize| -> f64 {
+        0.5 * (1.0 - (std::f64::consts::PI * i as f64 / n as f64).cos())
+    };
+    let mut polygon = Vec::with_capacity(2 * n + 1);
+    // Upper surface: trailing edge to leading edge.
+    for i in (0..=n).rev() {
+        let x = station(i);
+        polygon.push((x, thickness(x)));
+    }
+    // Lower surface: leading edge back to trailing edge (the polygon
+    // closes with the vertical trailing-edge segment).
+    for i in 1..=n {
+        let x = station(i);
+        polygon.push((x, -thickness(x)));
+    }
+    polygon
+}
+
+/// Point-in-polygon test (even-odd ray casting) for a simple polygon.
+fn point_in_polygon(point: (f64, f64), polygon: &[(f64, f64)]) -> bool {
+    let mut inside = false;
+    let mut j = polygon.len() - 1;
+    for i in 0..polygon.len() {
+        let (xi, yi) = polygon[i];
+        let (xj, yj) = polygon[j];
+        if (yi > point.1) != (yj > point.1) {
+            let x_cross = xi + (point.1 - yi) * (xj - xi) / (yj - yi);
+            if point.0 < x_cross {
+                inside = !inside;
+            }
+        }
+        j = i;
+    }
+    inside
+}
+
+fn point_segment_distance(point: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (abx, aby) = (b.0 - a.0, b.1 - a.1);
+    let length_sq = abx * abx + aby * aby;
+    let t = if length_sq > 0.0 {
+        (((point.0 - a.0) * abx + (point.1 - a.1) * aby) / length_sq).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let (dx, dy) = (point.0 - (a.0 + t * abx), point.1 - (a.1 + t * aby));
+    (dx * dx + dy * dy).sqrt()
+}
+
+fn polygon_distance(point: (f64, f64), polygon: &[(f64, f64)]) -> f64 {
+    let mut best = f64::INFINITY;
+    for i in 0..polygon.len() {
+        let a = polygon[i];
+        let b = polygon[(i + 1) % polygon.len()];
+        best = best.min(point_segment_distance(point, a, b));
+    }
+    best
+}
+
+/// Channel mesh with a body-fitted NACA 0012 airfoil, following the
+/// construction of [`channel_with_cylinder_triangles`]: seeded Cartesian
+/// background points, a densified body polygon with offset near-body
+/// layers, Delaunay triangulation, and removal of elements inside the
+/// body. Boundary markers match the cylinder convention: 1 inlet,
+/// 2 outlet, 3 top/bottom, 4 airfoil surface. The airfoil occupies
+/// `[chord_x, chord_x + chord] x [chord_y - 0.06 chord, chord_y + 0.06 chord]`
+/// at zero geometric incidence; incidence is imposed through the
+/// freestream direction by the solver driver.
+#[allow(clippy::too_many_arguments)]
+pub fn channel_with_airfoil_triangles(
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    nx: usize,
+    ny: usize,
+    chord_x: f64,
+    chord_y: f64,
+    chord: f64,
+) -> Mesh {
+    assert!(nx > 0 && ny > 0, "channel mesh subdivisions must be non-zero");
+    assert!(x_min < x_max && y_min < y_max, "channel bounds must have positive extent");
+    assert!(chord.is_finite() && chord > 0.0, "chord must be finite and positive");
+    assert!(
+        chord_x > x_min && chord_x + chord < x_max && chord_y - 0.06 * chord > y_min && chord_y + 0.06 * chord < y_max,
+        "airfoil must lie strictly inside the channel"
+    );
+    StructuredGridError::check_cell_budget(
+        "channel grid",
+        StructuredGridError::checked_cells(&[nx, ny]),
+        StructuredGridError::BYTES_PER_CELL_2D,
+    )
+    .expect("channel grid over cell budget");
+
+    let dx = (x_max - x_min) / nx as f64;
+    let dy = (y_max - y_min) / ny as f64;
+    let background_h = dx.min(dy);
+    let clearance = (2.0 * background_h).min(0.3 * chord);
+
+    // Body polygon in physical coordinates.
+    let n_surface = ((chord / (0.35 * background_h)).ceil() as usize).clamp(60, 400);
+    let polygon: Vec<(f64, f64)> = naca0012_polygon(n_surface)
+        .into_iter()
+        .map(|(x, y)| (chord_x + chord * x, chord_y + chord * y))
+        .collect();
+    let body_centroid = (chord_x + 0.4 * chord, chord_y);
+
+    // Outward vertex normals (averaged edge normals, oriented away from
+    // the body centroid).
+    let vertex_normals: Vec<(f64, f64)> = (0..polygon.len())
+        .map(|i| {
+            let prev = polygon[(i + polygon.len() - 1) % polygon.len()];
+            let next = polygon[(i + 1) % polygon.len()];
+            let (ex, ey) = (next.0 - prev.0, next.1 - prev.1);
+            let mut normal = (ey, -ex);
+            let length = (normal.0.powi(2) + normal.1.powi(2)).sqrt().max(1.0e-300);
+            normal.0 /= length;
+            normal.1 /= length;
+            let outward = (polygon[i].0 - body_centroid.0) * normal.0
+                + (polygon[i].1 - body_centroid.1) * normal.1;
+            if outward < 0.0 {
+                normal = (-normal.0, -normal.1);
+            }
+            normal
+        })
+        .collect();
+
+    let mut points: Vec<(f64, f64)> = Vec::with_capacity((nx + 1) * (ny + 1) + 512);
+    for j in 0..=ny {
+        for i in 0..=nx {
+            // Same symmetry-breaking row perturbation as the cylinder mesh.
+            let row_phase = std::f64::consts::TAU * j as f64 / ny as f64;
+            let column_window = (std::f64::consts::PI * i as f64 / nx as f64).sin();
+            let x = x_min + i as f64 * dx + 0.05 * dx * column_window * row_phase.cos();
+            let y = y_min + j as f64 * dy;
+            if !point_in_polygon((x, y), &polygon) && polygon_distance((x, y), &polygon) > clearance {
+                points.push((x, y));
+            }
+        }
+    }
+    // Body polygon plus three offset near-body layers.
+    points.extend(polygon.iter().copied());
+    for layer in 1..=3 {
+        let offset = clearance * layer as f64 / 3.0;
+        for (point, normal) in polygon.iter().zip(&vertex_normals) {
+            points.push((point.0 + offset * normal.0, point.1 + offset * normal.1));
+        }
+    }
+
+    let triangles = super::triangulate_points_2d(&points);
+    let mut mesh = Mesh::new(2);
+    for &(x, y) in &points {
+        mesh.add_node(Point::new_2d(x, y));
+    }
+    for triangle in triangles {
+        let cx = (points[triangle[0]].0 + points[triangle[1]].0 + points[triangle[2]].0) / 3.0;
+        let cy = (points[triangle[0]].1 + points[triangle[1]].1 + points[triangle[2]].1) / 3.0;
+        if !point_in_polygon((cx, cy), &polygon) {
+            mesh.add_element(ElementType::Triangle, triangle.to_vec());
+        }
+    }
+    let mut mesh = compact_mesh(&mesh);
+    mesh.detect_boundaries();
+    // Re-tag: faces on the domain box keep 1/2/3, everything else is the
+    // airfoil (marker 4).
+    let tol = 0.25 * background_h;
+    for boundary in &mut mesh.boundaries {
+        if boundary.nodes.len() < 2 {
+            continue;
+        }
+        let avg_x: f64 =
+            boundary.nodes.iter().map(|&n| mesh.nodes[n].x).sum::<f64>() / boundary.nodes.len() as f64;
+        let avg_y: f64 =
+            boundary.nodes.iter().map(|&n| mesh.nodes[n].y).sum::<f64>() / boundary.nodes.len() as f64;
+        if (avg_x - x_min).abs() < tol {
+            boundary.marker = 1;
+        } else if (avg_x - x_max).abs() < tol {
+            boundary.marker = 2;
+        } else if (avg_y - y_min).abs() < tol || (avg_y - y_max).abs() < tol {
+            boundary.marker = 3;
+        } else {
+            boundary.marker = 4;
+        }
+    }
+    mesh
+}
+
 /// Fallible [`channel_with_cylinder_triangles`] for externally supplied
 /// counts/geometry: zero counts, empty/non-finite spans, a non-positive
 /// radius and over-budget grids return [`StructuredGridError`] instead of

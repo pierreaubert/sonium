@@ -141,6 +141,46 @@ pub fn app(simulator: &str) -> Result<App, String> {
                 )],
             )
         }
+        "flow" => (
+            "Flow Lab",
+            "Steady incompressible air flow past a cylinder and Pironneau drag shape optimisation",
+            vec![
+                study(
+                    "cylinder",
+                    "Cylinder flow",
+                    "Steady incompressible Navier-Stokes air flow past a circular cylinder in a channel (Schäfer–Turek geometry); drag from boundary traction integration.",
+                    vec![
+                        number(
+                            "reynolds",
+                            "Reynolds number (diameter, mean velocity)",
+                            20.0,
+                            5.0,
+                            40.0,
+                        ),
+                        integer("nx", "Channel divisions in x", 64, 32, 96),
+                        integer("ny", "Channel divisions in y", 12, 8, 20),
+                    ],
+                ),
+                study(
+                    "drag_opt",
+                    "Drag shape optimisation",
+                    "Pironneau fixed-area drag minimisation: the cylinder profile (even Fourier cosines) is deformed to minimise steady Navier-Stokes drag, starting from the circle.",
+                    vec![
+                        number(
+                            "reynolds",
+                            "Reynolds number (diameter, mean velocity)",
+                            20.0,
+                            5.0,
+                            40.0,
+                        ),
+                        integer("n_modes", "Fourier modes", 3, 2, 4),
+                        integer("nx", "Channel divisions in x", 48, 32, 96),
+                        integer("ny", "Channel divisions in y", 10, 8, 20),
+                        integer("outer_iterations", "Optimiser outer iterations", 8, 4, 20),
+                    ],
+                ),
+            ],
+        ),
         "structural" => (
             "Structure Lab",
             "Solved displacement, equilibrium and vibration response",

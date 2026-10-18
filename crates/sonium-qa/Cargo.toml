@@ -2737,6 +2737,18 @@ test = false
 required-features = ["qa-binaries"]
 
 [[bin]]
+name = "qa-fem-compressible-cylinder-mach1"
+path = "bin/fem_compressible_cylinder_mach1.rs"
+test = false
+required-features = ["qa-binaries"]
+
+[[bin]]
+name = "qa-fem-compressible-airfoil-naca0012"
+path = "bin/fem_compressible_airfoil_naca0012.rs"
+test = false
+required-features = ["qa-binaries"]
+
+[[bin]]
 name = "qa-fem-compressible-conservation-3d"
 path = "bin/fem_compressible_conservation_3d.rs"
 test = false

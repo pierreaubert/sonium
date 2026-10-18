@@ -333,6 +333,317 @@ fn shell_strain_field(
     nodal
 }
 
+/// Bookkeeping for one contact projection pass.
+#[derive(Default)]
+struct ContactStats {
+    /// Total normal impulse applied in N s.
+    impulse: f64,
+    /// Kinetic energy removed by velocity projection in J.
+    ke_removed: f64,
+    /// Work done on the system by position projection in J
+    /// (estimated as -force . displacement with the step force;
+    /// positive when the projection injects energy).
+    work: f64,
+    /// Deepest penetration corrected in m.
+    max_penetration: f64,
+    /// Number of node projections applied.
+    projections: u64,
+}
+
+/// Closest point on triangle `abc` to `p` (Ericson's barycentric
+/// region tests, *Real-Time Collision Detection* 5.1.5).
+fn closest_point_triangle(p: [f64; 3], a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> [f64; 3] {
+    let sub = |u: [f64; 3], v: [f64; 3]| [u[0] - v[0], u[1] - v[1], u[2] - v[2]];
+    let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let ab = sub(b, a);
+    let ac = sub(c, a);
+    let ap = sub(p, a);
+    let d1 = dot(ab, ap);
+    let d2 = dot(ac, ap);
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return a;
+    }
+    let bp = sub(p, b);
+    let d3 = dot(ab, bp);
+    let d4 = dot(ac, bp);
+    if d3 >= 0.0 && d4 <= d3 {
+        return b;
+    }
+    let vc = d1 * d4 - d3 * d2;
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        let t = d1 / (d1 - d3);
+        return [a[0] + t * ab[0], a[1] + t * ab[1], a[2] + t * ab[2]];
+    }
+    let cp = sub(p, c);
+    let d5 = dot(ab, cp);
+    let d6 = dot(ac, cp);
+    if d6 >= 0.0 && d5 <= d6 {
+        return c;
+    }
+    let vb = d5 * d2 - d1 * d6;
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        let t = d2 / (d2 - d6);
+        return [a[0] + t * ac[0], a[1] + t * ac[1], a[2] + t * ac[2]];
+    }
+    let va = d3 * d6 - d5 * d4;
+    if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
+        let t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return [
+            b[0] + t * (c[0] - b[0]),
+            b[1] + t * (c[1] - b[1]),
+            b[2] + t * (c[2] - b[2]),
+        ];
+    }
+    let denom = 1.0 / (va + vb + vc);
+    let v = vb * denom;
+    let w = vc * denom;
+    [
+        a[0] + ab[0] * v + ac[0] * w,
+        a[1] + ab[1] * v + ac[1] * w,
+        a[2] + ab[2] * v + ac[2] * w,
+    ]
+}
+
+/// Barycentric weights of `p` with respect to triangle `abc`
+/// (clamped to the triangle; used to distribute contact corrections
+/// over the opposing surface nodes).
+fn barycentric_weights(p: [f64; 3], a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> [f64; 3] {
+    let sub = |u: [f64; 3], v: [f64; 3]| [u[0] - v[0], u[1] - v[1], u[2] - v[2]];
+    let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let v0 = sub(b, a);
+    let v1 = sub(c, a);
+    let v2 = sub(p, a);
+    let d00 = dot(v0, v0);
+    let d01 = dot(v0, v1);
+    let d11 = dot(v1, v1);
+    let d20 = dot(v2, v0);
+    let d21 = dot(v2, v1);
+    let denom = d00 * d11 - d01 * d01;
+    if denom.abs() <= 1.0e-300 {
+        return [1.0, 0.0, 0.0];
+    }
+    let v = (d11 * d20 - d01 * d21) / denom;
+    let w = (d00 * d21 - d01 * d20) / denom;
+    [
+        (1.0 - v - w).clamp(0.0, 1.0),
+        v.clamp(0.0, 1.0),
+        w.clamp(0.0, 1.0),
+    ]
+}
+
+/// Thickness-aware tube self-contact: shell midsurfaces may not
+/// approach closer than one thickness (the two solid faces then
+/// touch). The position correction is split between the node and
+/// the opposing surface nodes by inverse mass (barycentric
+/// weights), so the projection does not act on one side only; the
+/// approaching relative normal velocity is removed (perfectly
+/// inelastic, like the wall projection). Work done by the
+/// projection is estimated with the step force and accounted in
+/// `stats.work`: one-sided projection measurably injected energy
+/// at 30 x 18 (plastic diagnostic 3.1x the platen work), which the
+/// split plus this account keep visible and bounded.
+/// Topologically near quads (two-ring neighbourhood) are excluded:
+/// their midsurface distance is a membrane measure, not contact.
+/// Broadphase is a uniform grid over triangle centroids.
+#[allow(clippy::too_many_arguments)]
+fn crush_self_contact(
+    points: &mut [[f64; 3]],
+    velocity: &mut [[f64; 6]],
+    force: &[[f64; 6]],
+    masses: &[[f64; 6]],
+    quads: &[[usize; 4]],
+    excluded: &[Vec<u32>],
+    fixed: &[bool],
+    tube_nodes: usize,
+    thickness: f64,
+    stats: &mut ContactStats,
+) {
+    use std::collections::HashMap;
+    const CELL: f64 = 0.008;
+    let cell_of = |p: [f64; 3]| {
+        (
+            (p[0] / CELL).floor() as i32,
+            (p[1] / CELL).floor() as i32,
+            (p[2] / CELL).floor() as i32,
+        )
+    };
+    // Triangle list: quad split (a, b, c) and (a, c, d), matching
+    // the render/colouring split.
+    let mut grid: HashMap<(i32, i32, i32), Vec<u32>> = HashMap::new();
+    for (qi, quad) in quads.iter().enumerate() {
+        for tri in 0..2 {
+            let idx = [
+                quad[0],
+                if tri == 0 { quad[1] } else { quad[2] },
+                if tri == 0 { quad[2] } else { quad[3] },
+            ];
+            let centroid = [
+                (points[idx[0]][0] + points[idx[1]][0] + points[idx[2]][0]) / 3.0,
+                (points[idx[0]][1] + points[idx[1]][1] + points[idx[2]][1]) / 3.0,
+                (points[idx[0]][2] + points[idx[1]][2] + points[idx[2]][2]) / 3.0,
+            ];
+            grid.entry(cell_of(centroid))
+                .or_default()
+                .push(2 * qi as u32 + tri as u32);
+        }
+    }
+    for node in 0..tube_nodes {
+        if fixed[node] {
+            continue;
+        }
+        let p = points[node];
+        let (cx, cy, cz) = cell_of(p);
+        let mut best: Option<(f64, [f64; 3], [usize; 3])> = None;
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    let Some(tris) = grid.get(&(cx + dx, cy + dy, cz + dz)) else {
+                        continue;
+                    };
+                    for &t in tris {
+                        let qi = (t / 2) as usize;
+                        if excluded[node].contains(&(qi as u32)) {
+                            continue;
+                        }
+                        let quad = quads[qi];
+                        let idx = if t % 2 == 0 {
+                            [quad[0], quad[1], quad[2]]
+                        } else {
+                            [quad[0], quad[2], quad[3]]
+                        };
+                        let closest = closest_point_triangle(
+                            p,
+                            points[idx[0]],
+                            points[idx[1]],
+                            points[idx[2]],
+                        );
+                        let d = [p[0] - closest[0], p[1] - closest[1], p[2] - closest[2]];
+                        let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                        if dist < thickness && best.is_none_or(|(b, ..)| dist < b) {
+                            best = Some((dist, closest, idx));
+                        }
+                    }
+                }
+            }
+        }
+        let Some((dist, closest, surf)) = best else {
+            continue;
+        };
+        if dist <= 1.0e-12 {
+            continue; // Degenerate: node on the surface, no direction.
+        }
+        let penetration = thickness - dist;
+        let n = [
+            (p[0] - closest[0]) / dist,
+            (p[1] - closest[1]) / dist,
+            (p[2] - closest[2]) / dist,
+        ];
+        stats.max_penetration = stats.max_penetration.max(penetration);
+        stats.projections += 1;
+        // Inverse-mass split of the correction. Fixed (driven or
+        // clamped) surface nodes carry infinite mass and do not move.
+        let weights =
+            barycentric_weights(closest, points[surf[0]], points[surf[1]], points[surf[2]]);
+        let inv_node = 1.0 / masses[node][0];
+        let mut inv_surf = [0.0; 3];
+        let mut denom = inv_node;
+        for i in 0..3 {
+            if !fixed[surf[i]] {
+                inv_surf[i] = weights[i] * weights[i] / masses[surf[i]][0];
+                denom += inv_surf[i];
+            }
+        }
+        let correction = [n[0] * penetration, n[1] * penetration, n[2] * penetration];
+        let apply =
+            |points: &mut [[f64; 3]], stats: &mut ContactStats, target: usize, delta: [f64; 3]| {
+                for c in 0..3 {
+                    points[target][c] += delta[c];
+                    stats.work -= force[target][c] * delta[c];
+                }
+            };
+        let share = inv_node / denom;
+        apply(
+            points,
+            stats,
+            node,
+            [
+                correction[0] * share,
+                correction[1] * share,
+                correction[2] * share,
+            ],
+        );
+        for i in 0..3 {
+            if inv_surf[i] > 0.0 {
+                let share_i = inv_surf[i] / denom;
+                apply(
+                    points,
+                    stats,
+                    surf[i],
+                    [
+                        -correction[0] * share_i,
+                        -correction[1] * share_i,
+                        -correction[2] * share_i,
+                    ],
+                );
+            }
+        }
+        // Remove the approaching relative normal velocity with the
+        // same inverse-mass weighting; account the exact kinetic
+        // energy change of every moved node.
+        let mut involved: Vec<usize> = vec![node];
+        for i in 0..3 {
+            if inv_surf[i] > 0.0 && !involved.contains(&surf[i]) {
+                involved.push(surf[i]);
+            }
+        }
+        let ke_before: f64 = involved
+            .iter()
+            .map(|&nd| {
+                0.5 * masses[nd][0]
+                    * (velocity[nd][0].powi(2) + velocity[nd][1].powi(2) + velocity[nd][2].powi(2))
+            })
+            .sum();
+        let v_surf = [
+            weights[0] * velocity[surf[0]][0]
+                + weights[1] * velocity[surf[1]][0]
+                + weights[2] * velocity[surf[2]][0],
+            weights[0] * velocity[surf[0]][1]
+                + weights[1] * velocity[surf[1]][1]
+                + weights[2] * velocity[surf[2]][1],
+            weights[0] * velocity[surf[0]][2]
+                + weights[1] * velocity[surf[1]][2]
+                + weights[2] * velocity[surf[2]][2],
+        ];
+        let vn_rel = (velocity[node][0] - v_surf[0]) * n[0]
+            + (velocity[node][1] - v_surf[1]) * n[1]
+            + (velocity[node][2] - v_surf[2]) * n[2];
+        if vn_rel < 0.0 {
+            let impulse = -vn_rel / denom;
+            stats.impulse += impulse;
+            for c in 0..3 {
+                velocity[node][c] += impulse * inv_node * n[c];
+            }
+            for i in 0..3 {
+                if inv_surf[i] > 0.0 {
+                    for c in 0..3 {
+                        velocity[surf[i]][c] -= impulse * weights[i] / masses[surf[i]][0] * n[c];
+                    }
+                }
+            }
+            let ke_after: f64 = involved
+                .iter()
+                .map(|&nd| {
+                    0.5 * masses[nd][0]
+                        * (velocity[nd][0].powi(2)
+                            + velocity[nd][1].powi(2)
+                            + velocity[nd][2].powi(2))
+                })
+                .sum();
+            stats.ke_removed += ke_before - ke_after;
+        }
+    }
+}
+
 /// Thin-walled tube crushed by prescribed end-shortening against a
 /// rigid wall (Q4 crash shells, J2 plasticity; driven top ring).
 fn crush(out_dir: &Path) -> Result<(), String> {
@@ -348,8 +659,42 @@ fn crush(out_dir: &Path) -> Result<(), String> {
     let radius = 0.045f64;
     let height = 0.16f64;
     let z_base = 0.002f64;
-    let n_around = 40usize;
-    let n_axial = 24usize;
+    // Resolution and formulation variants for the convergence and
+    // sensitivity studies behind `fem.website-crush-regression.v1`.
+    // Defaults are the shipped demo configuration; overrides exist so
+    // the study matrix runs the identical driver, not a copy.
+    let env_usize = |key: &str, default: usize| -> usize {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    };
+    let env_f64 = |key: &str, default: f64| -> f64 {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    };
+    let n_around = env_usize("CRUSH_N_AROUND", 40);
+    let n_axial = env_usize("CRUSH_N_AXIAL", 24);
+    let dt_scale = env_f64("CRUSH_DT_SCALE", 1.0);
+    // `gauss5`: 5-point Gauss layers (shipped). `linear3`: 3
+    // surface-sampled piecewise-linear layers, the TYPE1 rule of the
+    // verified crash-box card.
+    let linear_layers = std::env::var("CRUSH_LAYERS").is_ok_and(|v| v == "linear3");
+    // `clamp`: bottom ring fixed in all DOF (shipped). `contact`:
+    // bottom ring rests on the wall through the contact model below
+    // (normal projection plus friction), free to slide and rotate.
+    // Sensitivity result (2026-10-18): the contact variant lowers
+    // the mean force ~15% (24.2 vs 28.6 kN) but its sustained
+    // whole-ring projection contact is not energy-consistent
+    // (closure -58%: each step's position reset re-stretches the
+    // loaded ring elements), so `clamp` remains the shipped
+    // configuration and `contact` stays a study variant.
+    let bottom_contact = std::env::var("CRUSH_BOTTOM").is_ok_and(|v| v == "contact");
+    // Self-contact can be disabled to isolate its energy account
+    // (`CRUSH_SELF=0`); the shipped configuration keeps it on.
+    let self_contact = !std::env::var("CRUSH_SELF").is_ok_and(|v| v == "0");
     let section = ShellSection::new(70.0e9, 0.33, 0.0012, 2700.0);
     let node_id = |level: usize, around: usize| level * n_around + (around % n_around);
     let point = |level: usize, around: usize| {
@@ -444,13 +789,25 @@ fn crush(out_dir: &Path) -> Result<(), String> {
     let sound = (70.0e9 / density).sqrt();
     let mut layers: Vec<LayerStates<J2LayerState>> = quads
         .iter()
-        .map(|_| LayerStates::new(J2LayerState::new(), 5, thickness).map_err(|e| e.message))
+        .map(|_| {
+            if linear_layers {
+                LayerStates::new_piecewise_linear(J2LayerState::new(), 3, thickness)
+            } else {
+                LayerStates::new(J2LayerState::new(), 5, thickness)
+            }
+            .map_err(|e| e.message)
+        })
         .collect::<Result<_, _>>()?;
     let bottom_ring: Vec<usize> = (0..n_around).map(|a| node_id(0, a)).collect();
     let top_ring: Vec<usize> = (0..n_around).map(|a| node_id(n_axial, a)).collect();
     let mut fixed = vec![false; total_nodes];
-    for &node in bottom_ring.iter().chain(top_ring.iter()) {
+    for &node in top_ring.iter() {
         fixed[node] = true;
+    }
+    if !bottom_contact {
+        for &node in &bottom_ring {
+            fixed[node] = true;
+        }
     }
     for wall_node in 0..4 {
         fixed[wall_start + wall_node] = true;
@@ -475,7 +832,7 @@ fn crush(out_dir: &Path) -> Result<(), String> {
             }
         }
     }
-    let dt = 0.5 * dt_min;
+    let dt = 0.5 * dt_min * dt_scale;
     let end_time = 0.010f64;
     // Total prescribed end-shortening in m (34% of the tube height).
     let crush_distance = 0.055f64;
@@ -530,6 +887,44 @@ fn crush(out_dir: &Path) -> Result<(), String> {
             };
             write_frame(out_dir, &format!("frame_{frame_index:04}"), &mesh, &fields)
         };
+
+    // Self-contact exclusion: quads in the two-ring neighbourhood of
+    // each node (their distance is membrane strain, not contact).
+    let excluded: Vec<Vec<u32>> = {
+        let mut node_quads: Vec<Vec<u32>> = vec![Vec::new(); tube_nodes];
+        for (qi, quad) in quads.iter().enumerate() {
+            for &node in quad {
+                node_quads[node].push(qi as u32);
+            }
+        }
+        (0..tube_nodes)
+            .map(|node| {
+                let mut set: Vec<u32> = Vec::new();
+                for &qi in &node_quads[node] {
+                    for &other in &quads[qi as usize] {
+                        for &qj in &node_quads[other] {
+                            if !set.contains(&qj) {
+                                set.push(qj);
+                            }
+                        }
+                    }
+                }
+                set
+            })
+            .collect()
+    };
+
+    // Reliability bookkeeping (gate `fem.website-crush-regression.v1`):
+    // energy, momentum and contact accounts for the whole run.
+    let mut plastic_work = 0.0f64;
+    let mut hourglass_energy = 0.0f64;
+    let mut external_work = 0.0f64;
+    let mut peak_reaction = 0.0f64;
+    let mut min_z = f64::INFINITY;
+    let mut wall_stats = ContactStats::default();
+    let mut self_stats = ContactStats::default();
+    let mut force_curve: Vec<(f64, f64)> = Vec::new();
+    let mut reaction_window = (0.0f64, 0usize);
 
     let mut points = initial.clone();
     let mut velocity = vec![[0.0f64; 6]; total_nodes];
@@ -601,6 +996,8 @@ fn crush(out_dir: &Path) -> Result<(), String> {
                 &shear_hook,
             )
             .map_err(|e| e.message)?;
+            plastic_work += out.plastic_work_rate * dt;
+            hourglass_energy += out.hg_power * dt;
             for (slot, &node) in quad.iter().enumerate() {
                 let ft = from_local([
                     out.forces[6 * slot],
@@ -621,6 +1018,16 @@ fn crush(out_dir: &Path) -> Result<(), String> {
                 }
             }
         }
+        // Driven-ring reaction and platen work for this step. The
+        // assembled `force` is the element force on the ring (it
+        // pushes the ring up under compression); the platen cancels
+        // it, so the compressive reaction magnitude is its sum and
+        // the platen power is reaction x drive rate.
+        let reaction: f64 = top_ring.iter().map(|&node| force[node][2]).sum();
+        external_work += reaction * drive_rate * dt;
+        peak_reaction = peak_reaction.max(reaction.abs());
+        reaction_window.0 += reaction;
+        reaction_window.1 += 1;
         for node in 0..tube_nodes {
             if fixed[node] {
                 continue;
@@ -632,15 +1039,111 @@ fn crush(out_dir: &Path) -> Result<(), String> {
                 points[node][c] += dt * velocity[node][c];
             }
         }
+        // Rigid-wall contact: the wall face is z = 0 and the shell
+        // midsurface may not pass z = thickness / 2. The pinned
+        // bottom ring alone does not stop free nodes beside it from
+        // crossing once a fold forms at the base, which the refined
+        // 40 x 24 mesh does (the coarse mesh folded mid-tube and
+        // never reached the wall). Project penetrating nodes back
+        // and cancel their inward velocity, mirroring the wall
+        // projection of the verified crash-box driver
+        // (`bin/support/crash_box.rs`), and account the impulse and
+        // removed kinetic energy (the fixed wall does no work; its
+        // impulse work is exactly that removed kinetic energy). The
+        // `contact` bottom variant also
+        // applies Coulomb friction capped by the normal impulse.
+        let floor = thickness / 2.0;
+        for node in 0..tube_nodes {
+            if points[node][2] < floor {
+                wall_stats.max_penetration =
+                    wall_stats.max_penetration.max(floor - points[node][2]);
+                wall_stats.projections += 1;
+                points[node][2] = floor;
+                if velocity[node][2] < 0.0 {
+                    let m = masses[node][0];
+                    let normal_impulse = m * (-velocity[node][2]);
+                    wall_stats.impulse += normal_impulse;
+                    wall_stats.ke_removed += 0.5 * m * velocity[node][2].powi(2);
+                    velocity[node][2] = 0.0;
+                    if bottom_contact && bottom_ring.contains(&node) {
+                        // Friction: tangential impulse at most
+                        // mu * normal impulse (mu = 0.3).
+                        let vt = [velocity[node][0], velocity[node][1]];
+                        let speed = (vt[0] * vt[0] + vt[1] * vt[1]).sqrt();
+                        if speed > 0.0 {
+                            let dv = (0.3 * normal_impulse / m).min(speed);
+                            velocity[node][0] -= dv * vt[0] / speed;
+                            velocity[node][1] -= dv * vt[1] / speed;
+                        }
+                    }
+                }
+            }
+        }
+        // Fold self-contact every fourth step: nodal travel per
+        // step (~3 um) is far below the thickness it resolves, and
+        // every-step projection was measured to drain kinetic
+        // energy continuously on persistent fold contacts.
+        if self_contact && (step % 4 == 0 || step == total_steps) {
+            crush_self_contact(
+                &mut points,
+                &mut velocity,
+                &force,
+                &masses,
+                &quads,
+                &excluded,
+                &fixed,
+                tube_nodes,
+                thickness,
+                &mut self_stats,
+            );
+        }
+        for node in 0..tube_nodes {
+            min_z = min_z.min(points[node][2]);
+        }
         if !points.iter().flatten().all(|value| value.is_finite()) {
             return Err(format!("crush diverged at step {step}"));
         }
         if step % frame_every == 0 || step == total_steps {
+            if reaction_window.1 > 0 {
+                force_curve.push((drive, reaction_window.0 / reaction_window.1 as f64));
+                reaction_window = (0.0, 0);
+            }
             frames.push(dump(&points, frame_index, &mut max_strain)?);
             times.push(step as f64 * dt);
             frame_index += 1;
         }
     }
+    // Final kinetic energy and the derived gate metrics.
+    let mut kinetic_final = 0.0f64;
+    for node in 0..tube_nodes {
+        for d in 0..6 {
+            kinetic_final += 0.5 * masses[node][d] * velocity[node][d].powi(2);
+        }
+    }
+    let mean_crush_force = external_work / crush_distance;
+    let hourglass_fraction = hourglass_energy / plastic_work.max(1.0e-30);
+    let metrics = format!(
+        "{{\n  \"n_around\": {n_around}, \"n_axial\": {n_axial},\n  \"layers\": \"{}\", \"bottom\": \"{}\",\n  \"dt\": {dt:.6e}, \"steps\": {total_steps}, \"dt_scale\": {dt_scale},\n  \"crush_distance_m\": {crush_distance}, \"external_work_J\": {external_work:.6e},\n  \"plastic_work_J\": {plastic_work:.6e}, \"hourglass_energy_J\": {hourglass_energy:.6e},\n  \"hourglass_fraction\": {hourglass_fraction:.6e}, \"kinetic_final_J\": {kinetic_final:.6e},\n  \"mean_crush_force_N\": {mean_crush_force:.6e}, \"peak_reaction_N\": {peak_reaction:.6e},\n  \"wall_impulse_Ns\": {:.6e}, \"wall_ke_removed_J\": {:.6e}, \"wall_projections\": {},\n  \"self_impulse_Ns\": {:.6e}, \"self_ke_removed_J\": {:.6e}, \"self_work_J\": {:.6e}, \"self_projections\": {},\n  \"max_wall_penetration_m\": {:.6e}, \"max_self_penetration_m\": {:.6e},\n  \"min_z_m\": {min_z:.6e}, \"max_strain\": {max_strain:.6e},\n  \"force_curve\": [{}]\n}}\n",
+        if linear_layers { "linear3" } else { "gauss5" },
+        if bottom_contact { "contact" } else { "clamp" },
+        wall_stats.impulse,
+        wall_stats.ke_removed,
+        wall_stats.projections,
+        self_stats.impulse,
+        self_stats.ke_removed,
+        self_stats.work,
+        self_stats.projections,
+        wall_stats.max_penetration,
+        self_stats.max_penetration,
+        force_curve
+            .iter()
+            .map(|(d, f)| format!("[{d:.6e}, {f:.6e}]"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    std::fs::write(out_dir.join("crush_metrics.json"), &metrics)
+        .map_err(|e| format!("write crush metrics: {e}"))?;
+    println!("CRUSH_METRICS: {}", metrics.replace('\n', " "));
     println!(
         "crush: {total_steps} steps, dt={dt:.3e}, max strain {max_strain:.3}, final time {:.4}",
         total_steps as f64 * dt
@@ -2510,13 +3013,20 @@ struct SloshStats {
 /// element-local density/viscosity interpolated from the phase field
 /// (solver `element_density` + transported per-element viscosity),
 /// segregated with an implicit Cahn-Hilliard phase-field step
-/// advected by the fresh velocity.
+/// advected by the fresh velocity. Time stepping is adaptive:
+/// a CFL controller sizes each step from the fresh peak speed, and
+/// the BDF2 step uses the true variable-step coefficients.
 ///
 /// Documented approximations: properties are lagged one step behind
 /// the phase field; capillary force on the momentum is neglected,
 /// which the Bond number (~5e5 for this tank) justifies; surface
 /// tension enters only through the phase-field interface profile;
-/// stabilisation keeps reference (water) properties.
+/// stabilisation keeps reference (water) properties; the light
+/// phase carries a bulk Rayleigh drag (25 1/s, weighted by the air
+/// fraction) that keeps the air quasi-steady -- with true air
+/// inertia the unstabilised coupling otherwise grows a spurious
+/// air-layer gyre that destroys the phase field over a few hundred
+/// steps (see the drag site below).
 fn sloshing_core(
     drive_amplitude: f64,
     nx: usize,
@@ -2530,6 +3040,7 @@ fn sloshing_core(
         PhaseFieldFluid, PhaseMassForm, assemble_linearized_cahn_hilliard, planar_interface_phase,
     };
     use sonium_fem::physics::fluid::stokes::navier_stokes::solve_bdf_step_cached_with_force;
+    use sonium_fem::physics::fluid::stokes::time_stepping::AdaptiveStepController;
     use sonium_solvers::SparseLuFactorization;
 
     // Tank and fill (metres): quasi-2D section of the 0.1 m wide box.
@@ -2657,13 +3168,28 @@ fn sloshing_core(
         use_direct_solver: false,
         linear_solver_max_iterations: 3000,
         linear_solver_tolerance: 1e-8,
-        linear_solver_cpu_preconditioner: LinearSolverCpuPreconditionerKind::Ilu,
+        // Schur-complement preconditioning: plain ILU stagnates on
+        // the variable-density saddle system (the BDF mass block
+        // jumps by the 830:1 air/water contrast across the
+        // interface), which is also why the solver's element-density
+        // unit tests use this preconditioner.
+        linear_solver_cpu_preconditioner: LinearSolverCpuPreconditionerKind::IlutSchur,
         ..Default::default()
     };
-    // dt = 0.0125 s (~232 steps per drive period); the halved step
-    // keeps the variable-density Picard iteration tame.
-    let dt = 0.0125f64;
-    let bdf = BdfConfig::bdf2(dt, steps);
+    // Nominal dt = 0.0125 s (~232 steps per drive period); an
+    // adaptive CFL controller (target 0.5 on the grid spacing, dt in
+    // [dt/20, 2 dt], growth at most 1.25x per step) shrinks the step
+    // as the slosh speeds up, so fast motion stays resolved in time
+    // without paying the small step at rest. The run advances to the
+    // same total time `steps * dt_nominal` as the fixed-step version;
+    // `steps` now only sets that horizon, and `max_steps` bounds the
+    // adaptive step count (reached only if dt sits at its floor).
+    let dt_nominal = 0.0125f64;
+    let mut stepper =
+        AdaptiveStepController::new(dt_nominal, 0.5, dt_nominal / 20.0, dt_nominal * 2.0, 1.25);
+    let t_end = dt_nominal * steps as f64;
+    let max_steps = steps * 24 + 16;
+    let mut bdf = BdfConfig::bdf2(dt_nominal, steps);
     let mut workspace = BdfWorkspace::new(&mesh, &v_space, &p_space);
     let gauge = mesh
         .nodes
@@ -2776,8 +3302,19 @@ fn sloshing_core(
         }
         fill_depth
     };
-    for step in 0..steps {
-        let t_next = dt * (step + 1) as f64;
+    let mut previous_dt: Option<f64> = None;
+    let mut step = 0usize;
+    while state.time < t_end - 1.0e-12 {
+        if step >= max_steps {
+            return Err(format!(
+                "sloshing exceeded {max_steps} adaptive steps before t = {t_end:.3} s"
+            ));
+        }
+        // Final partial step lands exactly on the time horizon.
+        let dt = stepper.current_dt().min(t_end - state.time);
+        bdf.dt = dt;
+        bdf.previous_dt = previous_dt;
+        let t_next = state.time + dt;
         // Momentum step with phase-weighted gravity at t_next: the
         // horizontal component is the tank-frame pseudo-acceleration
         // for displacement amplitude * sin(omega t).
@@ -2811,9 +3348,13 @@ fn sloshing_core(
             }
             current
         };
-        // Element-local viscosity from the lagged phase field,
-        // through the transported per-element channel.
+        // Element-local viscosity and density from the lagged phase
+        // field, through the transported per-element channels. Both
+        // sample the same mollified fraction at the element centroid,
+        // and gravity below uses the same density law, so inertia,
+        // convection, and body force see one density field.
         let mut eddy_elements = vec![0.0f64; mesh.num_elements()];
+        let mut density_elements = vec![0.0f64; mesh.num_elements()];
         for (index, element) in mesh.elements.iter().enumerate() {
             let (mut cx_e, mut cy_e) = (0.0, 0.0);
             for &node in &element.nodes {
@@ -2837,26 +3378,43 @@ fn sloshing_core(
             let band = 4.0 * fraction * (1.0 - fraction);
             let mu_total = mu_e + band * rho_water * dx * 0.02;
             eddy_elements[index] = ((mu_total - 1.8e-5) / rho_water).max(0.0);
+            density_elements[index] = rho_air + (rho_water - rho_air) * fraction;
         }
-        // NOTE: element_density is intentionally not enabled here.
-        // Full air/water inertia contrast excites a contact-line
-        // parasitic jet that kills the momentum iteration within
-        // ~50 steps (reproduced at both resolutions); the solver
-        // support is implemented and unit-tested, but the demo keeps
-        // reference-density inertia until a consistent-mass-flux
-        // coupling lands. Density still enters through gravity.
-        config.element_density = None;
+        config.element_density = Some(density_elements);
         config.transported_eddy_viscosity_per_element = Some(eddy_elements);
         let gx = drive_amplitude * drive_omega * drive_omega * (drive_omega * t_next).sin();
-        // Gravity samples the mollified phase density (floored at
-        // 1% of water), so the body force has no sharp jump at the
-        // interface either.
-        let force_grid = grid_momentum;
+        // Gravity samples the same mollified phase density as the
+        // element inertia above (no separate floor), so the body
+        // force has no sharp jump at the interface either and the
+        // hydrostatic balance sees one density field.
+        let force_grid = grid_momentum.clone();
         let force = move |coords: [f64; 3]| -> Vec<f64> {
             let fraction =
                 ((interp(&force_grid, coords[0], coords[1]) + 1.0) / 2.0).clamp(0.0, 1.0);
-            let rho = (rho_air + (rho_water - rho_air) * fraction).max(0.01 * rho_water);
+            let rho = rho_air + (rho_water - rho_air) * fraction;
             vec![rho * gx, -rho * gravity, 0.0]
+        };
+        // Bulk Rayleigh drag on the light phase: with true air
+        // inertia the unstabilised P1-P1 coupling excites a spurious
+        // air-layer gyre (discrete vorticity generated at the
+        // density jump, amplified ~rho_water/rho_air over the
+        // physical air response) that advects the phase field into
+        // garbage over a few hundred steps; viscosity, density
+        // floors, and smaller steps do not reach it. The air's
+        // physical role here is only to transmit pressure to the
+        // interface, so its velocity is relaxed toward the tank
+        // frame at 25 1/s (~11x the drive frequency, well above the
+        // gyre growth rate): through the body-force Jacobian
+        // channel (which assembles -J) J = -sigma*I adds an implicit
+        // sigma*u term with sigma = rho * 25 * (1 - fraction) --
+        // zero in water, full in air, and zero at rest, so the
+        // hydrostatic balance and the water dynamics are untouched.
+        let drag_grid = grid_momentum;
+        let drag_jac = move |coords: [f64; 3]| -> [[f64; 3]; 3] {
+            let fraction = ((interp(&drag_grid, coords[0], coords[1]) + 1.0) / 2.0).clamp(0.0, 1.0);
+            let rho = rho_air + (rho_water - rho_air) * fraction;
+            let sigma = rho * 25.0 * (1.0 - fraction);
+            [[-sigma, 0.0, 0.0], [0.0, -sigma, 0.0], [0.0, 0.0, -sigma]]
         };
         if !solve_bdf_step_cached_with_force(
             &mesh,
@@ -2869,7 +3427,7 @@ fn sloshing_core(
             &bc_dofs,
             &[],
             force,
-            |_| [[0.0; 3]; 3],
+            drag_jac,
             &workspace,
         ) {
             return Err(format!("sloshing BDF solve failed at step {step}"));
@@ -2960,7 +3518,18 @@ fn sloshing_core(
         }
         phase = iterate;
 
-        if (step + 1) % 10 == 0 {
+        // Adapt the next step to the fresh peak speed (vel_node is
+        // this step's post-solve field, already used by the phase
+        // step above), and record the accepted step size so the next
+        // BDF step uses the true variable-step coefficients.
+        let peak_speed = vel_node
+            .iter()
+            .map(|v| (v[0].powi(2) + v[1].powi(2)).sqrt())
+            .fold(0.0f64, f64::max);
+        stepper.dt_for_speed(peak_speed, dx.min(dy));
+        previous_dt = Some(dt);
+
+        if (step + 1).is_multiple_of(10) {
             let vel = nodal_velocity(&state);
             let (max_node, max_speed) = vel
                 .iter()
@@ -2968,7 +3537,7 @@ fn sloshing_core(
                 .map(|(node, v)| (node, (v[0].powi(2) + v[1].powi(2)).sqrt()))
                 .fold((0usize, 0.0f64), |a, b| if b.1 > a.1 { b } else { a });
             println!(
-                "sloshing: step {}/{steps}, max speed {max_speed:.3} at ({:.3}, {:.3}), water fraction {:.4} (initial {initial_water:.4}), max |phase| {:.2}",
+                "sloshing: step {}, t {t_next:.2}/{t_end:.2} s, dt {dt:.5} s, max speed {max_speed:.3} at ({:.3}, {:.3}), water fraction {:.4} (initial {initial_water:.4}), max |phase| {:.2}",
                 step + 1,
                 mesh.nodes[max_node].x,
                 mesh.nodes[max_node].y,
@@ -2976,7 +3545,7 @@ fn sloshing_core(
                 phase.iter().map(|c| c.abs()).fold(0.0f64, f64::max),
             );
         }
-        if (step + 1) % 10 == 0 || step + 1 == steps {
+        if (step + 1).is_multiple_of(10) || state.time >= t_end - 1.0e-9 {
             let grid_now = phase_grid(&phase);
             for i in [3usize, nx - 3] {
                 stats.max_eta_deviation = stats
@@ -2995,10 +3564,11 @@ fn sloshing_core(
                 frame_index += 1;
             }
         }
+        step += 1;
     }
     stats.final_water_fraction = water_volume(&phase);
     println!(
-        "sloshing: {steps} steps at {drive_frequency:.3} Hz, amplitude {drive_amplitude:.3} m, max eta deviation {:.3} m, max speed {:.3} m/s, water {:.4} (initial {initial_water:.4})",
+        "sloshing: {step} adaptive steps to {t_end:.2} s at {drive_frequency:.3} Hz, amplitude {drive_amplitude:.3} m, max eta deviation {:.3} m, max speed {:.3} m/s, water {:.4} (initial {initial_water:.4})",
         stats.max_eta_deviation, stats.max_speed, stats.final_water_fraction,
     );
     if let Some(out) = out_dir {
@@ -3023,7 +3593,10 @@ fn sloshing_tank(out_dir: &Path) -> Result<(), String> {
 }
 
 /// Driven-amplitude sweep at the base resolution: three drive
-/// periods per amplitude, writing sweep.csv (no frames).
+/// periods per amplitude, writing sweep.csv (no frames). The
+/// 0.15/0.25/0.30 m points probe past the 0.20 m case toward
+/// breaking onset; the run aborts at the first failing amplitude,
+/// whose step log is the failure record.
 fn sloshing_sweep(out_dir: &Path) -> Result<(), String> {
     let mut csv = String::from(
         "amplitude_m,drive_hz,max_eta_deviation_m,max_speed_m_s,final_water_fraction\n",
@@ -3031,7 +3604,7 @@ fn sloshing_sweep(out_dir: &Path) -> Result<(), String> {
     // Same drive frequency as the movie (first-mode resonance).
     let wave_k = std::f64::consts::PI / 2.0;
     let drive_hz = (9.81 * wave_k * (wave_k * 0.20f64).tanh()).sqrt() / std::f64::consts::TAU;
-    for amplitude in [0.025f64, 0.05, 0.10, 0.20] {
+    for amplitude in [0.025f64, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30] {
         let stats = sloshing_core(amplitude, 100, 25, 696, None)?;
         csv.push_str(&format!(
             "{amplitude:?},{drive_hz:.6},{:?},{:?},{:?}\n",
@@ -3264,6 +3837,318 @@ fn cylinder_wake(out_dir: &Path) -> Result<(), String> {
     )
 }
 
+/// Compressible flow past a cylinder at freestream Mach 1: explicit P1-DG
+/// compressible Navier--Stokes (inviscid limit, slip wall) on a body-fitted
+/// mesh. Colour field is the local Mach number, averaged from DG cell
+/// averages onto mesh nodes for the render pipeline. Mirrors the gated QA
+/// case `qa-fem-compressible-cylinder-mach1` at demo resolution.
+fn cylinder_mach1(out_dir: &Path) -> Result<(), String> {
+    use sonium_fem::mesh::generators::channel_with_cylinder_triangles;
+    use sonium_fem::physics::fluid::compressible_flow::{
+        CompressibleBoundaryCondition, CompressibleDgConfig, CompressibleDgSolver,
+        CompressibleDgState, ConservativeState, IdealGas, ViscosityModel,
+    };
+    use std::collections::HashMap;
+
+    // Nondimensional freestream: rho = 1, c = 1, U = Mach = 1, p = 1/gamma.
+    let gas = IdealGas {
+        gamma: 1.4,
+        gas_constant: 1.0,
+    };
+    let free = ConservativeState::from_primitive(1.0, [1.0, 0.0, 0.0], 1.0 / gas.gamma, gas);
+    let mesh = channel_with_cylinder_triangles(-5.0, 12.0, -4.0, 4.0, 68, 32, 0.0, 0.0, 0.5);
+    let simple = simple_mesh_from_fem(&mesh)?;
+    let mut boundaries: HashMap<i32, CompressibleBoundaryCondition> = HashMap::new();
+    boundaries.insert(1, CompressibleBoundaryCondition::FarField(free));
+    boundaries.insert(2, CompressibleBoundaryCondition::FarField(free));
+    boundaries.insert(3, CompressibleBoundaryCondition::FarField(free));
+    boundaries.insert(4, CompressibleBoundaryCondition::SlipWall);
+    let config = CompressibleDgConfig {
+        gas,
+        viscosity: ViscosityModel::Constant(1.0e-10),
+        boundaries,
+        degree: sonium_fem::basis::PolynomialDegree::P2,
+        flux: sonium_fem::physics::fluid::compressible_flow::CompressibleFluxKind::Hllc,
+        troubled_cell_relaxation: 0.5,
+        troubled_cell_threshold: 0.03,
+        persson_threshold: -3.0,
+        ..CompressibleDgConfig::default()
+    };
+    let solver = CompressibleDgSolver::new(&mesh, config)
+        .map_err(|error| format!("cylinder-mach1 solver: {error:?}"))?;
+    let mut state = CompressibleDgState::from_function_degree(
+        &mesh,
+        sonium_fem::basis::PolynomialDegree::P2,
+        |_| free,
+    )
+        .map_err(|error| format!("cylinder-mach1 initial state: {error:?}"))?;
+
+    let dump = |state: &CompressibleDgState, step: usize| -> Result<String, String> {
+        let mut mach = vec![0.0f64; mesh.num_nodes()];
+        let mut density = vec![0.0f64; mesh.num_nodes()];
+        let mut schlieren = vec![0.0f64; mesh.num_nodes()];
+        let mut counts = vec![0.0f64; mesh.num_nodes()];
+        for element in 0..mesh.num_elements() {
+            let average = state.cell_average(element);
+            let velocity = average.velocity();
+            let speed = (velocity[0].powi(2) + velocity[1].powi(2)).sqrt();
+            let local_mach =
+                speed / gas.speed_of_sound(average.pressure(gas), average.density);
+            for &node in mesh.elements[element].vertices() {
+                mach[node] += local_mach;
+                density[node] += average.density;
+                counts[node] += 1.0;
+            }
+        }
+        for field in [&mut mach, &mut density] {
+            for (value, count) in field.iter_mut().zip(&counts) {
+                if *count > 0.0 {
+                    *value /= *count;
+                }
+            }
+        }
+        // Numerical schlieren: |grad rho| of the nodal density field over
+        // each P1 element, averaged back to nodes. Gradients of the DG
+        // vertex values would under-read: the troubled-cell limiter
+        // flattens element slopes in shocked regions.
+        for element in 0..mesh.num_elements() {
+            let nodes = mesh.elements[element].vertices();
+            let (p0, p1, p2) = (
+                &mesh.nodes[nodes[0]],
+                &mesh.nodes[nodes[1]],
+                &mesh.nodes[nodes[2]],
+            );
+            let det = (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y);
+            if det.abs() <= 1.0e-300 {
+                continue;
+            }
+            let (d0, d1, d2) = (density[nodes[0]], density[nodes[1]], density[nodes[2]]);
+            let gx = ((p2.y - p0.y) * (d1 - d0) - (p1.y - p0.y) * (d2 - d0)) / det;
+            let gy = ((p1.x - p0.x) * (d2 - d0) - (p2.x - p0.x) * (d1 - d0)) / det;
+            let local_schlieren = (gx * gx + gy * gy).sqrt();
+            for &node in mesh.elements[element].vertices() {
+                schlieren[node] += local_schlieren;
+            }
+        }
+        for (value, count) in schlieren.iter_mut().zip(&counts) {
+            if *count > 0.0 {
+                *value /= *count;
+            }
+        }
+        let fields = FrameFields {
+            point_scalars: vec![
+                ("mach", mach),
+                ("density", density),
+                ("schlieren", schlieren),
+            ],
+            point_vectors: Vec::new(),
+            cell_scalars: Vec::new(),
+        };
+        write_frame(out_dir, &format!("frame_{step:04}"), &simple, &fields)
+    };
+
+    let t_end = 9.0f64;
+    let dump_interval = 0.3f64;
+    let mut frames = Vec::new();
+    let mut times = Vec::new();
+    let mut max_mach: f64 = 0.0;
+    frames.push(dump(&state, 0)?);
+    times.push(0.0);
+    let mut time = 0.0f64;
+    let mut next_dump = dump_interval;
+    let mut frame_index = 0usize;
+    while time < t_end {
+        let stable = solver
+            .operator
+            .stable_time_step(&state)
+            .map_err(|error| format!("cylinder-mach1 CFL at t={time:.2}: {error:?}"))?;
+        let report = solver
+            .step(&mut state, stable)
+            .map_err(|error| format!("cylinder-mach1 step at t={time:.2}: {error:?}"))?;
+        time += report.accepted_time_step;
+        if time >= next_dump || time >= t_end {
+            frame_index += 1;
+            frames.push(dump(&state, frame_index)?);
+            times.push(time);
+            next_dump += dump_interval;
+            for element in 0..mesh.num_elements() {
+                let average = state.cell_average(element);
+                let velocity = average.velocity();
+                let speed = (velocity[0].powi(2) + velocity[1].powi(2)).sqrt();
+                max_mach = max_mach.max(
+                    speed / gas.speed_of_sound(average.pressure(gas), average.density),
+                );
+            }
+        }
+    }
+    println!("cylinder-mach1: t={time:.2}, max Mach {max_mach:.3}");
+    write_manifest(
+        out_dir,
+        "cylinder-mach1",
+        "Cylinder at Mach 1 (compressible DG)",
+        &frames,
+        &times,
+        "mach",
+        (0.0, max_mach.max(1.0)),
+    )
+}
+
+/// NACA 0012 airfoil at Mach 0.80, alpha = 1.25 degrees (AGARD inviscid
+/// benchmark): explicit P2-DG compressible solver on a body-fitted mesh.
+/// Mirrors `qa-fem-compressible-airfoil-naca0012` at demo resolution.
+fn naca0012(out_dir: &Path) -> Result<(), String> {
+    use sonium_fem::mesh::generators::channel_with_airfoil_triangles;
+    use sonium_fem::physics::fluid::compressible_flow::{
+        CompressibleBoundaryCondition, CompressibleDgConfig, CompressibleDgSolver,
+        CompressibleDgState, ConservativeState, IdealGas, ViscosityModel,
+    };
+    use std::collections::HashMap;
+
+    let gas = IdealGas {
+        gamma: 1.4,
+        gas_constant: 1.0,
+    };
+    let (mach, alpha_deg) = (0.80f64, 1.25f64);
+    let alpha = alpha_deg.to_radians();
+    let free = ConservativeState::from_primitive(
+        1.0,
+        [mach * alpha.cos(), mach * alpha.sin(), 0.0],
+        1.0 / gas.gamma,
+        gas,
+    );
+    let mesh = channel_with_airfoil_triangles(-6.0, 12.0, -5.0, 5.0, 90, 50, 0.0, 0.0, 1.0);
+    let simple = simple_mesh_from_fem(&mesh)?;
+    let mut boundaries: HashMap<i32, CompressibleBoundaryCondition> = HashMap::new();
+    boundaries.insert(1, CompressibleBoundaryCondition::FarField(free));
+    boundaries.insert(2, CompressibleBoundaryCondition::FarField(free));
+    boundaries.insert(3, CompressibleBoundaryCondition::FarField(free));
+    boundaries.insert(4, CompressibleBoundaryCondition::SlipWall);
+    let config = CompressibleDgConfig {
+        gas,
+        viscosity: ViscosityModel::Constant(1.0e-10),
+        boundaries,
+        degree: sonium_fem::basis::PolynomialDegree::P2,
+        flux: sonium_fem::physics::fluid::compressible_flow::CompressibleFluxKind::Hllc,
+        troubled_cell_relaxation: 0.5,
+        troubled_cell_threshold: 0.03,
+        persson_threshold: -3.0,
+        ..CompressibleDgConfig::default()
+    };
+    let solver = CompressibleDgSolver::new(&mesh, config)
+        .map_err(|error| format!("naca0012 solver: {error:?}"))?;
+    let mut state = CompressibleDgState::from_function_degree(
+        &mesh,
+        sonium_fem::basis::PolynomialDegree::P2,
+        |_| free,
+    )
+    .map_err(|error| format!("naca0012 initial state: {error:?}"))?;
+
+    let dump = |state: &CompressibleDgState, step: usize| -> Result<String, String> {
+        let mut mach_field = vec![0.0f64; mesh.num_nodes()];
+        let mut density = vec![0.0f64; mesh.num_nodes()];
+        let mut schlieren = vec![0.0f64; mesh.num_nodes()];
+        let mut counts = vec![0.0f64; mesh.num_nodes()];
+        for element in 0..mesh.num_elements() {
+            let average = state.cell_average(element);
+            let velocity = average.velocity();
+            let speed = (velocity[0].powi(2) + velocity[1].powi(2)).sqrt();
+            let local_mach =
+                speed / gas.speed_of_sound(average.pressure(gas), average.density);
+            for &node in mesh.elements[element].vertices() {
+                mach_field[node] += local_mach;
+                density[node] += average.density;
+                counts[node] += 1.0;
+            }
+        }
+        for field in [&mut mach_field, &mut density] {
+            for (value, count) in field.iter_mut().zip(&counts) {
+                if *count > 0.0 {
+                    *value /= *count;
+                }
+            }
+        }
+        for element in 0..mesh.num_elements() {
+            let nodes = mesh.elements[element].vertices();
+            let (p0, p1, p2) = (
+                &mesh.nodes[nodes[0]],
+                &mesh.nodes[nodes[1]],
+                &mesh.nodes[nodes[2]],
+            );
+            let det = (p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y);
+            if det.abs() <= 1.0e-300 {
+                continue;
+            }
+            let (d0, d1, d2) = (density[nodes[0]], density[nodes[1]], density[nodes[2]]);
+            let gx = ((p2.y - p0.y) * (d1 - d0) - (p1.y - p0.y) * (d2 - d0)) / det;
+            let gy = ((p1.x - p0.x) * (d2 - d0) - (p2.x - p0.x) * (d1 - d0)) / det;
+            let local_schlieren = (gx * gx + gy * gy).sqrt();
+            for &node in mesh.elements[element].vertices() {
+                schlieren[node] += local_schlieren;
+            }
+        }
+        for (value, count) in schlieren.iter_mut().zip(&counts) {
+            if *count > 0.0 {
+                *value /= *count;
+            }
+        }
+        let fields = FrameFields {
+            point_scalars: vec![
+                ("mach", mach_field),
+                ("density", density),
+                ("schlieren", schlieren),
+            ],
+            point_vectors: Vec::new(),
+            cell_scalars: Vec::new(),
+        };
+        write_frame(out_dir, &format!("frame_{step:04}"), &simple, &fields)
+    };
+
+    let t_end = 8.0f64;
+    let dump_interval = 0.3f64;
+    let mut frames = Vec::new();
+    let mut times = Vec::new();
+    let mut max_mach: f64 = 0.0;
+    frames.push(dump(&state, 0)?);
+    times.push(0.0);
+    let mut time = 0.0f64;
+    let mut next_dump = dump_interval;
+    let mut frame_index = 0usize;
+    while time < t_end {
+        let stable = solver
+            .operator
+            .stable_time_step(&state)
+            .map_err(|error| format!("naca0012 CFL at t={time:.2}: {error:?}"))?;
+        let report = solver
+            .step(&mut state, stable)
+            .map_err(|error| format!("naca0012 step at t={time:.2}: {error:?}"))?;
+        time += report.accepted_time_step;
+        if time >= next_dump || time >= t_end {
+            frame_index += 1;
+            frames.push(dump(&state, frame_index)?);
+            times.push(time);
+            next_dump += dump_interval;
+            for element in 0..mesh.num_elements() {
+                let average = state.cell_average(element);
+                let velocity = average.velocity();
+                let speed = (velocity[0].powi(2) + velocity[1].powi(2)).sqrt();
+                max_mach = max_mach.max(
+                    speed / gas.speed_of_sound(average.pressure(gas), average.density),
+                );
+            }
+        }
+    }
+    println!("naca0012: t={time:.2}, max Mach {max_mach:.3}");
+    write_manifest(
+        out_dir,
+        "naca0012",
+        "NACA 0012 at Mach 0.8 (compressible DG)",
+        &frames,
+        &times,
+        "mach",
+        (0.0, max_mach.max(1.0)),
+    )
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 3 {
@@ -3288,6 +4173,8 @@ fn main() {
         "sloshing-tank" => sloshing_tank(&out_dir),
         "sloshing-sweep" => sloshing_sweep(&out_dir),
         "cylinder-wake" => cylinder_wake(&out_dir),
+        "cylinder-mach1" => cylinder_mach1(&out_dir),
+        "naca0012" => naca0012(&out_dir),
         other => Err(format!("unknown demo {other:?}")),
     };
     match result {

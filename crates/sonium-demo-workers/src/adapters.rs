@@ -13,7 +13,10 @@ pub fn validate(p: &Project) -> Result<(), String> {
             "The harmonic bracket study needs a nonzero tip force to define magnification".into(),
         );
     }
-    if p.study == "cylinder" && p.number("inner_radius")? >= p.number("outer_radius")? {
+    if p.simulator == "structural"
+        && p.study == "cylinder"
+        && p.number("inner_radius")? >= p.number("outer_radius")?
+    {
         return Err("Inner radius must be smaller than outer radius".into());
     }
     Ok(())
@@ -72,6 +75,7 @@ fn metric(label: &str, value: f64, unit: &str) -> Metric {
 
 pub fn run(p: &Project) -> Result<ResultData, Box<dyn Error>> {
     match p.simulator.as_str() {
+        "flow" => flow(p),
         "structural" => structural(p),
         "propeller" => propeller(p),
         "room" => room(p),
@@ -79,6 +83,196 @@ pub fn run(p: &Project) -> Result<ResultData, Box<dyn Error>> {
         "driver" => driver(p),
         _ => Err("Unknown simulator".into()),
     }
+}
+
+fn flow_surface(
+    name: &str,
+    flow: &sonium_fem::physics::fluid::stokes::drag_shape_opt::FlowEvaluation,
+    description: &str,
+) -> Surface {
+    let mesh = Mesh {
+        positions: flow
+            .mesh
+            .nodes
+            .iter()
+            .map(|node| [node.x, node.y, 0.0])
+            .collect(),
+        triangles: flow
+            .mesh
+            .elements
+            .iter()
+            .map(|element| {
+                let vertices = element.vertices();
+                [vertices[0] as u32, vertices[1] as u32, vertices[2] as u32]
+            })
+            .collect(),
+    };
+    let speed: Vec<f64> = (0..flow.mesh.num_nodes())
+        .map(|i| (flow.velocity[2 * i].powi(2) + flow.velocity[2 * i + 1].powi(2)).sqrt())
+        .collect();
+    Surface {
+        name: name.into(),
+        mesh,
+        association: "node".into(),
+        field_name: "Speed".into(),
+        field_unit: "m/s".into(),
+        scalar_frames: vec![speed],
+        displacement: Vec::new(),
+        view: "plane".into(),
+        description: description.into(),
+    }
+}
+
+fn centreline_curve(
+    flow: &sonium_fem::physics::fluid::stokes::drag_shape_opt::FlowEvaluation,
+    center_y: f64,
+    channel_length: f64,
+) -> Curve {
+    use sonium_fem::mesh::interpolation::interpolate_scalar_at_point;
+    let ux: Vec<f64> = (0..flow.mesh.num_nodes())
+        .map(|i| flow.velocity[2 * i])
+        .collect();
+    // 64 interpolated samples give a smooth wake profile; points inside
+    // the obstacle have no fluid value and report the no-slip value 0.
+    let samples = 64;
+    let mut x = Vec::with_capacity(samples);
+    let mut values = Vec::with_capacity(samples);
+    for i in 0..samples {
+        let xi = 0.02 + (channel_length - 0.04) * i as f64 / (samples - 1) as f64;
+        x.push(xi);
+        values
+            .push(interpolate_scalar_at_point(&flow.mesh, &ux, [xi, center_y, 0.0]).unwrap_or(0.0));
+    }
+    curve(
+        "Wake centreline velocity",
+        "x (m)",
+        "Axial velocity (m/s)",
+        x,
+        vec![("u(x, centreline)", values)],
+        false,
+    )
+}
+
+fn flow(p: &Project) -> Result<ResultData, Box<dyn Error>> {
+    use sonium_fem::physics::fluid::stokes::drag_shape_opt::{
+        DragShapeOptConfig, evaluate_flow, optimise_drag,
+    };
+    let base = DragShapeOptConfig {
+        reynolds: p.number("reynolds")?,
+        nx: p.number("nx")? as usize,
+        ny: p.number("ny")? as usize,
+        ..Default::default()
+    };
+    if p.study == "cylinder" {
+        let flow = evaluate_flow(&base, &[base.radius, 0.0, 0.0])?;
+        let mut data = result(
+            p,
+            "Native CPU/f64 steady incompressible Navier-Stokes (P1-P1, residual stabilisation, Picard/Oseen) for air (rho 1.225 kg/m3, mu 1.81e-5 Pa s) in the Schäfer–Turek channel; mean inlet velocity follows from the Reynolds number. Drag/lift are boundary-traction integrals on the obstacle. Steady claim only; no vortex-shedding, turbulence or measured validation claim.",
+        );
+        data.surfaces
+            .push(flow_surface("Cylinder flow — speed", &flow, "Solved nodal speed on the retained FEM channel mesh; the circular obstacle is the mesh hole."));
+        data.curves
+            .push(centreline_curve(&flow, base.center_y, base.channel_length));
+        data.metrics = vec![
+            metric("Drag coefficient", flow.drag_coefficient, "dimensionless"),
+            metric("Lift coefficient", flow.lift_coefficient, "dimensionless"),
+            metric("Drag per unit depth", flow.drag, "N/m"),
+            metric("Mean inlet velocity", base.mean_velocity(), "m/s"),
+            metric(
+                "Picard iterations",
+                flow.picard_iterations as f64,
+                "iterations",
+            ),
+        ];
+        data.diagnostics = serde_json::json!({
+            "reynolds": base.reynolds,
+            "density_kg_m3": base.density,
+            "viscosity_pa_s": base.viscosity,
+            "mean_velocity_m_s": base.mean_velocity(),
+            "picard_residual": flow.picard_residual,
+            "converged": flow.converged,
+        });
+        return Ok(data);
+    }
+
+    let config = DragShapeOptConfig {
+        n_modes: p.number("n_modes")? as usize,
+        max_outer_iterations: p.number("outer_iterations")? as usize,
+        max_inner_iterations: 15,
+        ..base
+    };
+    let opt = optimise_drag(&config)?;
+    let reduction = (1.0 - opt.optimal_flow.drag / opt.initial_flow.drag) * 100.0;
+    let mut data = result(
+        p,
+        "Native CPU/f64 Pironneau fixed-area drag minimisation on the steady incompressible Navier-Stokes channel flow (P1-P1, residual stabilisation, Picard/Oseen) for air (rho 1.225 kg/m3, mu 1.81e-5 Pa s). Profile: even Fourier cosines with analytic area constraint; drag gradient by forward finite differences; projected-gradient optimiser with exact area projection. Mesh morphs smoothly from the cylinder mesh within three radii. Steady, laminar claim only; optimum is mesh- and mode-count-dependent, not a measured product claim.",
+    );
+    data.surfaces.push(flow_surface(
+        "Initial cylinder — speed",
+        &opt.initial_flow,
+        "Solved nodal speed for the initial circular cylinder.",
+    ));
+    data.surfaces.push(flow_surface(
+        "Optimised body — speed",
+        &opt.optimal_flow,
+        "Solved nodal speed for the fixed-area drag-optimal body.",
+    ));
+    data.curves.push(curve(
+        "Drag convergence",
+        "Objective evaluation",
+        "Drag coefficient",
+        opt.history
+            .iter()
+            .map(|entry| entry.evaluation as f64)
+            .collect(),
+        vec![(
+            "C_D",
+            opt.history
+                .iter()
+                .map(|entry| entry.drag_coefficient)
+                .collect(),
+        )],
+        false,
+    ));
+    data.curves.push(centreline_curve(
+        &opt.optimal_flow,
+        config.center_y,
+        config.channel_length,
+    ));
+    data.metrics = vec![
+        metric(
+            "Initial C_D",
+            opt.initial_flow.drag_coefficient,
+            "dimensionless",
+        ),
+        metric(
+            "Optimised C_D",
+            opt.optimal_flow.drag_coefficient,
+            "dimensionless",
+        ),
+        metric("Drag reduction", reduction, "%"),
+        metric(
+            "Aspect ratio (length/width)",
+            opt.aspect_ratio,
+            "dimensionless",
+        ),
+        metric(
+            "Area error",
+            (opt.optimal_area - opt.area_target).abs() / opt.area_target * 100.0,
+            "%",
+        ),
+        metric("Objective evaluations", opt.fun_evals as f64, "evaluations"),
+    ];
+    data.diagnostics = serde_json::json!({
+        "initial_params": opt.initial_params,
+        "optimal_params": opt.optimal_params,
+        "area_target_m2": opt.area_target,
+        "optimal_area_m2": opt.optimal_area,
+        "optimiser_converged": opt.converged,
+        "optimiser_iterations": opt.optimiser_iterations,
+        "history": opt.history.iter().map(|entry| serde_json::json!({"evaluation": entry.evaluation, "drag_coefficient": entry.drag_coefficient, "params": entry.params})).collect::<Vec<_>>(),
+    });
+    Ok(data)
 }
 
 fn structural(p: &Project) -> Result<ResultData, Box<dyn Error>> {

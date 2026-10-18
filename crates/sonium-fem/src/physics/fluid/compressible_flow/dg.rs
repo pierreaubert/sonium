@@ -492,7 +492,7 @@ impl<'a> CompressibleDgOperator<'a> {
             ) {
                 return Err(CompressibleDgError::NonPhysicalCellAverage);
             }
-            let h = element_diameter(self.mesh, element);
+            let h = element_min_altitude(self.mesh, element);
             let velocity = average.velocity();
             let speed = norm3(velocity)
                 + self
@@ -1511,6 +1511,48 @@ fn minimum_thermodynamics(state: &CompressibleDgState, gas: IdealGas) -> (f64, f
             )
         },
     )
+}
+
+/// Minimum altitude of a simplex element: `2A / longest edge` in 2D,
+/// `3V / largest face area` in 3D. The stable time step must use this,
+/// not the maximum-edge diameter: on sliver triangles (which graded
+/// body-fitted meshes produce near curved surfaces) the diameter
+/// overestimates the stability length by an order of magnitude, and the
+/// stepper then pays a fixed number of positivity retries on every step
+/// until halving reaches the altitude-based step.
+fn element_min_altitude(mesh: &Mesh, element: usize) -> f64 {
+    let volume = cell_volume(mesh, element);
+    let cell = &mesh.elements[element];
+    let vertices = cell.vertices();
+    if mesh.dimension == 2 {
+        let mut longest = 0.0f64;
+        for i in 0..vertices.len() {
+            let a = point3(mesh, vertices[i]);
+            let b = point3(mesh, vertices[(i + 1) % vertices.len()]);
+            longest = longest.max(norm3(sub3(b, a)));
+        }
+        if longest > 0.0 {
+            2.0 * volume / longest
+        } else {
+            element_diameter(mesh, element)
+        }
+    } else {
+        // Largest triangular face area of the tetrahedron.
+        let mut largest = 0.0f64;
+        for face in 0..vertices.len() {
+            let others: Vec<usize> = (0..vertices.len()).filter(|&i| i != face).collect();
+            let a = point3(mesh, vertices[others[0]]);
+            let b = point3(mesh, vertices[others[1]]);
+            let c = point3(mesh, vertices[others[2]]);
+            let cross = cross3(sub3(b, a), sub3(c, a));
+            largest = largest.max(0.5 * norm3(cross));
+        }
+        if largest > 0.0 {
+            3.0 * volume / largest
+        } else {
+            element_diameter(mesh, element)
+        }
+    }
 }
 
 fn cell_volume(mesh: &Mesh, element: usize) -> f64 {

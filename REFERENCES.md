@@ -409,6 +409,11 @@ underlying algorithm.
   "On optimum profiles in Stokes flow." *J. Fluid Mech.* 59(1). (Ogival drag-optimal
   profile.)
   `crates/sonium-fem/examples/stokes_shape_opt.rs`
+- **Pironneau, O.** (1974).
+  "On optimum design in fluid mechanics." *J. Fluid Mech.* 64(1).
+  (Fixed-area drag minimisation applied here to steady Navier–Stokes flow.)
+  `crates/sonium-fem/src/physics/fluid/stokes/drag_shape_opt.rs`,
+  `crates/sonium-fem/examples/ns_shape_opt.rs`
 
 ## Comparison codes (calibration references — not redistributed)
 

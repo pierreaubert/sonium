@@ -61,7 +61,7 @@ mod tests {
     use super::*;
     #[test]
     fn every_catalog_study_produces_valid_native_outputs() {
-        for simulator in ["room", "pcfan", "propeller", "driver", "structural"] {
+        for simulator in ["room", "pcfan", "propeller", "driver", "structural", "flow"] {
             let app = catalog::app(simulator).unwrap();
             for i in 0..app.studies.len() {
                 let project = app.project(i);
