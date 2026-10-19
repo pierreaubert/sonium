@@ -209,9 +209,8 @@ impl<'a> CompressibleDgGpuSolver<'a> {
             match self.trial(dt) {
                 Ok(()) => {
                     let gpu = self.require_gpu()?;
-                    let (minimum_density, minimum_pressure) = gpu.min_thermo(DgSlot::StageA)?;
+                    let (minimum_density, minimum_pressure, after) = gpu.report(DgSlot::StageA)?;
                     gpu.copy_slot(DgSlot::Current, DgSlot::StageA)?;
-                    let after = gpu.totals(DgSlot::Current)?;
                     return Ok(CompressibleStepReport {
                         accepted_time_step: dt,
                         retries: retry,
@@ -232,27 +231,26 @@ impl<'a> CompressibleDgGpuSolver<'a> {
     }
 
     /// One SSPRK3 trial from the `Original` slot into `StageA`.
+    ///
+    /// All stages launch without intermediate synchronization; the
+    /// kernel flag bitmask is read once at the end (bit 0: nonphysical
+    /// quadrature trace, bit 1: nonphysical cell average). A failed
+    /// trial is discarded wholesale, exactly like the CPU trial, so
+    /// deferring the error read changes no accepted state.
     fn trial(&mut self, dt: f64) -> Result<(), CompressibleDgGpuError> {
         let gpu = self.require_gpu()?;
+        gpu.clear_flags()?;
         // Stage 1: u1 = u0 + dt * L(u0), then limit.
-        if gpu.spatial_operator(DgSlot::Original)? {
-            return Err(CompressibleDgError::NonPhysicalQuadratureState.into());
-        }
+        gpu.spatial_operator_deferred(DgSlot::Original)?;
         gpu.add_scaled(DgSlot::StageA, DgSlot::Original, dt)?;
-        self.limit_slot(DgSlot::StageA)?;
+        gpu.limit_deferred(DgSlot::StageA)?;
         // Stage 2: u2 = 3/4 u0 + 1/4 (u1 + dt * L(u1)), then limit.
-        let gpu = self.require_gpu()?;
-        if gpu.spatial_operator(DgSlot::StageA)? {
-            return Err(CompressibleDgError::NonPhysicalQuadratureState.into());
-        }
+        gpu.spatial_operator_deferred(DgSlot::StageA)?;
         gpu.add_scaled(DgSlot::StageB, DgSlot::StageA, dt)?;
         gpu.convex(DgSlot::StageA, 0.75, DgSlot::Original, 0.25, DgSlot::StageB)?;
-        self.limit_slot(DgSlot::StageA)?;
+        gpu.limit_deferred(DgSlot::StageA)?;
         // Stage 3: u3 = 1/3 u0 + 2/3 (u2 + dt * L(u2)), then limit.
-        let gpu = self.require_gpu()?;
-        if gpu.spatial_operator(DgSlot::StageA)? {
-            return Err(CompressibleDgError::NonPhysicalQuadratureState.into());
-        }
+        gpu.spatial_operator_deferred(DgSlot::StageA)?;
         gpu.add_scaled(DgSlot::StageB, DgSlot::StageA, dt)?;
         gpu.convex(
             DgSlot::StageA,
@@ -261,13 +259,12 @@ impl<'a> CompressibleDgGpuSolver<'a> {
             2.0 / 3.0,
             DgSlot::StageB,
         )?;
-        self.limit_slot(DgSlot::StageA)?;
-        Ok(())
-    }
-
-    fn limit_slot(&mut self, slot: DgSlot) -> Result<(), CompressibleDgGpuError> {
-        let gpu = self.require_gpu()?;
-        if gpu.limit(slot)? {
+        gpu.limit_deferred(DgSlot::StageA)?;
+        let flags = gpu.flags()?;
+        if flags & 1 != 0 {
+            return Err(CompressibleDgError::NonPhysicalQuadratureState.into());
+        }
+        if flags & 2 != 0 {
             return Err(CompressibleDgError::NonPhysicalCellAverage.into());
         }
         Ok(())

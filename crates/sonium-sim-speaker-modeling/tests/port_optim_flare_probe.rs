@@ -931,8 +931,8 @@ fn spot_check_3d_inlet_pinch() {
     let voltage = 1.0_f64;
     let straight_run = run_3d_spot_check(&case, &straight, voltage, frequency_hz, &fidelity)
         .unwrap_or_else(|e| panic!("straight 3D run failed: {e:?}"));
-    let equal_v_run =
-        run_3d_spot_check(&case, &winner, voltage, frequency_hz, &fidelity).unwrap_or_else(|e| panic!("winner 3D run failed: {e:?}"));
+    let equal_v_run = run_3d_spot_check(&case, &winner, voltage, frequency_hz, &fidelity)
+        .unwrap_or_else(|e| panic!("winner 3D run failed: {e:?}"));
     let v_matched = voltage * straight_run.port_flow_rms_m3s / equal_v_run.port_flow_rms_m3s;
     let matched_run = run_3d_spot_check(&case, &winner, v_matched, frequency_hz, &fidelity)
         .unwrap_or_else(|e| panic!("winner matched 3D run failed: {e:?}"));

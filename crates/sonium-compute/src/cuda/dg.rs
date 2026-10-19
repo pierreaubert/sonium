@@ -27,9 +27,10 @@ use crate::pool::MemoryPool;
 /// NVRTC source for the `sonium_dg_*` kernels.
 const DG_KERNELS_CU: &str = include_str!("kernels/dg_kernels.cu");
 
-/// Threads per element block; local node counts never exceed 10, so the
-/// extra lanes only idle (serial per-element work runs on lane 0).
-const ELEMENT_THREADS: u32 = 32;
+/// Threads per block: four warps, one element per warp; local node
+/// counts never exceed 10, so the extra lanes only idle (serial
+/// per-element work runs on the warp's lane 0).
+const BLOCK_THREADS: u32 = 128;
 
 /// Scalar kernel parameters, layout-matched with `DgParams` in
 /// `kernels/dg_kernels.cu`.
@@ -283,15 +284,10 @@ pub struct CudaDgOperator {
     num_elements: usize,
     total_slots: usize,
     nq_vol: i32,
-    facet_records: usize,
-    bnd_records: usize,
     reset_scalars: CudaFunction,
     averages_kernel: CudaFunction,
     dt_kernel: CudaFunction,
-    volume_kernel: CudaFunction,
-    facet_kernel: CudaFunction,
-    boundary_kernel: CudaFunction,
-    invmass_kernel: CudaFunction,
+    rhs_kernel: CudaFunction,
     limiter_kernel: CudaFunction,
     zhangshu_kernel: CudaFunction,
     add_scaled_kernel: CudaFunction,
@@ -331,7 +327,6 @@ pub struct CudaDgOperator {
     persson_gram: F64Buffer,
     states: [F64Buffer; 4],
     rate: F64Buffer,
-    integrated: F64Buffer,
     averages: F64Buffer,
     dt_out: F64Buffer,
     flag: I32Buffer,
@@ -440,8 +435,8 @@ fn slot_triple(
 
 fn element_launch_config(num_elements: usize, operation: &'static str) -> BackendResult<LaunchConfig> {
     Ok(LaunchConfig {
-        grid_dim: (check_u32(operation, "elements", num_elements)?, 1, 1),
-        block_dim: (ELEMENT_THREADS, 1, 1),
+        grid_dim: (check_u32(operation, "element warps", num_elements.div_ceil(4))?, 1, 1),
+        block_dim: (BLOCK_THREADS, 1, 1),
         shared_mem_bytes: 0,
     })
 }
@@ -568,10 +563,7 @@ impl CudaDgOperator {
         let reset_scalars = function("sonium_dg_reset_scalars")?;
         let averages_kernel = function("sonium_dg_averages")?;
         let dt_kernel = function("sonium_dg_dt")?;
-        let volume_kernel = function("sonium_dg_volume")?;
-        let facet_kernel = function("sonium_dg_facet")?;
-        let boundary_kernel = function("sonium_dg_boundary")?;
-        let invmass_kernel = function("sonium_dg_invmass")?;
+        let rhs_kernel = function("sonium_dg_rhs")?;
         let limiter_kernel = function("sonium_dg_limiter")?;
         let zhangshu_kernel = function("sonium_dg_zhangshu")?;
         let add_scaled_kernel = function("sonium_dg_add_scaled")?;
@@ -634,7 +626,6 @@ impl CudaDgOperator {
             persson_vinv: stage_f64(&problem.persson_vinv)?,
             persson_gram: stage_f64(&problem.persson_gram)?,
             rate: pool.try_alloc::<f64>(state_len)?,
-            integrated: pool.try_alloc::<f64>(state_len)?,
             averages: pool.try_alloc::<f64>(num_elements * 5)?,
             dt_out: pool.try_alloc::<f64>(1)?,
             flag: pool.try_alloc::<i32>(1)?,
@@ -646,15 +637,10 @@ impl CudaDgOperator {
             num_elements,
             total_slots,
             nq_vol: i32::try_from(nq).map_err(|_| invalid(OPERATION, "nq_vol exceeds i32"))?,
-            facet_records,
-            bnd_records,
             reset_scalars,
             averages_kernel,
             dt_kernel,
-            volume_kernel,
-            facet_kernel,
-            boundary_kernel,
-            invmass_kernel,
+            rhs_kernel,
             limiter_kernel,
             zhangshu_kernel,
             add_scaled_kernel,
@@ -725,10 +711,35 @@ impl CudaDgOperator {
         self.pool.backend().try_copy_d2h(self.rate.raw(), out)
     }
 
-    fn read_flag(&self) -> BackendResult<bool> {
+    fn read_flags(&self) -> BackendResult<i32> {
         let mut flag = [0i32; 1];
         self.pool.backend().try_copy_d2h(self.flag.raw(), &mut flag)?;
-        Ok(flag[0] != 0)
+        Ok(flag[0])
+    }
+
+    /// Synchronize and read the kernel flag bitmask.
+    ///
+    /// Bit 0 marks a nonphysical quadrature/facet/boundary trace; bit 1
+    /// marks a nonphysical cell average. Kernels only ever set bits
+    /// (`atomicOr`), so deferred launches can accumulate both across a
+    /// whole SSPRK3 trial before a single read.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BackendError::OperationFailed`] when the sync or the
+    /// scalar copy-back fails.
+    pub fn flags(&self) -> BackendResult<i32> {
+        self.pool.backend().synchronize()?;
+        self.read_flags()
+    }
+
+    /// Reset the flag bitmask and reduction scalars.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BackendError::OperationFailed`] when the launch fails.
+    pub fn clear_flags(&mut self) -> BackendResult<()> {
+        self.launch_reset()
     }
 
     fn launch_reset(&mut self) -> BackendResult<()> {
@@ -767,6 +778,8 @@ impl CudaDgOperator {
         let avg_w = launch_slice(OPERATION, "avg_weights", self.avg_weights.raw())?;
         let averages = launch_slice_mut(OPERATION, "averages", self.averages.raw_mut())?;
         let params = self.params;
+        let num_elements = i32::try_from(self.num_elements)
+            .map_err(|_| invalid(OPERATION, "element count exceeds i32"))?;
         let config = element_launch_config(self.num_elements, OPERATION)?;
         // SAFETY: matches `sonium_dg_averages`; the state slot holds
         // `total_slots * 5` values and `averages` holds 5 per element,
@@ -780,6 +793,7 @@ impl CudaDgOperator {
                 .arg(avg_w)
                 .arg(averages)
                 .arg(&params)
+                .arg(&num_elements)
                 .launch(config)
                 .map_err(|error| load_failed(OPERATION, error))?;
         }
@@ -804,6 +818,8 @@ impl CudaDgOperator {
         let dt_out = launch_slice_mut(OPERATION, "dt_out", self.dt_out.raw_mut())?;
         let flag = launch_slice_mut(OPERATION, "flag", self.flag.raw_mut())?;
         let params = self.params;
+        let num_elements = i32::try_from(self.num_elements)
+            .map_err(|_| invalid(OPERATION, "element count exceeds i32"))?;
         let config = element_launch_config(self.num_elements, OPERATION)?;
         // SAFETY: matches `sonium_dg_dt`; `averages` was just produced
         // by `launch_averages` on the same stream, and `dt_out`/`flag`
@@ -818,13 +834,14 @@ impl CudaDgOperator {
                 .arg(dt_out)
                 .arg(flag)
                 .arg(&params)
+                .arg(&num_elements)
                 .launch(config)
                 .map_err(|error| load_failed(OPERATION, error))?;
         }
         self.pool.backend().synchronize()?;
         let mut dt = [0.0f64; 1];
         self.pool.backend().try_copy_d2h(self.dt_out.raw(), &mut dt)?;
-        Ok((dt[0], self.read_flag()?))
+        Ok((dt[0], self.read_flags()? & 2 != 0))
     }
 
     /// Spatial operator of a state slot into the internal rate buffer.
@@ -837,133 +854,93 @@ impl CudaDgOperator {
     /// Returns [`BackendError::OperationFailed`] when a launch fails.
     pub fn spatial_operator(&mut self, slot: DgSlot) -> BackendResult<bool> {
         self.launch_reset()?;
-        let config = element_launch_config(self.num_elements, "dg_volume")?;
+        self.launch_spatial(slot)?;
+        self.pool.backend().synchronize()?;
+        Ok(self.read_flags()? & 1 != 0)
+    }
+
+    /// Launch the spatial operator without resetting flags, syncing,
+    /// or reading results (see [`Self::flags`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BackendError::OperationFailed`] when a launch fails.
+    pub fn spatial_operator_deferred(&mut self, slot: DgSlot) -> BackendResult<()> {
+        self.launch_spatial(slot)
+    }
+
+    fn launch_spatial(&mut self, slot: DgSlot) -> BackendResult<()> {
+        const OPERATION: &str = "dg_rhs";
         let params = self.params;
         let nq_vol = self.nq_vol;
-        let state = launch_slice("dg_volume", "state", self.states[slot.index()].raw())?;
-        let vol_basis = launch_slice("dg_volume", "vol_basis", self.vol_basis.raw())?;
-        let vol_grad = launch_slice("dg_volume", "vol_grad", self.vol_grad.raw())?;
-        let vol_wdet = launch_slice("dg_volume", "vol_wdet", self.vol_wdet.raw())?;
-        let cent_grad = launch_slice("dg_volume", "cent_grad", self.cent_grad.raw())?;
-        let integrated = launch_slice_mut("dg_volume", "integrated", self.integrated.raw_mut())?;
-        let flag = launch_slice_mut("dg_volume", "flag", self.flag.raw_mut())?;
-        // SAFETY: matches `sonium_dg_volume`; table lengths were
-        // validated at load, and the volume kernel writes `integrated`
-        // (first stage) before the facet/boundary kernels accumulate.
+        let num_elements = i32::try_from(self.num_elements)
+            .map_err(|_| invalid(OPERATION, "element count exceeds i32"))?;
+        let config = element_launch_config(self.num_elements, OPERATION)?;
+        let state = launch_slice(OPERATION, "state", self.states[slot.index()].raw())?;
+        let vol_basis = launch_slice(OPERATION, "vol_basis", self.vol_basis.raw())?;
+        let vol_grad = launch_slice(OPERATION, "vol_grad", self.vol_grad.raw())?;
+        let vol_wdet = launch_slice(OPERATION, "vol_wdet", self.vol_wdet.raw())?;
+        let cent_grad = launch_slice(OPERATION, "cent_grad", self.cent_grad.raw())?;
+        let f_offsets = launch_slice(OPERATION, "facet_offsets", self.facet_elem_offsets.raw())?;
+        let f_neighbor = launch_slice(OPERATION, "facet_neighbor", self.facet_neighbor.raw())?;
+        let f_is_plus = launch_slice(OPERATION, "facet_is_plus", self.facet_is_plus.raw())?;
+        let f_normal = launch_slice(OPERATION, "facet_normal", self.facet_normal.raw())?;
+        let f_h = launch_slice(OPERATION, "facet_h", self.facet_h.raw())?;
+        let f_quad = launch_slice(OPERATION, "facet_quad", self.facet_quad_offsets.raw())?;
+        let f_bown = launch_slice(OPERATION, "facet_basis_own", self.facet_basis_own.raw())?;
+        let f_bother = launch_slice(OPERATION, "facet_basis_other", self.facet_basis_other.raw())?;
+        let f_weights = launch_slice(OPERATION, "facet_weights", self.facet_weights.raw())?;
+        let b_offsets = launch_slice(OPERATION, "bnd_offsets", self.bnd_elem_offsets.raw())?;
+        let b_kind = launch_slice(OPERATION, "bnd_kind", self.bnd_kind.raw())?;
+        let b_params = launch_slice(OPERATION, "bnd_params", self.bnd_params.raw())?;
+        let b_normal = launch_slice(OPERATION, "bnd_normal", self.bnd_normal.raw())?;
+        let b_h = launch_slice(OPERATION, "bnd_h", self.bnd_h.raw())?;
+        let b_quad = launch_slice(OPERATION, "bnd_quad", self.bnd_quad_offsets.raw())?;
+        let b_basis = launch_slice(OPERATION, "bnd_basis", self.bnd_basis.raw())?;
+        let b_weights = launch_slice(OPERATION, "bnd_weights", self.bnd_weights.raw())?;
+        let mass_inv = launch_slice(OPERATION, "mass_inv", self.mass_inv.raw())?;
+        let rate = launch_slice_mut(OPERATION, "rate", self.rate.raw_mut())?;
+        let flag = launch_slice_mut(OPERATION, "flag", self.flag.raw_mut())?;
+        // SAFETY: matches `sonium_dg_rhs`; every table length and CSR
+        // invariant was validated at load, and the kernel writes the
+        // rate for the same slot it reads.
         unsafe {
             self.pool
                 .backend()
                 .stream()
-                .launch_builder(&self.volume_kernel)
+                .launch_builder(&self.rhs_kernel)
                 .arg(state)
                 .arg(vol_basis)
                 .arg(vol_grad)
                 .arg(vol_wdet)
                 .arg(cent_grad)
-                .arg(integrated)
+                .arg(f_offsets)
+                .arg(f_neighbor)
+                .arg(f_is_plus)
+                .arg(f_normal)
+                .arg(f_h)
+                .arg(f_quad)
+                .arg(f_bown)
+                .arg(f_bother)
+                .arg(f_weights)
+                .arg(b_offsets)
+                .arg(b_kind)
+                .arg(b_params)
+                .arg(b_normal)
+                .arg(b_h)
+                .arg(b_quad)
+                .arg(b_basis)
+                .arg(b_weights)
+                .arg(mass_inv)
+                .arg(rate)
                 .arg(flag)
                 .arg(&params)
                 .arg(&nq_vol)
+                .arg(&num_elements)
                 .launch(config)
-                .map_err(|error| load_failed("dg_volume", error))?;
+                .map_err(|error| load_failed(OPERATION, error))?;
         }
-        if self.facet_records > 0 {
-            let state = launch_slice("dg_facet", "state", self.states[slot.index()].raw())?;
-            let cent_grad = launch_slice("dg_facet", "cent_grad", self.cent_grad.raw())?;
-            let offsets = launch_slice("dg_facet", "offsets", self.facet_elem_offsets.raw())?;
-            let neighbor = launch_slice("dg_facet", "neighbor", self.facet_neighbor.raw())?;
-            let is_plus = launch_slice("dg_facet", "is_plus", self.facet_is_plus.raw())?;
-            let normal = launch_slice("dg_facet", "normal", self.facet_normal.raw())?;
-            let h = launch_slice("dg_facet", "h", self.facet_h.raw())?;
-            let quad = launch_slice("dg_facet", "quad", self.facet_quad_offsets.raw())?;
-            let b_own = launch_slice("dg_facet", "basis_own", self.facet_basis_own.raw())?;
-            let b_other = launch_slice("dg_facet", "basis_other", self.facet_basis_other.raw())?;
-            let weights = launch_slice("dg_facet", "weights", self.facet_weights.raw())?;
-            let integrated = launch_slice_mut("dg_facet", "integrated", self.integrated.raw_mut())?;
-            let flag = launch_slice_mut("dg_facet", "flag", self.flag.raw_mut())?;
-            let config = element_launch_config(self.num_elements, "dg_facet")?;
-            // SAFETY: matches `sonium_dg_facet`; the CSR and tables
-            // were validated at load.
-            unsafe {
-                self.pool
-                    .backend()
-                    .stream()
-                    .launch_builder(&self.facet_kernel)
-                    .arg(state)
-                    .arg(cent_grad)
-                    .arg(offsets)
-                    .arg(neighbor)
-                    .arg(is_plus)
-                    .arg(normal)
-                    .arg(h)
-                    .arg(quad)
-                    .arg(b_own)
-                    .arg(b_other)
-                    .arg(weights)
-                    .arg(integrated)
-                    .arg(flag)
-                    .arg(&params)
-                    .launch(config)
-                    .map_err(|error| load_failed("dg_facet", error))?;
-            }
-        }
-        if self.bnd_records > 0 {
-            let state = launch_slice("dg_boundary", "state", self.states[slot.index()].raw())?;
-            let cent_grad = launch_slice("dg_boundary", "cent_grad", self.cent_grad.raw())?;
-            let offsets = launch_slice("dg_boundary", "offsets", self.bnd_elem_offsets.raw())?;
-            let kind = launch_slice("dg_boundary", "kind", self.bnd_kind.raw())?;
-            let bparams = launch_slice("dg_boundary", "params", self.bnd_params.raw())?;
-            let normal = launch_slice("dg_boundary", "normal", self.bnd_normal.raw())?;
-            let h = launch_slice("dg_boundary", "h", self.bnd_h.raw())?;
-            let quad = launch_slice("dg_boundary", "quad", self.bnd_quad_offsets.raw())?;
-            let basis = launch_slice("dg_boundary", "basis", self.bnd_basis.raw())?;
-            let weights = launch_slice("dg_boundary", "weights", self.bnd_weights.raw())?;
-            let integrated = launch_slice_mut("dg_boundary", "integrated", self.integrated.raw_mut())?;
-            let flag = launch_slice_mut("dg_boundary", "flag", self.flag.raw_mut())?;
-            let config = element_launch_config(self.num_elements, "dg_boundary")?;
-            // SAFETY: matches `sonium_dg_boundary`; validated at load.
-            unsafe {
-                self.pool
-                    .backend()
-                    .stream()
-                    .launch_builder(&self.boundary_kernel)
-                    .arg(state)
-                    .arg(cent_grad)
-                    .arg(offsets)
-                    .arg(kind)
-                    .arg(bparams)
-                    .arg(normal)
-                    .arg(h)
-                    .arg(quad)
-                    .arg(basis)
-                    .arg(weights)
-                    .arg(integrated)
-                    .arg(flag)
-                    .arg(&params)
-                    .launch(config)
-                    .map_err(|error| load_failed("dg_boundary", error))?;
-            }
-        }
-        let integrated = launch_slice("dg_invmass", "integrated", self.integrated.raw())?;
-        let mass_inv = launch_slice("dg_invmass", "mass_inv", self.mass_inv.raw())?;
-        let rate = launch_slice_mut("dg_invmass", "rate", self.rate.raw_mut())?;
-        let config = element_launch_config(self.num_elements, "dg_invmass")?;
-        // SAFETY: matches `sonium_dg_invmass`; both buffers hold one
-        // block per element as staged at load.
-        unsafe {
-            self.pool
-                .backend()
-                .stream()
-                .launch_builder(&self.invmass_kernel)
-                .arg(integrated)
-                .arg(mass_inv)
-                .arg(rate)
-                .arg(&params)
-                .launch(config)
-                .map_err(|error| load_failed("dg_invmass", error))?;
-        }
-        self.pool.backend().synchronize()?;
-        self.read_flag()
+        Ok(())
     }
 
     /// Characteristic limiter plus Zhang--Shu positivity on a slot.
@@ -975,9 +952,28 @@ impl CudaDgOperator {
     ///
     /// Returns [`BackendError::OperationFailed`] when a launch fails.
     pub fn limit(&mut self, slot: DgSlot) -> BackendResult<bool> {
+        self.launch_reset()?;
+        self.launch_limit(slot)?;
+        self.pool.backend().synchronize()?;
+        Ok(self.read_flags()? & 2 != 0)
+    }
+
+    /// Launch the limiter plus Zhang--Shu positivity without syncing
+    /// or reading the flag bitmask (see [`Self::flags`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BackendError::OperationFailed`] when a launch fails.
+    pub fn limit_deferred(&mut self, slot: DgSlot) -> BackendResult<()> {
+        self.launch_limit(slot)
+    }
+
+    fn launch_limit(&mut self, slot: DgSlot) -> BackendResult<()> {
         const OPERATION: &str = "dg_limiter";
         self.launch_averages(slot)?;
         let params = self.params;
+        let num_elements = i32::try_from(self.num_elements)
+            .map_err(|_| invalid(OPERATION, "element count exceeds i32"))?;
         let config = element_launch_config(self.num_elements, OPERATION)?;
         let state = launch_slice_mut(OPERATION, "state", self.states[slot.index()].raw_mut())?;
         let averages = launch_slice(OPERATION, "averages", self.averages.raw())?;
@@ -1004,10 +1000,10 @@ impl CudaDgOperator {
                 .arg(vinv)
                 .arg(gram)
                 .arg(&params)
+                .arg(&num_elements)
                 .launch(config)
                 .map_err(|error| load_failed(OPERATION, error))?;
         }
-        self.launch_reset()?;
         let state = launch_slice_mut("dg_zhangshu", "state", self.states[slot.index()].raw_mut())?;
         let avg_w = launch_slice("dg_zhangshu", "avg_weights", self.avg_weights.raw())?;
         let flag = launch_slice_mut("dg_zhangshu", "flag", self.flag.raw_mut())?;
@@ -1023,11 +1019,11 @@ impl CudaDgOperator {
                 .arg(avg_w)
                 .arg(flag)
                 .arg(&params)
+                .arg(&num_elements)
                 .launch(config)
                 .map_err(|error| load_failed("dg_zhangshu", error))?;
         }
-        self.pool.backend().synchronize()?;
-        self.read_flag()
+        Ok(())
     }
 
     /// `out = x + dt * rate` over all slots (the SSPRK Euler update).
@@ -1136,8 +1132,18 @@ impl CudaDgOperator {
     /// Returns [`BackendError::OperationFailed`] when a launch or the
     /// scalar copy-back fails.
     pub fn min_thermo(&mut self, slot: DgSlot) -> BackendResult<(f64, f64)> {
-        const OPERATION: &str = "dg_min_thermo";
         self.launch_reset()?;
+        self.launch_min_thermo(slot)?;
+        self.pool.backend().synchronize()?;
+        let mut out = [0.0f64; 2];
+        self.pool
+            .backend()
+            .try_copy_d2h(self.min_thermo.raw(), &mut out)?;
+        Ok((out[0], out[1]))
+    }
+
+    fn launch_min_thermo(&mut self, slot: DgSlot) -> BackendResult<()> {
+        const OPERATION: &str = "dg_min_thermo";
         let state = launch_slice(OPERATION, "state", self.states[slot.index()].raw())?;
         let min_thermo = launch_slice_mut(OPERATION, "min_thermo", self.min_thermo.raw_mut())?;
         let params = self.params;
@@ -1158,12 +1164,7 @@ impl CudaDgOperator {
                 .launch(config)
                 .map_err(|error| load_failed(OPERATION, error))?;
         }
-        self.pool.backend().synchronize()?;
-        let mut out = [0.0f64; 2];
-        self.pool
-            .backend()
-            .try_copy_d2h(self.min_thermo.raw(), &mut out)?;
-        Ok((out[0], out[1]))
+        Ok(())
     }
 
     /// Conserved totals `sum_e volume_e * average_e` of a slot.
@@ -1176,8 +1177,16 @@ impl CudaDgOperator {
     /// Returns [`BackendError::OperationFailed`] when a launch or the
     /// copy-back fails.
     pub fn totals(&mut self, slot: DgSlot) -> BackendResult<[f64; 5]> {
-        const OPERATION: &str = "dg_totals";
         self.launch_reset()?;
+        self.launch_totals(slot)?;
+        self.pool.backend().synchronize()?;
+        let mut out = [0.0f64; 5];
+        self.pool.backend().try_copy_d2h(self.totals.raw(), &mut out)?;
+        Ok(out)
+    }
+
+    fn launch_totals(&mut self, slot: DgSlot) -> BackendResult<()> {
+        const OPERATION: &str = "dg_totals";
         self.launch_averages(slot)?;
         let averages = launch_slice(OPERATION, "averages", self.averages.raw())?;
         let volumes = launch_slice(OPERATION, "volumes", self.elem_volume.raw())?;
@@ -1199,9 +1208,29 @@ impl CudaDgOperator {
                 .launch(config)
                 .map_err(|error| load_failed(OPERATION, error))?;
         }
+        Ok(())
+    }
+
+    /// Step-report scalars of a slot in one synchronization: minimum
+    /// nodal density, minimum nodal pressure, and conserved totals.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BackendError::OperationFailed`] when a launch or the
+    /// copy-back fails.
+    pub fn report(&mut self, slot: DgSlot) -> BackendResult<(f64, f64, [f64; 5])> {
+        self.launch_reset()?;
+        self.launch_min_thermo(slot)?;
+        self.launch_totals(slot)?;
         self.pool.backend().synchronize()?;
-        let mut out = [0.0f64; 5];
-        self.pool.backend().try_copy_d2h(self.totals.raw(), &mut out)?;
-        Ok(out)
+        let mut thermo = [0.0f64; 2];
+        self.pool
+            .backend()
+            .try_copy_d2h(self.min_thermo.raw(), &mut thermo)?;
+        let mut totals = [0.0f64; 5];
+        self.pool
+            .backend()
+            .try_copy_d2h(self.totals.raw(), &mut totals)?;
+        Ok((thermo[0], thermo[1], totals))
     }
 }

@@ -290,6 +290,13 @@ __device__ __forceinline__ void dg_load_cell(const double* state, int element, i
     for (int i = 0; i < n * 5; ++i) cell[i] = src[i];
 }
 
+// Cooperative (block-wide, coalesced) cell load into shared memory.
+__device__ __forceinline__ void dg_load_cell_par(const double* state, int element, int n,
+                                                 double* cell, int tid) {
+    const double* src = state + (long long)element * n * 5;
+    for (int i = tid; i < n * 5; i += 32) cell[i] = src[i];
+}
+
 __device__ __forceinline__ void dg_cell_average(const double* cell, const double* avg_w,
                                                 int n, double* average) {
     for (int eq = 0; eq < 5; ++eq) average[eq] = 0.0;
@@ -410,10 +417,17 @@ extern "C" __global__ void sonium_dg_reset_scalars(double* dt_out, int* flag,
     for (int i = 0; i < 5; ++i) totals[i] = 0.0;
 }
 
+
+// Warp-per-element mapping (v3): each warp owns one element, phases
+// synchronize with __syncwarp, and four warps share a 128-thread
+// block. `element` is uniform across the warp, so early return and
+// loop trip counts are warp-uniform.
 extern "C" __global__ void sonium_dg_averages(const double* state, const double* avg_w,
-                                              double* averages, DgParams params) {
-    int element = blockIdx.x;
-    if (threadIdx.x != 0) return;
+                                              double* averages, DgParams params,
+                                              int num_elements) {
+    int element = blockIdx.x * 4 + (threadIdx.x >> 5);
+    if (element >= num_elements) return;
+    if ((threadIdx.x & 31) != 0) return;
     double cell[DG_MAX_N * 5];
     dg_load_cell(state, element, params.n, cell);
     double average[5];
@@ -421,13 +435,16 @@ extern "C" __global__ void sonium_dg_averages(const double* state, const double*
     for (int eq = 0; eq < 5; ++eq) averages[element * 5 + eq] = average[eq];
 }
 
+
 extern "C" __global__ void sonium_dg_dt(const double* averages, const double* min_altitude,
-                                        double* dt_out, int* flag, DgParams params) {
-    int element = blockIdx.x;
-    if (threadIdx.x != 0) return;
+                                        double* dt_out, int* flag, DgParams params,
+                                        int num_elements) {
+    int element = blockIdx.x * 4 + (threadIdx.x >> 5);
+    if (element >= num_elements) return;
+    if ((threadIdx.x & 31) != 0) return;
     const double* average = averages + element * 5;
     if (!dg_is_physical(average, &params)) {
-        atomicExch(flag, 1);
+        atomicOr(flag, 2);
         return;
     }
     double h = min_altitude[element];
@@ -448,153 +465,188 @@ extern "C" __global__ void sonium_dg_dt(const double* averages, const double* mi
     dg_atomic_min_double(dt_out, local);
 }
 
-extern "C" __global__ void sonium_dg_volume(
-    const double* state, const double* vol_basis, const double* vol_grad,
-    const double* vol_wdet, const double* cent_grad, double* integrated,
-    int* flag, DgParams params, int nq_vol) {
-    int element = blockIdx.x;
-    int local = threadIdx.x;
-    __shared__ double cell[DG_MAX_N * 5];
-    __shared__ double grad_velocity[9];
-    __shared__ double grad_temperature[3];
-    if (local == 0) {
-        dg_load_cell(state, element, params.n, cell);
-        dg_primitive_gradients(cell, cent_grad + (long long)element * params.n * 3,
-                               &params, grad_velocity, grad_temperature);
-    }
-    __syncthreads();
-    if (local >= params.n) return;
-    int n = params.n;
-    double res[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-    const double* grads = vol_grad + ((long long)element * nq_vol * n) * 3;
-    for (int q = 0; q < nq_vol; ++q) {
-        double value[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-        for (int j = 0; j < n; ++j) {
-            double basis = vol_basis[q * n + j];
-            for (int eq = 0; eq < 5; ++eq) value[eq] += basis * cell[j * 5 + eq];
-        }
-        if (!dg_is_physical(value, &params)) atomicExch(flag, 1);
-        double viscous[15];
-        dg_viscous_tensor(value, grad_velocity, grad_temperature, &params, viscous);
-        double weight = vol_wdet[(long long)element * nq_vol + q];
-        for (int dir = 0; dir < params.dim; ++dir) {
-            double normal[3] = {0.0, 0.0, 0.0};
-            normal[dir] = 1.0;
-            double inviscid[5];
-            dg_euler_flux(value, &params, normal, inviscid);
-            const double* g = grads + ((long long)q * n + local) * 3;
-            for (int eq = 0; eq < 5; ++eq)
-                res[eq] += g[dir] * (inviscid[eq] - viscous[dir * 5 + eq]) * weight;
-        }
-    }
-    double* out = integrated + ((long long)element * n + local) * 5;
-    for (int eq = 0; eq < 5; ++eq) out[eq] = res[eq];
-}
 
-extern "C" __global__ void sonium_dg_facet(
-    const double* state, const double* cent_grad,
-    const int* elem_offsets, const int* neighbor, const int* is_plus,
-    const double* facet_normal, const double* facet_h, const int* quad_offsets,
-    const double* basis_own, const double* basis_other, const double* weights,
-    double* integrated, int* flag, DgParams params) {
-    int element = blockIdx.x;
-    int local = threadIdx.x;
-    __shared__ double cell[DG_MAX_N * 5];
-    __shared__ double grad_velocity[9];
-    __shared__ double grad_temperature[3];
-    if (local == 0) {
-        dg_load_cell(state, element, params.n, cell);
-        dg_primitive_gradients(cell, cent_grad + (long long)element * params.n * 3,
-                               &params, grad_velocity, grad_temperature);
-    }
-    __syncthreads();
-    if (local >= params.n) return;
+// Fused right-hand side (v3): volume + interior-facet + boundary
+// contributions accumulated per element in the CPU merge order, then
+// the inverse-mass product, in a single launch. One warp owns one
+// element; quadrature-point lanes evaluate fluxes into shared memory
+// and the local-node lanes accumulate. No integrated-residual buffer
+// round-trips through global memory.
+extern "C" __global__ void sonium_dg_rhs(
+    const double* state, const double* vol_basis, const double* vol_grad,
+    const double* vol_wdet, const double* cent_grad,
+    const int* facet_offsets, const int* facet_neighbor, const int* facet_is_plus,
+    const double* facet_normal, const double* facet_h, const int* facet_quad_offsets,
+    const double* facet_basis_own, const double* facet_basis_other,
+    const double* facet_weights,
+    const int* bnd_offsets, const int* bnd_kind, const double* bnd_params,
+    const double* bnd_normal, const double* bnd_h, const int* bnd_quad_offsets,
+    const double* bnd_basis, const double* bnd_weights,
+    const double* mass_inv, double* rate, int* flag, DgParams params,
+    int nq_vol, int num_elements) {
+    int warp = threadIdx.x >> 5;
+    int lane = threadIdx.x & 31;
+    int element = blockIdx.x * 4 + warp;
+    if (element >= num_elements) return;
+    __shared__ double cell[4][DG_MAX_N * 5];
+    __shared__ double other_cell[4][DG_MAX_N * 5];
+    __shared__ double grad_velocity[4][9];
+    __shared__ double grad_temperature[4][3];
+    __shared__ double other_gv[4][9];
+    __shared__ double other_gt[4][3];
+    __shared__ double point_flux[4][32 * 3 * 5];
+    __shared__ double facet_flux[4][7 * 5];
+    __shared__ double res_shared[4][DG_MAX_N * 5];
     int n = params.n;
+    double* my_cell = cell[warp];
+    dg_load_cell_par(state, element, n, my_cell, lane);
+    __syncwarp();
+    if (lane == 0)
+        dg_primitive_gradients(my_cell, cent_grad + (long long)element * n * 3,
+                               &params, grad_velocity[warp], grad_temperature[warp]);
+    __syncwarp();
     double res[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-    for (int r = elem_offsets[element]; r < elem_offsets[element + 1]; ++r) {
-        int other_element = neighbor[r];
-        double other_cell[DG_MAX_N * 5];
-        dg_load_cell(state, other_element, n, other_cell);
-        double other_gv[9], other_gt[3];
-        dg_primitive_gradients(other_cell, cent_grad + (long long)other_element * n * 3,
-                               &params, other_gv, other_gt);
+    // Volume terms.
+    const double* grads = vol_grad + ((long long)element * nq_vol * n) * 3;
+    for (int base = 0; base < nq_vol; base += 32) {
+        int count = nq_vol - base < 32 ? nq_vol - base : 32;
+        if (lane < count) {
+            int q = base + lane;
+            double value[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+            for (int j = 0; j < n; ++j) {
+                double basis = vol_basis[q * n + j];
+                for (int eq = 0; eq < 5; ++eq) value[eq] += basis * my_cell[j * 5 + eq];
+            }
+            if (!dg_is_physical(value, &params)) atomicOr(flag, 1);
+            double viscous[15];
+            dg_viscous_tensor(value, grad_velocity[warp], grad_temperature[warp],
+                              &params, viscous);
+            for (int dir = 0; dir < params.dim; ++dir) {
+                double normal[3] = {0.0, 0.0, 0.0};
+                normal[dir] = 1.0;
+                double inviscid[5];
+                dg_euler_flux(value, &params, normal, inviscid);
+                for (int eq = 0; eq < 5; ++eq)
+                    point_flux[warp][(lane * 3 + dir) * 5 + eq] = inviscid[eq] - viscous[dir * 5 + eq];
+            }
+        }
+        __syncwarp();
+        if (lane < n) {
+            for (int i = 0; i < count; ++i) {
+                int q = base + i;
+                double weight = vol_wdet[(long long)element * nq_vol + q];
+                const double* g = grads + ((long long)q * n + lane) * 3;
+                for (int dir = 0; dir < params.dim; ++dir) {
+                    const double* f = point_flux[warp] + (i * 3 + dir) * 5;
+                    for (int eq = 0; eq < 5; ++eq)
+                        res[eq] += g[dir] * f[eq] * weight;
+                }
+            }
+        }
+        __syncwarp();
+    }
+    // Interior-facet terms.
+    for (int r = facet_offsets[element]; r < facet_offsets[element + 1]; ++r) {
+        bool plus = facet_is_plus[r] != 0;
+        double* my_other = other_cell[warp];
+        dg_load_cell_par(state, facet_neighbor[r], n, my_other, lane);
+        __syncwarp();
+        if (lane == 0)
+            dg_primitive_gradients(my_other, cent_grad + (long long)facet_neighbor[r] * n * 3,
+                                   &params, other_gv[warp], other_gt[warp]);
+        __syncwarp();
         const double* normal = facet_normal + r * 3;
-        bool plus = is_plus[r] != 0;
-        const double* left_gv = plus ? grad_velocity : other_gv;
-        const double* left_gt = plus ? grad_temperature : other_gt;
-        const double* right_gv = plus ? other_gv : grad_velocity;
-        const double* right_gt = plus ? other_gt : grad_temperature;
+        const double* left_gv = plus ? grad_velocity[warp] : other_gv[warp];
+        const double* left_gt = plus ? grad_temperature[warp] : other_gt[warp];
+        const double* right_gv = plus ? other_gv[warp] : grad_velocity[warp];
+        const double* right_gt = plus ? other_gt[warp] : grad_temperature[warp];
         double sign = plus ? -1.0 : 1.0;
-        for (int q = quad_offsets[r]; q < quad_offsets[r + 1]; ++q) {
+        int q0 = facet_quad_offsets[r], q1 = facet_quad_offsets[r + 1];
+        if (lane < q1 - q0) {
+            int q = q0 + lane;
             double left[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
             double right[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
             for (int j = 0; j < n; ++j) {
-                double b_own = basis_own[q * n + j];
-                double b_other = basis_other[q * n + j];
-                const double* own_state = plus ? left : right;
-                const double* other_state = plus ? right : left;
+                double b_own = facet_basis_own[q * n + j];
+                double b_other = facet_basis_other[q * n + j];
+                double* own_state = plus ? left : right;
+                double* other_state = plus ? right : left;
                 for (int eq = 0; eq < 5; ++eq) {
-                    ((double*)own_state)[eq] += b_own * cell[j * 5 + eq];
-                    ((double*)other_state)[eq] += b_other * other_cell[j * 5 + eq];
+                    own_state[eq] += b_own * my_cell[j * 5 + eq];
+                    other_state[eq] += b_other * my_other[j * 5 + eq];
                 }
             }
-            double flux[5];
             if (!dg_numerical_flux(left, right, left_gv, left_gt, right_gv, right_gt,
-                                   normal, facet_h[r], &params, flux))
-                atomicExch(flag, 1);
-            double basis = basis_own[q * n + local];
-            double w = weights[q];
-            for (int eq = 0; eq < 5; ++eq)
-                res[eq] += sign * basis * flux[eq] * w;
+                                   normal, facet_h[r], &params, facet_flux[warp] + lane * 5))
+                atomicOr(flag, 1);
         }
+        __syncwarp();
+        if (lane < n) {
+            for (int q = q0; q < q1; ++q) {
+                double basis = facet_basis_own[q * n + lane];
+                double w = facet_weights[q];
+                const double* flux = facet_flux[warp] + (q - q0) * 5;
+                for (int eq = 0; eq < 5; ++eq)
+                    res[eq] += sign * basis * flux[eq] * w;
+            }
+        }
+        __syncwarp();
     }
-    double* out = integrated + ((long long)element * n + local) * 5;
-    for (int eq = 0; eq < 5; ++eq) out[eq] += res[eq];
-}
-
-extern "C" __global__ void sonium_dg_boundary(
-    const double* state, const double* cent_grad,
-    const int* elem_offsets, const int* kind, const double* bnd_params,
-    const double* bnd_normal, const double* bnd_h, const int* quad_offsets,
-    const double* basis, const double* weights,
-    double* integrated, int* flag, DgParams params) {
-    int element = blockIdx.x;
-    int local = threadIdx.x;
-    __shared__ double cell[DG_MAX_N * 5];
-    __shared__ double grad_velocity[9];
-    __shared__ double grad_temperature[3];
-    if (local == 0) {
-        dg_load_cell(state, element, params.n, cell);
-        dg_primitive_gradients(cell, cent_grad + (long long)element * params.n * 3,
-                               &params, grad_velocity, grad_temperature);
-    }
-    __syncthreads();
-    if (local >= params.n) return;
-    int n = params.n;
-    double res[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-    for (int r = elem_offsets[element]; r < elem_offsets[element + 1]; ++r) {
+    // Boundary terms.
+    for (int r = bnd_offsets[element]; r < bnd_offsets[element + 1]; ++r) {
         const double* normal = bnd_normal + r * 3;
-        for (int q = quad_offsets[r]; q < quad_offsets[r + 1]; ++q) {
+        int q0 = bnd_quad_offsets[r], q1 = bnd_quad_offsets[r + 1];
+        if (lane < q1 - q0) {
+            int q = q0 + lane;
             double interior[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
             for (int j = 0; j < n; ++j) {
-                double b = basis[q * n + j];
-                for (int eq = 0; eq < 5; ++eq) interior[eq] += b * cell[j * 5 + eq];
+                double b = bnd_basis[q * n + j];
+                for (int eq = 0; eq < 5; ++eq) interior[eq] += b * my_cell[j * 5 + eq];
             }
             double exterior[5];
-            dg_boundary_state(kind[r], bnd_params + r * 8, interior, normal, &params, exterior);
-            double flux[5];
-            if (!dg_numerical_flux(interior, exterior, grad_velocity, grad_temperature,
-                                   grad_velocity, grad_temperature, normal, bnd_h[r],
-                                   &params, flux))
-                atomicExch(flag, 1);
-            double b = basis[q * n + local];
-            double w = weights[q];
-            for (int eq = 0; eq < 5; ++eq)
-                res[eq] -= b * flux[eq] * w;
+            dg_boundary_state(bnd_kind[r], bnd_params + r * 8, interior, normal, &params,
+                              exterior);
+            if (!dg_numerical_flux(interior, exterior, grad_velocity[warp],
+                                   grad_temperature[warp], grad_velocity[warp],
+                                   grad_temperature[warp], normal, bnd_h[r], &params,
+                                   facet_flux[warp] + lane * 5))
+                atomicOr(flag, 1);
+        }
+        __syncwarp();
+        if (lane < n) {
+            for (int q = q0; q < q1; ++q) {
+                double b = bnd_basis[q * n + lane];
+                double w = bnd_weights[q];
+                const double* flux = facet_flux[warp] + (q - q0) * 5;
+                for (int eq = 0; eq < 5; ++eq)
+                    res[eq] -= b * flux[eq] * w;
+            }
+        }
+        __syncwarp();
+    }
+    // Inverse mass product.
+    if (lane < n) {
+        double* slot = res_shared[warp] + lane * 5;
+        for (int eq = 0; eq < 5; ++eq) slot[eq] = res[eq];
+    }
+    __syncwarp();
+    if (lane < n) {
+        const double* inv = mass_inv + (long long)element * n * n;
+        const double* src = res_shared[warp];
+        double* out = rate + ((long long)element * n + lane) * 5;
+        for (int eq = 0; eq < 5; ++eq) {
+            double sum = 0.0;
+            for (int j = 0; j < n; ++j) sum += inv[lane * n + j] * src[j * 5 + eq];
+            out[eq] = sum;
         }
     }
-    double* out = integrated + ((long long)element * n + local) * 5;
-    for (int eq = 0; eq < 5; ++eq) out[eq] += res[eq];
+}
+
+// Rust `f64::min` semantics: a NaN operand yields the other operand.
+__device__ __forceinline__ double dg_min_rust(double a, double b) {
+    if (isnan(a)) return b;
+    if (isnan(b)) return a;
+    return fmin(a, b);
 }
 
 __device__ __forceinline__ void dg_characteristic(const double* s, const double* normal,
@@ -650,25 +702,40 @@ __device__ __forceinline__ double dg_persson_indicator(const double* density,
     return log10(highest / total);
 }
 
+
+// Warp-per-element: lane 0 of the warp makes the troubled-cell
+// decision; the characteristic theta is a min-reduction over
+// (neighbour, nodal) pairs spread across the warp's lanes. Min is
+// order-independent, so the reduced theta is the value the serial
+// CPU loop computes.
 extern "C" __global__ void sonium_dg_limiter(
     double* state, const double* averages, const double* avg_w,
     const int* lim_offsets, const int* lim_neighbor, const double* lim_normal,
-    const double* persson_vinv, const double* persson_gram, DgParams params) {
-    int element = blockIdx.x;
-    __shared__ double theta_shared;
-    __shared__ int active;
-    if (threadIdx.x == 0) {
-        active = 0;
+    const double* persson_vinv, const double* persson_gram, DgParams params,
+    int num_elements) {
+    int warp = threadIdx.x >> 5;
+    int lane = threadIdx.x & 31;
+    int element = blockIdx.x * 4 + warp;
+    if (element >= num_elements) return;
+    __shared__ double cell[4][DG_MAX_N * 5];
+    __shared__ double theta_shared[4];
+    __shared__ int active[4];
+    __shared__ int range_begin[4];
+    __shared__ double partials[4][32];
+    double* my_cell = cell[warp];
+    dg_load_cell_par(state, element, params.n, my_cell, lane);
+    __syncwarp();
+    if (lane == 0) {
+        active[warp] = 0;
         int begin = lim_offsets[element], end = lim_offsets[element + 1];
+        range_begin[warp] = begin;
         if (begin < end) {
             int n = params.n;
-            double cell[DG_MAX_N * 5];
-            dg_load_cell(state, element, n, cell);
             const double* average = averages + element * 5;
             bool troubled;
             if (params.sensor_mode == 0) {
                 double density[DG_MAX_N];
-                for (int j = 0; j < n; ++j) density[j] = cell[j * 5];
+                for (int j = 0; j < n; ++j) density[j] = my_cell[j * 5];
                 bool smooth = dg_persson_indicator(density, persson_vinv, persson_gram, &params)
                     <= params.persson_threshold;
                 bool strong_jump = false;
@@ -688,7 +755,7 @@ extern "C" __global__ void sonium_dg_limiter(
                 double pressure_scale = fmax(fabs(pressure), 1.0e-300);
                 troubled = false;
                 for (int j = 0; j < n && !troubled; ++j) {
-                    const double* nodal = cell + j * 5;
+                    const double* nodal = my_cell + j * 5;
                     if (fabs(nodal[0] - average[0]) / density_scale > params.threshold
                         || fabs(dg_pressure(nodal, params.gamma) - pressure) / pressure_scale
                             > params.threshold)
@@ -704,67 +771,79 @@ extern "C" __global__ void sonium_dg_limiter(
             } else {
                 troubled = true;
             }
-            if (troubled) {
-                double theta = 1.0;
-                for (int r = begin; r < end; ++r) {
-                    const double* normal = lim_normal + r * 3;
-                    double center[5], neighbor_char[5];
-                    dg_characteristic(average, normal, &params, center);
-                    dg_characteristic(averages + lim_neighbor[r] * 5, normal, &params,
-                                      neighbor_char);
-                    for (int j = 0; j < n; ++j) {
-                        double nodal_char[5];
-                        dg_characteristic(cell + j * 5, normal, &params, nodal_char);
-                        for (int wave = 0; wave < 5; ++wave) {
-                            double delta_neighbor = neighbor_char[wave] - center[wave];
-                            double margin = params.relaxation
-                                * fmax(fabs(delta_neighbor), 1.0e-12);
-                            double lower = fmin(center[wave], neighbor_char[wave]) - margin;
-                            double upper = fmax(center[wave], neighbor_char[wave]) + margin;
-                            double delta = nodal_char[wave] - center[wave];
-                            if (delta > 0.0) {
-                                double candidate = (upper - center[wave]) / delta;
-                                if (candidate < theta) theta = candidate;
-                            } else if (delta < 0.0) {
-                                double candidate = (lower - center[wave]) / delta;
-                                if (candidate < theta) theta = candidate;
-                            }
-                        }
-                    }
-                }
-                theta_shared = theta;
-                active = 1;
+            if (troubled) active[warp] = 1;
+        }
+    }
+    __syncwarp();
+    if (!active[warp]) return;
+    int n = params.n;
+    int begin = range_begin[warp];
+    int neighbors = lim_offsets[element + 1] - begin;
+    const double* average = averages + element * 5;
+    double partial = 1.0;
+    int pairs = neighbors * n;
+    for (int pair = lane; pair < pairs; pair += 32) {
+        int r = begin + pair / n;
+        int j = pair % n;
+        const double* normal = lim_normal + r * 3;
+        double center[5], neighbor_char[5], nodal_char[5];
+        dg_characteristic(average, normal, &params, center);
+        dg_characteristic(averages + lim_neighbor[r] * 5, normal, &params, neighbor_char);
+        dg_characteristic(my_cell + j * 5, normal, &params, nodal_char);
+        for (int wave = 0; wave < 5; ++wave) {
+            double delta_neighbor = neighbor_char[wave] - center[wave];
+            double margin = params.relaxation * fmax(fabs(delta_neighbor), 1.0e-12);
+            double lower = fmin(center[wave], neighbor_char[wave]) - margin;
+            double upper = fmax(center[wave], neighbor_char[wave]) + margin;
+            double delta = nodal_char[wave] - center[wave];
+            if (delta > 0.0) {
+                partial = dg_min_rust(partial, (upper - center[wave]) / delta);
+            } else if (delta < 0.0) {
+                partial = dg_min_rust(partial, (lower - center[wave]) / delta);
             }
         }
     }
-    __syncthreads();
-    int local = threadIdx.x;
-    if (!active || local >= params.n) return;
-    double theta = theta_shared;
+    partials[warp][lane] = partial;
+    __syncwarp();
+    if (lane == 0) {
+        double theta = 1.0;
+        for (int i = 0; i < 32; ++i) theta = dg_min_rust(theta, partials[warp][i]);
+        theta_shared[warp] = theta;
+    }
+    __syncwarp();
+    if (lane >= n) return;
+    double theta = theta_shared[warp];
     if (theta < 0.0) theta = 0.0;
     if (theta > 1.0) theta = 1.0;
-    const double* average = averages + element * 5;
-    double* nodal = state + ((long long)element * params.n + local) * 5;
+    double* nodal = state + ((long long)element * n + lane) * 5;
     for (int eq = 0; eq < 5; ++eq)
         nodal[eq] = average[eq] + theta * (nodal[eq] - average[eq]);
 }
 
+
+// Warp-per-element: lane 0 computes the positivity theta (density
+// bound, then the sequential pressure bisection, as on CPU); the
+// warp's local-node lanes apply the scaling.
 extern "C" __global__ void sonium_dg_zhangshu(double* state, const double* avg_w,
-                                              int* flag, DgParams params) {
-    int element = blockIdx.x;
-    __shared__ double theta_shared;
-    __shared__ double average_shared[5];
-    __shared__ int active;
-    if (threadIdx.x == 0) {
-        active = 0;
+                                              int* flag, DgParams params,
+                                              int num_elements) {
+    int warp = threadIdx.x >> 5;
+    int lane = threadIdx.x & 31;
+    int element = blockIdx.x * 4 + warp;
+    if (element >= num_elements) return;
+    __shared__ double theta_shared[4];
+    __shared__ double average_shared[4][5];
+    __shared__ int active[4];
+    if (lane == 0) {
+        active[warp] = 0;
         int n = params.n;
         double cell[DG_MAX_N * 5];
         dg_load_cell(state, element, n, cell);
         double average[5];
         dg_cell_average(cell, avg_w, n, average);
-        for (int eq = 0; eq < 5; ++eq) average_shared[eq] = average[eq];
+        for (int eq = 0; eq < 5; ++eq) average_shared[warp][eq] = average[eq];
         if (!dg_is_physical(average, &params)) {
-            atomicExch(flag, 1);
+            atomicOr(flag, 2);
         } else {
             double theta = 1.0;
             for (int j = 0; j < n; ++j) {
@@ -795,19 +874,18 @@ extern "C" __global__ void sonium_dg_zhangshu(double* state, const double* avg_w
                     if (lower < theta) theta = lower;
                 }
             }
-            theta_shared = theta;
-            active = 1;
+            theta_shared[warp] = theta;
+            active[warp] = 1;
         }
     }
-    __syncthreads();
-    int local = threadIdx.x;
-    if (!active || local >= params.n) return;
-    double theta = theta_shared;
+    __syncwarp();
+    if (!active[warp] || lane >= params.n) return;
+    double theta = theta_shared[warp];
     if (theta < 0.0) theta = 0.0;
     if (theta > 1.0) theta = 1.0;
-    double* nodal = state + ((long long)element * params.n + local) * 5;
+    double* nodal = state + ((long long)element * params.n + lane) * 5;
     for (int eq = 0; eq < 5; ++eq)
-        nodal[eq] = average_shared[eq] + theta * (nodal[eq] - average_shared[eq]);
+        nodal[eq] = average_shared[warp][eq] + theta * (nodal[eq] - average_shared[warp][eq]);
 }
 
 extern "C" __global__ void sonium_dg_add_scaled(double* out, const double* x,
@@ -857,21 +935,4 @@ extern "C" __global__ void sonium_dg_totals(const double* averages,
     double volume = elem_volume[element];
     const double* average = averages + element * 5;
     for (int eq = 0; eq < 5; ++eq) atomicAdd(totals + eq, volume * average[eq]);
-}
-
-extern "C" __global__ void sonium_dg_invmass(const double* integrated,
-                                             const double* mass_inv, double* rate,
-                                             DgParams params) {
-    int element = blockIdx.x;
-    int local = threadIdx.x;
-    if (local >= params.n) return;
-    int n = params.n;
-    const double* inv = mass_inv + (long long)element * n * n;
-    const double* src = integrated + (long long)element * n * 5;
-    double* out = rate + ((long long)element * n + local) * 5;
-    for (int eq = 0; eq < 5; ++eq) {
-        double sum = 0.0;
-        for (int j = 0; j < n; ++j) sum += inv[local * n + j] * src[j * 5 + eq];
-        out[eq] = sum;
-    }
 }
