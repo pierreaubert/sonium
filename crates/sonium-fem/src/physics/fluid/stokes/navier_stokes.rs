@@ -250,12 +250,59 @@ pub struct NavierStokesConfig {
     /// Disable for inf-sup-stable Taylor-Hood pairs such as P2-P1, where the
     /// additional pressure stabilisation is unnecessary.
     pub use_residual_stabilisation: bool,
-    /// Whether to switch to Newton after Picard converges to rough tolerance.
+    /// Whether to refine the steady solve with damped Newton steps.
+    ///
+    /// When enabled, each nonlinear iteration first tries a damped Newton
+    /// correction on the exactly assembled residual and tangent (the same
+    /// linearization published as `newton_linearization`); a step that
+    /// increases the residual norm is retried with halved damping, and a
+    /// failed Newton solve falls back to the Picard update for that
+    /// iteration. At most `max_newton_iterations` Newton steps are taken.
     pub use_newton_refinement: bool,
     /// Maximum Newton iterations (if enabled).
     pub max_newton_iterations: usize,
     /// Newton convergence tolerance.
     pub newton_tolerance: f64,
+    /// Relative tolerance for an inexact Newton--Krylov step on the
+    /// direct-solver path.
+    ///
+    /// Zero (the default) solves every Newton correction exactly with
+    /// the shifted sparse factorization. A positive value instead runs
+    /// GMRES on the exact tangent, left-preconditioned by a sparse LU
+    /// factorization of the same iteration's Picard (Oseen) operator,
+    /// and stops at this relative tolerance. On developed-flow states
+    /// the exact correction is dominated by near-null modes of the
+    /// tangent that the Picard operator does not share; a loosely
+    /// converged Krylov step filters those modes out spectrally and
+    /// globalizes far better than the exact step, at comparable cost.
+    pub newton_krylov_tolerance: f64,
+    /// Whether a rejected Newton correction may escalate beyond step
+    /// halving into the mass-shifted (pseudo-transient) and Levenberg
+    /// searches, each of which costs additional factorizations and
+    /// trial assemblies per iteration.
+    ///
+    /// The default (enabled) is the production globalization. Callers
+    /// running bounded loose continuation stages, where the outer
+    /// parameter stepping provides the globalization and a rejected
+    /// correction may simply fall back to the Picard update, can
+    /// disable the escalations to bound the cost of a crawling
+    /// iteration.
+    pub newton_extended_globalization: bool,
+    /// Depth of Anderson acceleration applied to the Picard update.
+    ///
+    /// Zero disables acceleration (plain under-relaxed Picard). When
+    /// positive, the last `anderson_depth` fixed-point residuals are
+    /// mixed to form the next iterate, which keeps the same fixed point
+    /// as the damped Picard iteration but converges far faster when the
+    /// damped map contracts only linearly (eigenvalues of the Picard
+    /// derivative far into the left half-plane). Do not combine with
+    /// [`Self::use_newton_refinement`]: the Newton branch owns the
+    /// iteration when enabled, so the acceleration history would go
+    /// stale between Picard updates. Enabling acceleration also
+    /// publishes the exact Newton linearization at every iteration so
+    /// downstream residual-based admission sees the same observation
+    /// as the Newton-refined path.
+    pub anderson_depth: usize,
     /// Maximum iterations for each Picard linearized solve.
     pub linear_solver_max_iterations: usize,
     /// Relative residual tolerance for each Picard linearized solve.
@@ -404,6 +451,9 @@ impl Default for NavierStokesConfig {
             use_newton_refinement: false,
             max_newton_iterations: 10,
             newton_tolerance: 1e-10,
+            newton_krylov_tolerance: 0.0,
+            newton_extended_globalization: true,
+            anderson_depth: 0,
             linear_solver_max_iterations: 5000,
             linear_solver_tolerance: 1e-8,
             linear_solver_cpu_preconditioner: LinearSolverCpuPreconditionerKind::Ilu,
@@ -1396,6 +1446,884 @@ where
     .newton_linearization
 }
 
+/// Median absolute diagonal of the tangent: calibrates the Levenberg
+/// shift so escalation is scale-free across meshes and operating
+/// points. The median keeps stiff penalty and boundary rows from
+/// setting the scale.
+fn csr_median_diagonal(jacobian: &sonium_solvers::CsrMatrix<f64>) -> Option<f64> {
+    let mut diagonals = Vec::new();
+    for row in 0..jacobian.num_rows {
+        if let Some(index) = (jacobian.row_ptrs[row]..jacobian.row_ptrs[row + 1])
+            .find(|&index| jacobian.col_indices[index] == row)
+        {
+            let value = jacobian.values[index].abs();
+            if value > 0.0 {
+                diagonals.push(value);
+            }
+        }
+    }
+    if diagonals.is_empty() {
+        return None;
+    }
+    diagonals.sort_by(|a, b| a.total_cmp(b));
+    Some(diagonals[diagonals.len() / 2])
+}
+
+/// Absolute Levenberg shift for the current trust-region state:
+/// `lm_mu` times the tangent's median diagonal (cached in `dscale`).
+fn lm_shift(
+    dscale: &mut Option<f64>,
+    jacobian: &sonium_solvers::CsrMatrix<f64>,
+    lm_mu: f64,
+) -> f64 {
+    if lm_mu <= 0.0 {
+        return 0.0;
+    }
+    if dscale.is_none() {
+        *dscale = csr_median_diagonal(jacobian);
+    }
+    dscale.map_or(0.0, |scale| lm_mu * scale)
+}
+
+/// Solve one Newton correction directly, applying a Levenberg diagonal
+/// shift (`J + shift * I`) when one is active. The shift filters the
+/// near-null modes that pollute the exact Newton correction on
+/// developed-flow states. Returns `None` on factorization/solve
+/// failure or a non-finite correction.
+/// Minimum row count for the exact multifrontal direct path.
+///
+/// Measured on the 11,876-DOF PC-fan saddle matrix: exact multifrontal
+/// factorization takes about 0.70 s versus about 2.73 s for the
+/// COLAMD supernodal numeric phase, while at 1,716 DOFs the supernodal
+/// path is already comparable or faster. Raising this threshold delays
+/// the large-system speedup; lowering it can slow small solves.
+const EXACT_MULTIFRONTAL_MIN_ROWS: usize = 4096;
+
+/// One steady direct factorization, backed by the solver that fits the
+/// system size.
+enum SteadyDirectFactorization {
+    // Boxed: the supernodal factorization is several hundred bytes
+    // and would otherwise set the size of every variant.
+    Supernodal(Box<sonium_solvers::direct::SparseLuFactorization<f64>>),
+    Multifrontal(sonium_solvers::direct::MultifrontalBlrFactorization<f64>),
+}
+
+impl SteadyDirectFactorization {
+    fn solve(&self, rhs: &[f64]) -> Option<Vec<f64>> {
+        match self {
+            Self::Supernodal(factorization) => factorization.solve(rhs).ok(),
+            Self::Multifrontal(factorization) => factorization.try_solve(rhs).ok(),
+        }
+    }
+}
+
+/// Symbolic analyses cached across the fixed-pattern factorizations
+/// of one steady solve, one per direct backend.
+#[derive(Default)]
+struct SteadyDirectSymbolics {
+    lu: Option<sonium_solvers::direct::SparseLuSymbolic>,
+    multifrontal: Option<sonium_solvers::direct::MultifrontalSymbolic>,
+}
+
+/// Factorize a steady direct system, reusing the cached symbolic
+/// analyses (see [`analyze_lu_symbolic`]). Large systems use exact
+/// multifrontal LU (`epsilon = 0`, so no low-rank compression is
+/// applied) with its assembly tree analyzed once per pattern —
+/// measured on the 11,876-DOF fan saddle matrix, the reusable tree
+/// cuts each numeric factorization from about 0.72 s to about
+/// 0.24 s. A multifrontal failure falls back to the supernodal path.
+fn factorize_steady_direct(
+    matrix: &sonium_solvers::CsrMatrix<f64>,
+    symbolic: &mut SteadyDirectSymbolics,
+    pivot_threshold: f64,
+) -> Option<SteadyDirectFactorization> {
+    if matrix.num_rows >= EXACT_MULTIFRONTAL_MIN_ROWS {
+        let config = sonium_solvers::direct::BlrConfig {
+            epsilon: 0.0,
+            ..sonium_solvers::direct::BlrConfig::default()
+        };
+        // One re-analysis is allowed when the pattern changes under
+        // the cache (for example a shifted matrix whose pattern
+        // differs from the unshifted tangent's); the worst case then
+        // costs what an uncached factorization always costs.
+        for attempt in 0..2 {
+            if symbolic.multifrontal.is_none() {
+                symbolic.multifrontal =
+                    sonium_solvers::direct::MultifrontalSymbolic::analyze(matrix, &config).ok();
+            }
+            let Some(analysis) = symbolic.multifrontal.as_ref() else {
+                break;
+            };
+            match sonium_solvers::direct::MultifrontalBlrFactorization::factorize_with_symbolic(
+                matrix, analysis, &config,
+            ) {
+                Ok(factorization) => {
+                    return Some(SteadyDirectFactorization::Multifrontal(factorization));
+                }
+                Err(sonium_solvers::direct::BlrError::PatternMismatch) if attempt == 0 => {
+                    symbolic.multifrontal = None;
+                }
+                Err(_) => break,
+            }
+        }
+    }
+    if symbolic.lu.is_none() {
+        symbolic.lu = analyze_lu_symbolic(matrix);
+    }
+    let factorization = match symbolic.lu.as_ref() {
+        Some(analysis) => {
+            sonium_solvers::direct::SparseLuFactorization::factorize_supernodal_with_symbolic(
+                matrix, analysis, pivot_threshold,
+            )
+            .or_else(|_| sonium_solvers::direct::SparseLuFactorization::factorize_supernodal(matrix))
+        }
+        None => sonium_solvers::direct::SparseLuFactorization::factorize_supernodal(matrix),
+    };
+    factorization
+        .ok()
+        .map(|factorization| SteadyDirectFactorization::Supernodal(Box::new(factorization)))
+}
+
+fn solve_levenberg_newton_step(
+    jacobian: &sonium_solvers::CsrMatrix<f64>,
+    shift: f64,
+    rhs: &[f64],
+    symbolic: &mut SteadyDirectSymbolics,
+) -> Option<Vec<f64>> {
+    let shifted;
+    let matrix = if shift > 0.0 {
+        let mut values = jacobian.values.clone();
+        for row in 0..jacobian.num_rows {
+            if let Some(index) = (jacobian.row_ptrs[row]..jacobian.row_ptrs[row + 1])
+                .find(|&index| jacobian.col_indices[index] == row)
+            {
+                values[index] += shift;
+            }
+        }
+        shifted = sonium_solvers::CsrMatrix::try_from_raw_parts(
+            jacobian.num_rows,
+            jacobian.num_cols,
+            jacobian.row_ptrs.clone(),
+            jacobian.col_indices.clone(),
+            values,
+        )
+        .ok()?;
+        &shifted
+    } else {
+        jacobian
+    };
+    // The tangent's sparsity pattern is fixed for a solve (same mesh,
+    // spaces, and boundary rows), so the symbolic analysis is cached
+    // and only the numeric phase repeats; a pattern mismatch (e.g. a
+    // coupling that assembled to an exact zero) falls back to the
+    // full factorization inside the helper.
+    factorize_steady_direct(matrix, symbolic, 0.1)
+        .and_then(|factorization| factorization.solve(rhs))
+        .filter(|step| step.iter().all(|value| value.is_finite()))
+}
+
+/// Solve one globalization-shifted Newton correction: the
+/// pseudo-transient (mass) shift while it is active, otherwise the
+/// Levenberg-shifted tangent solve at the current shift level.
+#[allow(clippy::too_many_arguments)]
+fn solve_shifted_newton_step(
+    jacobian: &sonium_solvers::CsrMatrix<f64>,
+    rhs: &[f64],
+    lm_mu: f64,
+    lm_dscale: &mut Option<f64>,
+    ptc_beta: f64,
+    ptc_mass: &Option<sonium_solvers::CsrMatrix<f64>>,
+    ptc_positions: &Option<Vec<i32>>,
+    is_bc: &[bool],
+    symbolic: &mut SteadyDirectSymbolics,
+) -> Option<Vec<f64>> {
+    if ptc_beta > 0.0
+        && let (Some(mass), Some(positions)) = (ptc_mass, ptc_positions)
+        && let Some(step) = solve_ptc_newton_step(
+            jacobian,
+            mass,
+            positions,
+            ptc_beta,
+            rhs,
+            is_bc,
+            symbolic,
+        )
+    {
+        return Some(step);
+    }
+    solve_levenberg_newton_step(
+        jacobian,
+        lm_shift(lm_dscale, jacobian, lm_mu),
+        rhs,
+        symbolic,
+    )
+}
+
+/// Inexact Newton step: GMRES on the exact tangent, left-preconditioned
+/// by a sparse LU factorization of the current Picard (Oseen) operator.
+///
+/// Loose convergence is the point, not a shortcut: the preconditioned
+/// Krylov iteration resolves the Picard operator's benign spectrum
+/// first and only later admits the tangent's near-null modes, so the
+/// truncated step omits the correction components that make the exact
+/// Newton step unusable on developed-flow states. Whether the step is
+/// kept is still decided by the caller's nonlinear acceptance test, so
+/// any finite GMRES iterate is a usable proposal; `None` is reserved
+/// for factorization failure.
+fn krylov_newton_step(
+    jacobian: &sonium_solvers::CsrMatrix<f64>,
+    picard: &sonium_solvers::CsrMatrix<f64>,
+    rhs: &[f64],
+    tolerance: f64,
+) -> Option<Vec<f64>> {
+    struct PicardLuPreconditioner(sonium_solvers::direct::SparseLuFactorization<f64>);
+
+    impl sonium_solvers::Preconditioner<f64> for PicardLuPreconditioner {
+        fn apply(&self, r: &[f64]) -> Vec<f64> {
+            self.0.solve(r).unwrap_or_else(|_| r.to_vec())
+        }
+    }
+
+    let factorization =
+        sonium_solvers::direct::SparseLuFactorization::factorize_supernodal(picard).ok()?;
+    let preconditioner = PicardLuPreconditioner(factorization);
+    let operator = sonium_solvers::ValidatedCsr::new(jacobian);
+    // Fifty iterations bound the subspace: the loose tolerance is the
+    // intended terminator, and a step that needs a larger subspace is
+    // already admitting the near-null modes this path exists to skip.
+    let solve_config = sonium_solvers::GmresConfig {
+        max_iterations: 50,
+        tolerance,
+        min_restart: Some(30),
+        max_restart: Some(240),
+        ..Default::default()
+    };
+    let result = sonium_solvers::gmres_preconditioned_with_guess(
+        &operator,
+        &preconditioner,
+        rhs,
+        None,
+        &solve_config,
+    );
+    if std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1") {
+        eprintln!(
+            "NS_PROFILE newton-krylov iters={} residual={:.3e} converged={}",
+            result.iterations, result.residual, result.converged
+        );
+    }
+    result
+        .x
+        .iter()
+        .all(|value| value.is_finite())
+        .then_some(result.x)
+}
+
+/// Index of every mass-matrix entry within the tangent's CSR values
+/// (`-1` where the tangent dropped the coupling). The tangent pattern
+/// is fixed for a solve, so the map is built once and reused.
+fn ptc_mass_positions(
+    jacobian: &sonium_solvers::CsrMatrix<f64>,
+    mass: &sonium_solvers::CsrMatrix<f64>,
+) -> Vec<i32> {
+    let mut positions = vec![-1i32; mass.values.len()];
+    for row in 0..mass.num_rows.min(jacobian.num_rows) {
+        let row_start = jacobian.row_ptrs[row];
+        let row_entries = &jacobian.col_indices[row_start..jacobian.row_ptrs[row + 1]];
+        let row_range = mass.row_ptrs[row]..mass.row_ptrs[row + 1];
+        for (position, &col) in positions[row_range.clone()]
+            .iter_mut()
+            .zip(&mass.col_indices[row_range])
+        {
+            if let Some(offset) = row_entries.iter().position(|&entry| entry == col) {
+                *position = (row_start + offset) as i32;
+            }
+        }
+    }
+    positions
+}
+
+/// The pseudo-transient shifted tangent `J + beta * M`, where `M` is
+/// the density-scaled velocity mass matrix and `beta` is the inverse
+/// pseudo-timestep. The mass shift bounds the correction by the flow's
+/// own inertia, which keeps the iteration on the solution branch
+/// through the flat near-null valley where the raw Newton correction
+/// overshoots at every step length and a diagonal Levenberg shift only
+/// crawls. Dirichlet rows are left unshifted so boundary conditions
+/// stay exact.
+#[allow(clippy::too_many_arguments)]
+fn ptc_shifted_matrix(
+    jacobian: &sonium_solvers::CsrMatrix<f64>,
+    mass: &sonium_solvers::CsrMatrix<f64>,
+    positions: &[i32],
+    beta: f64,
+    is_bc: &[bool],
+) -> Option<sonium_solvers::CsrMatrix<f64>> {
+    if beta <= 0.0 || mass.num_rows != mass.num_cols || mass.num_rows > jacobian.num_rows {
+        return None;
+    }
+    let mut values = jacobian.values.clone();
+    for row in 0..mass.num_rows {
+        if is_bc.get(row).copied().unwrap_or(false) {
+            continue;
+        }
+        let row_range = mass.row_ptrs[row]..mass.row_ptrs[row + 1];
+        for (&position, &mass_value) in positions[row_range.clone()]
+            .iter()
+            .zip(&mass.values[row_range])
+        {
+            if position >= 0 {
+                values[position as usize] += beta * mass_value;
+            }
+        }
+    }
+    sonium_solvers::CsrMatrix::try_from_raw_parts(
+        jacobian.num_rows,
+        jacobian.num_cols,
+        jacobian.row_ptrs.clone(),
+        jacobian.col_indices.clone(),
+        values,
+    )
+    .ok()
+}
+
+/// Solve one pseudo-transient Newton correction,
+/// `(J + beta * M) step = rhs` (see [`ptc_shifted_matrix`]). Returns
+/// `None` on factorization/solve failure or a non-finite correction.
+#[allow(clippy::too_many_arguments)]
+fn solve_ptc_newton_step(
+    jacobian: &sonium_solvers::CsrMatrix<f64>,
+    mass: &sonium_solvers::CsrMatrix<f64>,
+    positions: &[i32],
+    beta: f64,
+    rhs: &[f64],
+    is_bc: &[bool],
+    symbolic: &mut SteadyDirectSymbolics,
+) -> Option<Vec<f64>> {
+    let shifted = ptc_shifted_matrix(jacobian, mass, positions, beta, is_bc)?;
+    factorize_steady_direct(&shifted, symbolic, 1.0)
+        .and_then(|factorization| factorization.solve(rhs))
+        .filter(|step| step.iter().all(|value| value.is_finite()))
+}
+
+/// One Anderson-accelerated Picard update of the combined
+/// velocity/pressure state.
+///
+/// The plain update is `state + relaxation * g`, where
+/// `g = solved - state` is the fixed-point residual of the Oseen map.
+/// Anderson acceleration instead mixes the last `depth` residual
+/// differences: with `gamma` minimizing `||g - dG * gamma||`, the next
+/// state is `state + relaxation * g - (dX + relaxation * dG) * gamma`,
+/// where `dX`/`dG` hold consecutive state/residual differences. The
+/// fixed point is unchanged (`g = 0` still solves the update), but a
+/// linearly contracting damped map converges at a Krylov-like rate.
+/// A non-finite or wildly extrapolated candidate falls back to the
+/// damped update and clears the history, so a bad mix can cost at
+/// most one plain iteration.
+#[allow(clippy::too_many_arguments)]
+fn anderson_picard_update(
+    velocity: &[f64],
+    pressure: &[f64],
+    solved_velocity: &[f64],
+    solved_pressure: &[f64],
+    relaxation: f64,
+    depth: usize,
+    history: &mut Vec<(Vec<f64>, Vec<f64>)>,
+) -> (Vec<f64>, Vec<f64>) {
+    let n_v = velocity.len();
+    let mut current = Vec::with_capacity(n_v + pressure.len());
+    current.extend_from_slice(velocity);
+    current.extend_from_slice(pressure);
+    let mut solved = Vec::with_capacity(current.len());
+    solved.extend_from_slice(solved_velocity);
+    solved.extend_from_slice(solved_pressure);
+    let residual: Vec<f64> = solved
+        .iter()
+        .zip(&current)
+        .map(|(next, state)| next - state)
+        .collect();
+    let damped: Vec<f64> = current
+        .iter()
+        .zip(&residual)
+        .map(|(state, g)| state + relaxation * g)
+        .collect();
+    // Restart on growth: an extrapolated step that enlarged the
+    // fixed-point residual invalidates the local model the history
+    // encodes, so the mix restarts from this state with a damped step.
+    if let Some((_, previous_residual)) = history.last() {
+        let previous_norm = previous_residual
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
+        let current_norm = residual
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt();
+        if current_norm > previous_norm {
+            history.clear();
+        }
+    }
+    let split = |state: Vec<f64>| {
+        let (velocity, pressure) = state.split_at(n_v);
+        (velocity.to_vec(), pressure.to_vec())
+    };
+    history.push((current, residual));
+    if history.len() > depth + 1 {
+        let excess = history.len() - (depth + 1);
+        history.drain(..excess);
+    }
+    let columns = history.len() - 1;
+    if columns == 0 {
+        return split(damped);
+    }
+    // Difference columns between consecutive history entries.
+    let mut d_state: Vec<Vec<f64>> = Vec::with_capacity(columns);
+    let mut d_residual: Vec<Vec<f64>> = Vec::with_capacity(columns);
+    for pair in history.windows(2) {
+        d_state.push(
+            pair[1]
+                .0
+                .iter()
+                .zip(&pair[0].0)
+                .map(|(next, previous)| next - previous)
+                .collect(),
+        );
+        d_residual.push(
+            pair[1]
+                .1
+                .iter()
+                .zip(&pair[0].1)
+                .map(|(next, previous)| next - previous)
+                .collect(),
+        );
+    }
+    let current_residual = &history.last().expect("history is non-empty").1;
+    // Least squares for min ||g - dG * gamma|| via modified
+    // Gram-Schmidt with reorthogonalization. Forming the normal
+    // equations would square the condition number of the difference
+    // columns, which become nearly parallel as the iterates align;
+    // the QR factors keep the mix bounded. Directions whose residual
+    // factor falls below 1e-8 of the first (kept) direction are
+    // truncated: they carry no independent information and would only
+    // amplify the coefficients.
+    let mut q_columns: Vec<Vec<f64>> = Vec::with_capacity(columns);
+    let mut r_matrix = vec![vec![0.0; columns]; columns];
+    let mut kept: Vec<usize> = Vec::with_capacity(columns);
+    for (j, column) in d_residual.iter().enumerate() {
+        let mut v = column.clone();
+        for _ in 0..2 {
+            for (i, q) in q_columns.iter().enumerate() {
+                let coefficient: f64 = q.iter().zip(&v).map(|(a, b)| a * b).sum();
+                r_matrix[i][j] += coefficient;
+                for (target, source) in v.iter_mut().zip(q.iter()) {
+                    *target -= coefficient * source;
+                }
+            }
+        }
+        let diagonal = v.iter().map(|value| value * value).sum::<f64>().sqrt();
+        r_matrix[q_columns.len()][j] = diagonal;
+        let reference = if kept.is_empty() {
+            diagonal
+        } else {
+            r_matrix[0][kept[0]].abs()
+        };
+        if diagonal.is_finite() && diagonal > 1.0e-8 * reference.max(1.0e-300) {
+            for value in &mut v {
+                *value /= diagonal;
+            }
+            q_columns.push(v);
+            kept.push(j);
+        }
+    }
+    if kept.is_empty() {
+        history.clear();
+        return split(damped);
+    }
+    // Solve the kept triangular system R * gamma = Q^T * g by back
+    // substitution over the kept columns (in increasing order).
+    let rhs: Vec<f64> = q_columns
+        .iter()
+        .map(|q| {
+            q.iter()
+                .zip(current_residual)
+                .map(|(a, b)| a * b)
+                .sum()
+        })
+        .collect();
+    let kept_count = kept.len();
+    let mut kept_gamma = vec![0.0; kept_count];
+    for i in (0..kept_count).rev() {
+        let mut sum = rhs[i];
+        for (k, &column_index) in kept.iter().enumerate().skip(i + 1) {
+            sum -= r_matrix[i][column_index] * kept_gamma[k];
+        }
+        kept_gamma[i] = sum / r_matrix[i][kept[i]];
+    }
+    let mut gamma = vec![0.0; columns];
+    for (k, &column_index) in kept.iter().enumerate() {
+        gamma[column_index] = kept_gamma[k];
+    }
+    if gamma.iter().any(|value| !value.is_finite()) {
+        history.clear();
+        return split(damped);
+    }
+    let mut next = damped.clone();
+    for (i, &coefficient) in gamma.iter().enumerate() {
+        for (target, (dx, dg)) in next
+            .iter_mut()
+            .zip(d_state[i].iter().zip(&d_residual[i]))
+        {
+            *target -= coefficient * (dx + relaxation * dg);
+        }
+    }
+    // Reject an extrapolation that dwarfs the damped step (ten times
+    // its norm leaves any plausible basin for this state scale); the
+    // damped update still advances the iteration and the history
+    // restarts clean.
+    let damped_step = damped
+        .iter()
+        .zip(&history.last().expect("history is non-empty").0)
+        .map(|(next, state)| next - state)
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt();
+    let accelerated_step = next
+        .iter()
+        .zip(&history.last().expect("history is non-empty").0)
+        .map(|(next, state)| next - state)
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt();
+    if std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1") {
+        eprintln!(
+            "NS_PROFILE anderson columns={columns} |gamma|={:.3e} damped_step={damped_step:.3e} accelerated_step={accelerated_step:.3e} history={}",
+            gamma.iter().map(|value| value * value).sum::<f64>().sqrt(),
+            history.len()
+        );
+    }
+    if !accelerated_step.is_finite() || accelerated_step > 10.0 * damped_step.max(1.0e-300) {
+        history.clear();
+        return split(damped);
+    }
+    split(next)
+}
+
+/// Picard (Oseen) system assembled at one state: the
+/// Dirichlet-conditioned monolithic operator and right-hand side.
+///
+/// This is a separate unit so the steady solver can defer the
+/// assembly until a consumer (the Picard update, or the recorded
+/// Picard linearization on a Newton-accepted iteration) actually
+/// needs it: Newton-owned iterations then skip the forms entirely.
+/// Returns `None` on an invalid transported-viscosity field, which
+/// the caller treats as a failed (non-converged) solve.
+#[allow(clippy::too_many_arguments)]
+fn assemble_picard_system<VSpace, PSpace, ForceFn>(
+    mesh: &crate::mesh::Mesh,
+    v_space: &VSpace,
+    p_space: &PSpace,
+    config: &NavierStokesConfig,
+    mu_eff: f64,
+    velocity_topology: &std::sync::Arc<super::workspace::ElementVelocityTopology>,
+    velocity: &[f64],
+    body_force_fn: &std::sync::Arc<ForceFn>,
+    divergence_system: &crate::assembly::mixed::MixedSystem<f64>,
+    is_bc: &[bool],
+    bc_values: &[f64],
+    pin_pressure: bool,
+    pressure_pin: usize,
+    picard_scatter_plan: &mut Option<CsrScatterPlan>,
+    iter_start: std::time::Instant,
+) -> Option<PicardSystem>
+where
+    VSpace: crate::spaces::FunctionSpace + Sync,
+    PSpace: crate::spaces::FunctionSpace + Sync,
+    ForceFn: Fn([f64; 3], [f64; 3]) -> Vec<f64> + Send + Sync + 'static,
+{
+    let n_v = v_space.num_global_dofs(mesh);
+    let n_p = p_space.num_global_dofs(mesh);
+    let n_total = n_v + n_p;
+    let dim = mesh.dimension;
+    let stabilisation_rho = config.rho.max(f64::EPSILON);
+    let kinematic_viscosity = mu_eff / stabilisation_rho;
+    let viscous = super::forms::StokesViscousForm::new(mu_eff);
+
+    // Own a snapshot of the iterate: the assembly closures are
+    // 'static, so the evaluator cannot borrow `velocity`.
+    let velocity_field = std::sync::Arc::new(PicardVelocityField {
+        topology: std::sync::Arc::clone(velocity_topology),
+        values: velocity.to_vec(),
+        dim,
+    });
+    let convection_velocity_field = std::sync::Arc::clone(&velocity_field);
+    let convection = OseenConvectionForm::new(config.rho, move |coords: [f64; 3]| {
+        convection_velocity_field.velocity_components_at(coords)
+    });
+    let supg_velocity_field = std::sync::Arc::clone(&velocity_field);
+    let supg = super::stabilisation::SupgConvectionForm {
+        rho: config.rho,
+        nu: kinematic_viscosity,
+        velocity_fn: move |coords: [f64; 3]| supg_velocity_field.velocity_components_at(coords),
+        dt: None,
+    };
+    let lsic_velocity_field = std::sync::Arc::clone(&velocity_field);
+    let lsic = super::stabilisation::LsicForm {
+        rho: config.rho,
+        nu: kinematic_viscosity,
+        velocity_magnitude_fn: move |coords: [f64; 3]| {
+            lsic_velocity_field.velocity_magnitude_at(coords)
+        },
+        dt: None,
+    };
+    let pspg_velocity_field = std::sync::Arc::clone(&velocity_field);
+    let pspg = super::stabilisation::PspgForm {
+        rho: stabilisation_rho,
+        nu: kinematic_viscosity,
+        velocity_magnitude_fn: move |coords: [f64; 3]| {
+            pspg_velocity_field.velocity_magnitude_at(coords)
+        },
+        dt: None,
+    };
+    let supg_pressure_velocity_field = std::sync::Arc::clone(&velocity_field);
+    let supg_pressure = super::stabilisation::SupgPressureForm {
+        nu: kinematic_viscosity,
+        velocity_fn: move |coords: [f64; 3]| {
+            supg_pressure_velocity_field.velocity_components_at(coords)
+        },
+        dt: None,
+    };
+    let pspg_convection_velocity_field = std::sync::Arc::clone(&velocity_field);
+    let pspg_convection = super::stabilisation::PspgConvectionForm {
+        nu: kinematic_viscosity,
+        velocity_fn: move |coords: [f64; 3]| {
+            pspg_convection_velocity_field.velocity_components_at(coords)
+        },
+        dt: None,
+    };
+
+    // Assemble: viscous + convection + stabilisation blocks
+    let viscous_triplet = match assemble_transported_viscous_triplet(mesh, v_space, config, 2) {
+        Ok(Some(triplet)) => triplet,
+        Ok(None) => crate::assembly::assemble_bilinear(&viscous, v_space, v_space, mesh, 2),
+        Err(_) => {
+            // The public steady-solver result has no typed configuration
+            // error channel. Invalid transported fields therefore fail
+            // closed with the normal non-converged result.
+            return None;
+        }
+    };
+    let convection_triplet =
+        crate::assembly::assemble_bilinear(&convection, v_space, v_space, mesh, 2);
+    let supg_triplet = crate::assembly::assemble_bilinear(&supg, v_space, v_space, mesh, 2);
+    let lsic_triplet = crate::assembly::assemble_bilinear(&lsic, v_space, v_space, mesh, 2);
+    let pspg_triplet = crate::assembly::assemble_bilinear(&pspg, p_space, p_space, mesh, 2);
+    let supg_pressure_triplet = crate::assembly::mixed::assemble_bilinear_two_spaces(
+        &supg_pressure,
+        v_space,
+        p_space,
+        mesh,
+        2,
+    );
+    let pspg_convection_triplet = crate::assembly::mixed::assemble_bilinear_two_spaces(
+        &pspg_convection,
+        p_space,
+        v_space,
+        mesh,
+        2,
+    );
+
+    // Combined A = μK + C(u_k) + SUPG + LSIC
+    let mut a00 = crate::assembly::TripletMatrix::new(n_v, n_v);
+    for triplet in [&viscous_triplet, &convection_triplet] {
+        for k in 0..triplet.nnz() {
+            a00.push(triplet.rows[k], triplet.cols[k], triplet.values[k]);
+        }
+    }
+    if config.use_residual_stabilisation {
+        for triplet in [&supg_triplet, &lsic_triplet] {
+            for k in 0..triplet.nnz() {
+                a00.push(triplet.rows[k], triplet.cols[k], triplet.values[k]);
+            }
+        }
+    }
+
+    // Stabilised pressure-pressure block.
+    let mut a11 = crate::assembly::TripletMatrix::new(n_p, n_p);
+    for k in 0..pspg_triplet.nnz() {
+        a11.push(
+            pspg_triplet.rows[k],
+            pspg_triplet.cols[k],
+            pspg_triplet.values[k],
+        );
+    }
+
+    // Divergence coupling
+    let system = &divergence_system;
+
+    let forms_elapsed = iter_start.elapsed();
+    let rest_start = std::time::Instant::now();
+    // Build monolithic system manually with our combined a00
+    let mut mono = crate::assembly::TripletMatrix::new(n_total, n_total);
+    // Block (0,0): A = μK + C + SUPG + LSIC
+    for k in 0..a00.nnz() {
+        mono.push(a00.rows[k], a00.cols[k], a00.values[k]);
+    }
+    // Block (0,1): B (divergence coupling)
+    for k in 0..system.block_01.nnz() {
+        mono.push(
+            system.block_01.rows[k],
+            system.block_01.cols[k] + n_v,
+            system.block_01.values[k],
+        );
+    }
+    if config.use_residual_stabilisation {
+        for k in 0..supg_pressure_triplet.nnz() {
+            mono.push(
+                supg_pressure_triplet.rows[k],
+                supg_pressure_triplet.cols[k] + n_v,
+                supg_pressure_triplet.values[k],
+            );
+        }
+    }
+    // Block (1,0): B^T
+    for k in 0..system.block_10.nnz() {
+        mono.push(
+            system.block_10.rows[k] + n_v,
+            system.block_10.cols[k],
+            system.block_10.values[k],
+        );
+    }
+    if config.use_residual_stabilisation {
+        for k in 0..pspg_convection_triplet.nnz() {
+            mono.push(
+                pspg_convection_triplet.rows[k] + n_v,
+                pspg_convection_triplet.cols[k],
+                -pspg_convection_triplet.values[k],
+            );
+        }
+    }
+    // Block (1,1): PSPG pressure stabilisation
+    // `block_10` represents `-∫ q div(u)` because it is the transpose
+    // of `B[i,j] = -∫ p_j div(v_i)`.  The PSPG residual must therefore
+    // carry the same global sign: `-τ ∫ grad(q)·grad(p)`.  Adding the
+    // positive Laplacian here reverses the stabilised pressure response
+    // and can drive outlet flow opposite to a prescribed inlet.
+    if config.use_residual_stabilisation {
+        for k in 0..a11.nnz() {
+            mono.push(a11.rows[k] + n_v, a11.cols[k] + n_v, -a11.values[k]);
+        }
+    }
+
+    // RHS: body force for velocity, zero for pressure
+    let force_velocity_field = std::sync::Arc::clone(&velocity_field);
+    let standard_force_body = std::sync::Arc::clone(body_force_fn);
+    let body_force = super::forms::StokesBodyForceForm::new(move |coords| {
+        let local_velocity = force_velocity_field.velocity_at(coords);
+        standard_force_body(coords, local_velocity)
+    });
+    let rhs_v = crate::assembly::assemble_linear(&body_force, v_space, mesh, 2);
+
+    let supg_force_advection_field = std::sync::Arc::clone(&velocity_field);
+    let supg_force_evaluation_field = std::sync::Arc::clone(&velocity_field);
+    let supg_force_body = std::sync::Arc::clone(body_force_fn);
+    let supg_body_force = super::stabilisation::SupgBodyForceForm {
+        nu: kinematic_viscosity,
+        velocity_fn: move |coords: [f64; 3]| {
+            supg_force_advection_field.velocity_components_at(coords)
+        },
+        force_fn: move |coords: [f64; 3]| {
+            let local_velocity = supg_force_evaluation_field.velocity_at(coords);
+            supg_force_body(coords, local_velocity)
+        },
+        dt: None,
+    };
+    let rhs_supg = crate::assembly::assemble_linear(&supg_body_force, v_space, mesh, 2);
+
+    let pspg_force_magnitude_field = std::sync::Arc::clone(&velocity_field);
+    let pspg_force_evaluation_field = std::sync::Arc::clone(&velocity_field);
+    let pspg_force_body = std::sync::Arc::clone(body_force_fn);
+    let pspg_body_force = super::stabilisation::PspgBodyForceForm {
+        rho: stabilisation_rho,
+        nu: kinematic_viscosity,
+        velocity_magnitude_fn: move |coords: [f64; 3]| {
+            pspg_force_magnitude_field.velocity_magnitude_at(coords)
+        },
+        force_fn: move |coords: [f64; 3]| {
+            let local_velocity = pspg_force_evaluation_field.velocity_at(coords);
+            pspg_force_body(coords, local_velocity)
+        },
+        dt: None,
+    };
+    let rhs_pspg = crate::assembly::assemble_linear(&pspg_body_force, p_space, mesh, 2);
+    let mut rhs = vec![0.0; n_total];
+    for (i, &val) in rhs_v.iter().enumerate() {
+        rhs[i] = val
+            + if config.use_residual_stabilisation {
+                rhs_supg[i]
+            } else {
+                0.0
+            };
+    }
+    if config.use_residual_stabilisation {
+        for (i, &val) in rhs_pspg.iter().enumerate() {
+            rhs[n_v + i] = -val;
+        }
+    }
+    if n_p > 0 && pin_pressure {
+        // Taylor-Hood without pressure stabilisation has a
+        // structurally zero (p,p) block. Insert the gauge diagonal
+        // before CSR conversion so symmetric Dirichlet elimination
+        // can set it to 1.
+        mono.push(n_v + pressure_pin, n_v + pressure_pin, 0.0);
+    }
+
+    // Apply symmetric Dirichlet BCs
+    let rest_elapsed = rest_start.elapsed();
+    let merge_start = std::time::Instant::now();
+    // After the first iteration the mono triplet stream is
+    // identical in structure, so scatter it into CSR order via
+    // the cached plan instead of re-sorting.
+    let mut csr = match picard_scatter_plan {
+        Some(plan) => plan.scatter(&mono.values),
+        None => {
+            let csr = mono.to_csr();
+            *picard_scatter_plan = Some(CsrScatterPlan::from_triplets(&mono, &csr));
+            csr
+        }
+    };
+    apply_dirichlet_to_csr(&mut csr, &mut rhs, is_bc, bc_values);
+    let merge_elapsed = merge_start.elapsed();
+    Some(PicardSystem {
+        csr,
+        rhs,
+        forms_elapsed,
+        rest_elapsed,
+        merge_elapsed,
+    })
+}
+
+/// Dirichlet-conditioned Picard operator, right-hand side, and
+/// per-phase assembly timings for one steady iteration.
+struct PicardSystem {
+    csr: sonium_solvers::CsrMatrix<f64>,
+    rhs: Vec<f64>,
+    forms_elapsed: std::time::Duration,
+    rest_elapsed: std::time::Duration,
+    merge_elapsed: std::time::Duration,
+}
+
+/// Picard linearization data deferred from a Newton-accepted iteration.
+///
+/// The operator is assembled only if this record is still live at a return
+/// point, since intermediate records are overwritten unread.
+struct PendingPicardRecord {
+    base_velocity: Vec<f64>,
+    base_pressure: Vec<f64>,
+    fixed_point_step: Vec<f64>,
+    effective_viscosity: f64,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn solve_picard_with_velocity_force_and_jacobian_with_policy<
     VSpace,
@@ -1446,7 +2374,8 @@ where
         mesh,
         2,
     );
-    let pin_pressure = pressure_constant_mode_is_free(&divergence_system.block_01, bc_dofs);
+    let pin_pressure = std::env::var("SONIUM_NS_FORCE_PIN").as_deref() == Ok("1")
+        || pressure_constant_mode_is_free(&divergence_system.block_01, bc_dofs);
     if std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1") {
         eprintln!("NS_PROFILE gauge pin_pressure={pin_pressure} n_v={n_v} n_p={n_p}");
     }
@@ -1525,12 +2454,17 @@ where
     // configured `config.mu`.
     let body_force_fn = std::sync::Arc::new(body_force_fn);
     let body_force_jacobian_fn = std::sync::Arc::new(body_force_jacobian_fn);
-    let stabilisation_rho = config.rho.max(f64::EPSILON);
 
     let mut converged = false;
     let mut final_residual = 1.0;
     let mut last_linearization = None;
     let mut last_newton_linearization = None;
+    // Exact-tangent CSR scatter plan, built on the first Newton
+    // assembly of this solve and reused for the rest of the loop.
+    let mut newton_scatter_plan: Option<CsrScatterPlan> = None;
+    // Picard monolithic-matrix scatter plan, built on the first
+    // iteration of this solve.
+    let mut picard_scatter_plan: Option<CsrScatterPlan> = None;
     let mut resolved_linear_solver_backend = LinearSolverBackend::Cpu;
     // The row claims an accelerator only when every linear solve ran on
     // it: any fallback taints the report permanently (last-wins would
@@ -1546,7 +2480,9 @@ where
     // tangent is published only when the active peak is unique and non-zero;
 
     // ties and the zero state remain deliberately fail-closed.
-    let publish_newton_linearization = config.use_newton_refinement || initial_velocity.is_some();
+    let publish_newton_linearization = config.use_newton_refinement
+        || config.anderson_depth > 0
+        || initial_velocity.is_some();
     // Per-iteration timing spans for performance work. Timers always run
     // (nanosecond cost); only the report line is gated.
     let profile_ns = std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1");
@@ -1561,8 +2497,124 @@ where
     // reused while the monolithic sparsity stays fixed across Picard
     // iterations (rebuilt automatically when the structure changes).
     let mut csr_structure_plan: Option<CsrStructurePlan> = None;
+    // Damped-Newton bookkeeping (only used when `use_newton_refinement`):
+    // the first residual norm sets the relative scale, and a rejected
+    // correction is retried from its base state with halved damping.
+    let mut newton_residual_scale: Option<f64> = None;
+    let mut newton_steps = 0usize;
+    // Levenberg trust-region state: while `lm_mu` is positive, Newton
+    // corrections solve `(J + lm_mu * dscale * I) step = -R`, which
+    // filters the near-null modes that pollute the exact correction on
+    // developed-flow states (no step length along the raw direction
+    // decreases the residual there). `lm_dscale` is the tangent's
+    // median absolute diagonal, computed on first use.
+    let mut lm_mu: f64 = 0.0;
+    // Pseudo-transient retry state: the density-scaled velocity mass
+    // matrix (assembled lazily on the first rejected correction), its
+    // entry map into the tangent pattern, and the beta scale at which
+    // the shift matches the tangent's median diagonal. The active
+    // shift itself is iteration-local (see the step computation).
+    let mut ptc_mass: Option<sonium_solvers::CsrMatrix<f64>> = None;
+    let mut ptc_positions: Option<Vec<i32>> = None;
+    let mut ptc_beta_unit: f64 = 0.0;
+    let mut lm_dscale: Option<f64> = None;
+    // Cached symbolic factorization for the Newton tangent (its pattern
+    // is fixed for the whole solve).
+    let mut newton_symbolic = SteadyDirectSymbolics::default();
+    // Same caching for the Picard operator: its pattern is fixed for
+    // the whole solve, so only the numeric phase repeats.
+    let mut picard_symbolic = SteadyDirectSymbolics::default();
+    // Relative residual at each Newton-branch visit, for stall detection.
+    let mut newton_relative_history: Vec<f64> = Vec::new();
+    // Relative Newton residual once the refinement target is met; the
+    // remaining iterations up to `min_picard_iterations` are then free
+    // (the state no longer changes).
+    let mut newton_converged_relative: Option<f64> = None;
+    // Anderson acceleration history: (state, fixed-point residual)
+    // pairs, oldest first, capped at `anderson_depth + 1` entries.
+    let mut anderson_history: Vec<(Vec<f64>, Vec<f64>)> = Vec::new();
+
+    // Build BC prescribed values
+    let mut bc_values = vec![0.0; n_total];
+    let mut is_bc = vec![false; n_total];
+    for &dof in bc_dofs {
+        assert!(dof < n_v, "velocity Dirichlet DOF {dof} is out of range");
+        let point = velocity_dof_coordinates[dof];
+        let comp = dof % v_space.num_components();
+        let bc_val = bc_velocity_fn(point[0], point[1], point[2]);
+        assert!(
+            comp < bc_val.len(),
+            "velocity boundary function returned too few components"
+        );
+        is_bc[dof] = true;
+        bc_values[dof] = bc_val[comp];
+    }
+    if n_p > 0 && pin_pressure {
+        // Only the closed-boundary constant-pressure nullspace needs a
+        // gauge. Open natural tractions already fix the pressure level.
+        // Pin the DOF nearest the domain centroid. Pinning an arbitrary
+        // corner breaks reflection/rotation symmetries in finite precision
+        // and can contaminate small lift coefficients.
+        is_bc[n_v + pressure_pin] = true;
+        bc_values[n_v + pressure_pin] = 0.0;
+    }
+
+    // Picard linearization record deferred from a Newton-accepted
+    // iteration: (base velocity, base pressure, fixed-point step,
+    // effective viscosity at the base state). Intermediate records
+    // are overwritten unread, so the operator is assembled only
+    // when a return point is reached with a record pending.
+    let mut pending_picard_record: Option<PendingPicardRecord> = None;
+    macro_rules! fulfill_picard_record {
+        () => {
+            if let Some(record) = pending_picard_record.take() {
+                if let Some(system) = assemble_picard_system(
+                    mesh,
+                    v_space,
+                    p_space,
+                    config,
+                    record.effective_viscosity,
+                    &velocity_topology,
+                    &record.base_velocity,
+                    &body_force_fn,
+                    &divergence_system,
+                    &is_bc,
+                    &bc_values,
+                    pin_pressure,
+                    pressure_pin,
+                    &mut picard_scatter_plan,
+                    std::time::Instant::now(),
+                ) {
+                    let mut record_state = Vec::with_capacity(n_total);
+                    record_state.extend_from_slice(&record.base_velocity);
+                    record_state.extend_from_slice(&record.base_pressure);
+                    last_linearization = Some(NavierStokesPicardLinearization {
+                        state_jacobian: system.csr,
+                        state: record_state,
+                        fixed_point_residual: record.fixed_point_step,
+                    });
+                }
+            }
+        };
+    }
 
     for iter in 0..config.max_picard_iterations {
+        fulfill_picard_record!();
+        if let Some(relative_residual) = newton_converged_relative {
+            if iter + 1 >= config.min_picard_iterations {
+                return NavierStokesResult {
+                    velocity,
+                    pressure,
+                    iterations: iter + 1,
+                    residual: relative_residual,
+                    converged: true,
+                    resolved_linear_solver_backend,
+                    picard_linearization: last_linearization,
+                    newton_linearization: last_newton_linearization.clone(),
+                };
+            }
+            continue;
+        }
         let iter_start = std::time::Instant::now();
 
         // Peak velocity magnitude across all FE nodes — feeds the
@@ -1606,258 +2658,60 @@ where
                 config.turbulence,
                 super::turbulence::TurbulenceModel::Laminar
             ) || turbulence_mu_gradient.is_some());
-        let kinematic_viscosity = mu_eff / stabilisation_rho;
-        let viscous = super::forms::StokesViscousForm::new(mu_eff);
 
-        // Own a snapshot of the iterate: the assembly closures are
-        // 'static, so the evaluator cannot borrow `velocity`.
-        let velocity_field = std::sync::Arc::new(PicardVelocityField {
-            topology: std::sync::Arc::clone(&velocity_topology),
-            values: velocity.clone(),
-            dim,
-        });
-        let convection_velocity_field = std::sync::Arc::clone(&velocity_field);
-        let convection = OseenConvectionForm::new(config.rho, move |coords: [f64; 3]| {
-            convection_velocity_field.velocity_components_at(coords)
-        });
-        let supg_velocity_field = std::sync::Arc::clone(&velocity_field);
-        let supg = super::stabilisation::SupgConvectionForm {
-            rho: config.rho,
-            nu: kinematic_viscosity,
-            velocity_fn: move |coords: [f64; 3]| supg_velocity_field.velocity_components_at(coords),
-            dt: None,
-        };
-        let lsic_velocity_field = std::sync::Arc::clone(&velocity_field);
-        let lsic = super::stabilisation::LsicForm {
-            rho: config.rho,
-            nu: kinematic_viscosity,
-            velocity_magnitude_fn: move |coords: [f64; 3]| {
-                lsic_velocity_field.velocity_magnitude_at(coords)
-            },
-            dt: None,
-        };
-        let pspg_velocity_field = std::sync::Arc::clone(&velocity_field);
-        let pspg = super::stabilisation::PspgForm {
-            rho: stabilisation_rho,
-            nu: kinematic_viscosity,
-            velocity_magnitude_fn: move |coords: [f64; 3]| {
-                pspg_velocity_field.velocity_magnitude_at(coords)
-            },
-            dt: None,
-        };
-        let supg_pressure_velocity_field = std::sync::Arc::clone(&velocity_field);
-        let supg_pressure = super::stabilisation::SupgPressureForm {
-            nu: kinematic_viscosity,
-            velocity_fn: move |coords: [f64; 3]| {
-                supg_pressure_velocity_field.velocity_components_at(coords)
-            },
-            dt: None,
-        };
-        let pspg_convection_velocity_field = std::sync::Arc::clone(&velocity_field);
-        let pspg_convection = super::stabilisation::PspgConvectionForm {
-            nu: kinematic_viscosity,
-            velocity_fn: move |coords: [f64; 3]| {
-                pspg_convection_velocity_field.velocity_components_at(coords)
-            },
-            dt: None,
-        };
 
-        // Assemble: viscous + convection + stabilisation blocks
-        let viscous_triplet = match assemble_transported_viscous_triplet(mesh, v_space, config, 2) {
-            Ok(Some(triplet)) => triplet,
-            Ok(None) => crate::assembly::assemble_bilinear(&viscous, v_space, v_space, mesh, 2),
-            Err(_) => {
-                // The public steady-solver result has no typed configuration
-                // error channel. Invalid transported fields therefore fail
-                // closed with the normal non-converged result.
-                break;
-            }
-        };
-        let convection_triplet =
-            crate::assembly::assemble_bilinear(&convection, v_space, v_space, mesh, 2);
-        let supg_triplet = crate::assembly::assemble_bilinear(&supg, v_space, v_space, mesh, 2);
-        let lsic_triplet = crate::assembly::assemble_bilinear(&lsic, v_space, v_space, mesh, 2);
-        let pspg_triplet = crate::assembly::assemble_bilinear(&pspg, p_space, p_space, mesh, 2);
-        let supg_pressure_triplet = crate::assembly::mixed::assemble_bilinear_two_spaces(
-            &supg_pressure,
-            v_space,
-            p_space,
-            mesh,
-            2,
-        );
-        let pspg_convection_triplet = crate::assembly::mixed::assemble_bilinear_two_spaces(
-            &pspg_convection,
-            p_space,
-            v_space,
-            mesh,
-            2,
-        );
-
-        // Combined A = μK + C(u_k) + SUPG + LSIC
-        let mut a00 = crate::assembly::TripletMatrix::new(n_v, n_v);
-        for triplet in [&viscous_triplet, &convection_triplet] {
-            for k in 0..triplet.nnz() {
-                a00.push(triplet.rows[k], triplet.cols[k], triplet.values[k]);
-            }
-        }
-        if config.use_residual_stabilisation {
-            for triplet in [&supg_triplet, &lsic_triplet] {
-                for k in 0..triplet.nnz() {
-                    a00.push(triplet.rows[k], triplet.cols[k], triplet.values[k]);
+        // The Picard (Oseen) system is consumed only by the Picard
+        // update below and, on Newton-accepted iterations, by the
+        // recorded Picard linearization. With a direct Newton step
+        // it feeds no Krylov preconditioner, so its assembly is
+        // deferred until a consumer is reached: Newton-owned
+        // iterations skip the forms entirely, and only the recorded
+        // linearization's operator is assembled (at the base state,
+        // before the accepted state is committed).
+        let defer_picard = config.use_direct_solver && config.newton_krylov_tolerance <= 0.0;
+        let mut forms_elapsed = std::time::Duration::ZERO;
+        let mut rest_elapsed = std::time::Duration::ZERO;
+        let mut merge_elapsed = std::time::Duration::ZERO;
+        let mut assemble_elapsed = std::time::Duration::ZERO;
+        let mut csr = sonium_solvers::CsrMatrix::from_raw_parts(0, 0, vec![0], Vec::new(), Vec::new());
+        let mut rhs: Vec<f64> = Vec::new();
+        let mut picard_assembled = false;
+        macro_rules! ensure_picard {
+            () => {
+                if !picard_assembled {
+                    match assemble_picard_system(
+                        mesh,
+                        v_space,
+                        p_space,
+                        config,
+                        mu_eff,
+                        &velocity_topology,
+                        &velocity,
+                        &body_force_fn,
+                        &divergence_system,
+                        &is_bc,
+                        &bc_values,
+                        pin_pressure,
+                        pressure_pin,
+                        &mut picard_scatter_plan,
+                        iter_start,
+                    ) {
+                        Some(system) => {
+                            forms_elapsed = system.forms_elapsed;
+                            rest_elapsed = system.rest_elapsed;
+                            merge_elapsed = system.merge_elapsed;
+                            assemble_elapsed = iter_start.elapsed();
+                            csr = system.csr;
+                            rhs = system.rhs;
+                            picard_assembled = true;
+                        }
+                        None => break,
+                    }
                 }
-            }
+            };
         }
-
-        // Stabilised pressure-pressure block.
-        let mut a11 = crate::assembly::TripletMatrix::new(n_p, n_p);
-        for k in 0..pspg_triplet.nnz() {
-            a11.push(
-                pspg_triplet.rows[k],
-                pspg_triplet.cols[k],
-                pspg_triplet.values[k],
-            );
-        }
-
-        // Divergence coupling
-        let system = &divergence_system;
-
-        let forms_elapsed = iter_start.elapsed();
-        let rest_start = std::time::Instant::now();
-        // Build monolithic system manually with our combined a00
-        let mut mono = crate::assembly::TripletMatrix::new(n_total, n_total);
-        // Block (0,0): A = μK + C + SUPG + LSIC
-        for k in 0..a00.nnz() {
-            mono.push(a00.rows[k], a00.cols[k], a00.values[k]);
-        }
-        // Block (0,1): B (divergence coupling)
-        for k in 0..system.block_01.nnz() {
-            mono.push(
-                system.block_01.rows[k],
-                system.block_01.cols[k] + n_v,
-                system.block_01.values[k],
-            );
-        }
-        if config.use_residual_stabilisation {
-            for k in 0..supg_pressure_triplet.nnz() {
-                mono.push(
-                    supg_pressure_triplet.rows[k],
-                    supg_pressure_triplet.cols[k] + n_v,
-                    supg_pressure_triplet.values[k],
-                );
-            }
-        }
-        // Block (1,0): B^T
-        for k in 0..system.block_10.nnz() {
-            mono.push(
-                system.block_10.rows[k] + n_v,
-                system.block_10.cols[k],
-                system.block_10.values[k],
-            );
-        }
-        if config.use_residual_stabilisation {
-            for k in 0..pspg_convection_triplet.nnz() {
-                mono.push(
-                    pspg_convection_triplet.rows[k] + n_v,
-                    pspg_convection_triplet.cols[k],
-                    -pspg_convection_triplet.values[k],
-                );
-            }
-        }
-        // Block (1,1): PSPG pressure stabilisation
-        // `block_10` represents `-∫ q div(u)` because it is the transpose
-        // of `B[i,j] = -∫ p_j div(v_i)`.  The PSPG residual must therefore
-        // carry the same global sign: `-τ ∫ grad(q)·grad(p)`.  Adding the
-        // positive Laplacian here reverses the stabilised pressure response
-        // and can drive outlet flow opposite to a prescribed inlet.
-        if config.use_residual_stabilisation {
-            for k in 0..a11.nnz() {
-                mono.push(a11.rows[k] + n_v, a11.cols[k] + n_v, -a11.values[k]);
-            }
-        }
-
-        // RHS: body force for velocity, zero for pressure
-        let force_velocity_field = std::sync::Arc::clone(&velocity_field);
-        let standard_force_body = std::sync::Arc::clone(&body_force_fn);
-        let body_force = super::forms::StokesBodyForceForm::new(move |coords| {
-            let local_velocity = force_velocity_field.velocity_at(coords);
-            standard_force_body(coords, local_velocity)
-        });
-        let rhs_v = crate::assembly::assemble_linear(&body_force, v_space, mesh, 2);
-
-        let supg_force_advection_field = std::sync::Arc::clone(&velocity_field);
-        let supg_force_evaluation_field = std::sync::Arc::clone(&velocity_field);
-        let supg_force_body = std::sync::Arc::clone(&body_force_fn);
-        let supg_body_force = super::stabilisation::SupgBodyForceForm {
-            nu: kinematic_viscosity,
-            velocity_fn: move |coords: [f64; 3]| {
-                supg_force_advection_field.velocity_components_at(coords)
-            },
-            force_fn: move |coords: [f64; 3]| {
-                let local_velocity = supg_force_evaluation_field.velocity_at(coords);
-                supg_force_body(coords, local_velocity)
-            },
-            dt: None,
-        };
-        let rhs_supg = crate::assembly::assemble_linear(&supg_body_force, v_space, mesh, 2);
-
-        let pspg_force_magnitude_field = std::sync::Arc::clone(&velocity_field);
-        let pspg_force_evaluation_field = std::sync::Arc::clone(&velocity_field);
-        let pspg_force_body = std::sync::Arc::clone(&body_force_fn);
-        let pspg_body_force = super::stabilisation::PspgBodyForceForm {
-            rho: stabilisation_rho,
-            nu: kinematic_viscosity,
-            velocity_magnitude_fn: move |coords: [f64; 3]| {
-                pspg_force_magnitude_field.velocity_magnitude_at(coords)
-            },
-            force_fn: move |coords: [f64; 3]| {
-                let local_velocity = pspg_force_evaluation_field.velocity_at(coords);
-                pspg_force_body(coords, local_velocity)
-            },
-            dt: None,
-        };
-        let rhs_pspg = crate::assembly::assemble_linear(&pspg_body_force, p_space, mesh, 2);
-        let mut rhs = vec![0.0; n_total];
-        for (i, &val) in rhs_v.iter().enumerate() {
-            rhs[i] = val
-                + if config.use_residual_stabilisation {
-                    rhs_supg[i]
-                } else {
-                    0.0
-                };
-        }
-        if config.use_residual_stabilisation {
-            for (i, &val) in rhs_pspg.iter().enumerate() {
-                rhs[n_v + i] = -val;
-            }
-        }
-
-        // Build BC prescribed values
-        let mut bc_values = vec![0.0; n_total];
-        let mut is_bc = vec![false; n_total];
-        for &dof in bc_dofs {
-            assert!(dof < n_v, "velocity Dirichlet DOF {dof} is out of range");
-            let point = velocity_dof_coordinates[dof];
-            let comp = dof % v_space.num_components();
-            let bc_val = bc_velocity_fn(point[0], point[1], point[2]);
-            assert!(
-                comp < bc_val.len(),
-                "velocity boundary function returned too few components"
-            );
-            is_bc[dof] = true;
-            bc_values[dof] = bc_val[comp];
-        }
-        if n_p > 0 && pin_pressure {
-            // Only the closed-boundary constant-pressure nullspace needs a
-            // gauge. Open natural tractions already fix the pressure level.
-            // Pin the DOF nearest the domain centroid. Pinning an arbitrary
-            // corner breaks reflection/rotation symmetries in finite precision
-            // and can contaminate small lift coefficients.
-            is_bc[n_v + pressure_pin] = true;
-            bc_values[n_v + pressure_pin] = 0.0;
-            // Taylor-Hood without pressure stabilisation has a structurally
-            // zero (p,p) block. Insert the gauge diagonal before CSR
-            // conversion so symmetric Dirichlet elimination can set it to 1.
-            mono.push(n_v + pressure_pin, n_v + pressure_pin, 0.0);
+        if !defer_picard {
+            ensure_picard!();
         }
 
         // Assemble the complete laminar Newton residual/tangent.  This
@@ -1865,7 +2719,7 @@ where
         // differentiates every active velocity-dependent term (convection,
         // SUPG/PSPG/LSIC, and the supplied body-force callback).
         if publish_this_newton {
-            let (exact_residual, exact_tangent) = assemble_complete_newton_linearization(
+            let (exact_residual, exact_tangent) = assemble_complete_newton_linearization_planned(
                 mesh,
                 v_space,
                 p_space,
@@ -1877,17 +2731,27 @@ where
                 &*body_force_fn,
                 &*body_force_jacobian_fn,
                 2,
+                true,
+                newton_scatter_plan.as_ref(),
             );
-            let mut newton_mono = crate::assembly::TripletMatrix::new(n_total, n_total);
-            for k in 0..exact_tangent.nnz() {
-                newton_mono.push(
-                    exact_tangent.rows[k],
-                    exact_tangent.cols[k],
-                    exact_tangent.values[k],
-                );
-            }
-
-            let mut newton_csr = newton_mono.to_csr();
+            // The exact tangent is already assembled in monolithic
+            // (velocity, pressure) ordering. After the first assembly
+            // a scatter plan replaces the triplet sort on later
+            // iterations with an identical accumulation order.
+            let mut newton_csr = match exact_tangent {
+                AssembledTangent::Triplets(triplets) => {
+                    let csr = triplets.to_csr();
+                    if newton_scatter_plan.is_none() {
+                        newton_scatter_plan =
+                            Some(CsrScatterPlan::from_triplets(&triplets, &csr));
+                    }
+                    csr
+                }
+                AssembledTangent::Scattered(values) => newton_scatter_plan
+                    .as_ref()
+                    .expect("scattered values require a scatter plan")
+                    .matrix_from_scattered(values),
+            };
             let mut newton_rhs = vec![0.0; n_total];
             apply_dirichlet_to_csr(&mut newton_csr, &mut newton_rhs, &is_bc, &bc_values);
             let mut state = Vec::with_capacity(n_total);
@@ -1932,11 +2796,815 @@ where
             };
         }
 
-        // Apply symmetric Dirichlet BCs
-        let rest_elapsed = rest_start.elapsed();
-        let merge_start = std::time::Instant::now();
-        let mut csr = mono.to_csr();
-        apply_dirichlet_to_csr(&mut csr, &mut rhs, &is_bc, &bc_values);
+
+        // Damped Newton refinement: when enabled and the exact tangent was
+        // assembled above, correct the state with `J * step = -R` instead of
+        // the Picard update. The correction is committed only after a
+        // trial assembly confirms the residual decreases (step halving,
+        // then shifted-step escalation, on rejection); a failed Newton
+        // solve (or an exhausted step budget) falls back to the Picard
+        // update below for this iteration.
+        // Short-budget callers (map probes, two-step admission fixtures)
+        // rely on pure Picard semantics for their first updates, so Newton
+        // refinement only takes over from the third update there. Genuine
+        // solve budgets and warm-started states Newton from the start:
+        // Picard is contractive from rest but far too slow to finish.
+        if config.use_newton_refinement
+            && (iter >= 2 || config.max_picard_iterations > 2 || initial_velocity.is_some())
+            && newton_steps < config.max_newton_iterations
+            && let Some(linearization) = last_newton_linearization.as_ref()
+        {
+            let residual_norm = linearization
+                .state_residual
+                .iter()
+                .map(|value| value * value)
+                .sum::<f64>()
+                .sqrt();
+            let scale = *newton_residual_scale
+                .get_or_insert_with(|| residual_norm.max(f64::MIN_POSITIVE));
+            let relative_residual = residual_norm / scale;
+            final_residual = relative_residual;
+            // Newton refines to `newton_tolerance` when it is tighter than
+            // the Picard contract: conservation gates downstream of the
+            // steady solve are only met near the actual fixed point, not at
+            // the first crossing of the looser update tolerance. A residual
+            // that stagnates below the Picard tolerance (nonsmooth force
+            // kinks floor the exact residual) still counts as converged.
+            let newton_target = if config.newton_tolerance > 0.0 {
+                config.picard_tolerance.min(config.newton_tolerance)
+            } else {
+                config.picard_tolerance
+            };
+            // Damped Newton either converges quickly or not at all on these
+            // systems; corrections without halving the residual mean the
+            // globalization is wrong for this state, so fail fast and let
+            // callers retry (e.g. with load continuation) instead of
+            // burning the whole Picard budget. A steadily contracting
+            // iteration, even a slow one, is not a stall: it may spend
+            // the caller's step budget.
+            newton_relative_history.push(relative_residual);
+            // Stagnation means a genuine residual floor (force kinks),
+            // not a transient slow patch while the globalization hunts
+            // for a step size: require less than twenty percent total
+            // progress over the last ten corrections.
+            let newton_stagnated = newton_relative_history.len() > 10
+                && relative_residual
+                    >= 0.8 * newton_relative_history[newton_relative_history.len() - 11];
+            // A stall is genuine stagnation: less than two percent
+            // total progress over the last twenty-five corrections.
+            // A steadily contracting iteration, even at well under one
+            // percent per correction, is branch progress and must be
+            // allowed to spend the caller's step budget.
+            let newton_window_stalled = newton_relative_history.len() > 25
+                && relative_residual
+                    >= 0.98 * newton_relative_history[newton_relative_history.len() - 26];
+            if (relative_residual > 0.5
+                && lm_mu <= 0.0
+                && newton_steps >= 20
+                && newton_window_stalled)
+                || (iter >= 60 && newton_window_stalled)
+            {
+                fulfill_picard_record!();
+                return NavierStokesResult {
+                    velocity,
+                    pressure,
+                    iterations: iter + 1,
+                    residual: final_residual,
+                    converged: false,
+                    resolved_linear_solver_backend,
+                    picard_linearization: last_linearization,
+                    newton_linearization: last_newton_linearization.clone(),
+                };
+            }
+            if iter + 1 >= config.min_picard_iterations
+                && relative_residual < config.picard_tolerance
+                && (relative_residual < newton_target
+                    || newton_stagnated
+                    || newton_steps >= config.max_newton_iterations)
+            {
+                converged = true;
+                fulfill_picard_record!();
+                return NavierStokesResult {
+                    velocity,
+                    pressure,
+                    iterations: iter + 1,
+                    residual: final_residual,
+                    converged,
+                    resolved_linear_solver_backend,
+                    picard_linearization: last_linearization,
+                    newton_linearization: last_newton_linearization.clone(),
+                };
+            }
+            if relative_residual < newton_target {
+                // Refinement target met before the caller's minimum
+                // iteration count: park the converged state and let the
+                // loop head count out the remaining iterations for free.
+                newton_converged_relative = Some(relative_residual);
+                continue;
+            }
+            // Trial residual at a candidate state, with the same
+            // Dirichlet-row replacement as the head linearization.
+            let evaluate_trial = |trial_velocity: &[f64], trial_pressure: &[f64]| -> f64 {
+                let (trial_residual, _) = assemble_complete_newton_linearization(
+                    mesh,
+                    v_space,
+                    p_space,
+                    config,
+                    mu_eff,
+                    turbulence_mu_gradient.as_deref(),
+                    trial_velocity,
+                    trial_pressure,
+                    &*body_force_fn,
+                    &*body_force_jacobian_fn,
+                    2,
+                    false,
+                );
+                let mut trial_residual = trial_residual;
+                for (dof, constrained) in is_bc.iter().enumerate() {
+                    if *constrained {
+                        let state_value = if dof < n_v {
+                            trial_velocity[dof]
+                        } else {
+                            trial_pressure[dof - n_v]
+                        };
+                        trial_residual[dof] = state_value - bc_values[dof];
+                    }
+                }
+                trial_residual
+                    .iter()
+                    .map(|value| value * value)
+                    .sum::<f64>()
+                    .sqrt()
+            };
+            // Globalization shifts are iteration-local: every visit
+            // first proposes the raw Newton correction, and the
+            // mass-shifted/Levenberg escalation below only globalizes
+            // this visit's step. Persisting an escalated shift across
+            // visits strangles later corrections (a single retry can
+            // escalate the pseudo-transient shift by orders of
+            // magnitude, after which every "Newton" step is a tiny
+            // pseudo-transient step and the residual only crawls).
+            lm_mu = 0.0;
+            let ptc_beta = 0.0;
+            // Newton refines toward `newton_tolerance`; below it the Picard
+            // update owns the iteration again.
+            let step_solution = if relative_residual < config.newton_tolerance {
+                None
+            } else {
+                let neg_residual: Vec<f64> =
+                    linearization.state_residual.iter().map(|value| -value).collect();
+                // The Schur complement only feeds the iterative Newton
+                // paths; a direct tangent solve never reads it.
+                let newton_schur_csr = (!config.use_direct_solver
+                    && (config.linear_solver_cpu_preconditioner
+                        == LinearSolverCpuPreconditionerKind::JacobiSchur
+                    || config.linear_solver_cpu_preconditioner
+                        == LinearSolverCpuPreconditionerKind::IlutSchur
+                    || config.linear_solver_cpu_preconditioner
+                        == LinearSolverCpuPreconditionerKind::IluSchur
+                    || config.linear_solver_backend_preconditioner
+                        == BackendPreconditionerKind::JacobiSchur))
+                    .then(|| {
+                        pressure_mass_schur_csr(
+                            p_space,
+                            mesh,
+                            mu_eff,
+                            pin_pressure.then_some(pressure_pin),
+                        )
+                    });
+                if csr_structure_plan
+                    .as_ref()
+                    .is_none_or(|plan| !plan.matches_structure(&linearization.state_jacobian))
+                {
+                    csr_structure_plan =
+                        CsrStructurePlan::try_from_csr(&linearization.state_jacobian);
+                }
+                let solved: Option<Vec<f64>> = if config.use_direct_solver {
+                    // Newton steps factor the tangent only a handful of
+                    // times per solve, so use the supernodal panel backend
+                    // unconditionally instead of the Picard path's env gate.
+                    // On the 11876-DOF fan tangent it is ~7x faster than
+                    // the simplicial backend at the same checked residual.
+                    // Globalization-shifted at every shift level: the
+                    // shifted tangent filters the near-null modes that
+                    // make the raw Newton correction unusable on
+                    // developed-flow states, and a factorization-backed
+                    // step reduces the residual where an iterative
+                    // normal-equation step only crawls.
+                    if config.newton_krylov_tolerance > 0.0 {
+                        krylov_newton_step(
+                            &linearization.state_jacobian,
+                            &csr,
+                            &neg_residual,
+                            config.newton_krylov_tolerance,
+                        )
+                        .or_else(|| {
+                            solve_shifted_newton_step(
+                                &linearization.state_jacobian,
+                                &neg_residual,
+                                lm_mu,
+                                &mut lm_dscale,
+                                ptc_beta,
+                                &ptc_mass,
+                                &ptc_positions,
+                                &is_bc,
+                                &mut newton_symbolic,
+                            )
+                        })
+                    } else {
+                        solve_shifted_newton_step(
+                            &linearization.state_jacobian,
+                            &neg_residual,
+                            lm_mu,
+                            &mut lm_dscale,
+                            ptc_beta,
+                            &ptc_mass,
+                            &ptc_positions,
+                            &is_bc,
+                            &mut newton_symbolic,
+                        )
+                    }
+                } else if requested_backend == LinearSolverBackend::Cpu {
+                    // Newton-Krylov on the CPU path: iterate on the exact
+                    // tangent, preconditioned by this iteration's Picard
+                    // (Oseen) operator. The saddle/ILU preconditioners are
+                    // tuned for the Picard matrix; applied to the tangent
+                    // itself they stall on the convection-derivative terms.
+                    let newton_operator =
+                        sonium_solvers::ValidatedCsr::new(&linearization.state_jacobian);
+                    match config.linear_solver_cpu_preconditioner {
+                        LinearSolverCpuPreconditionerKind::Ilu => {
+                            // Newton-Krylov attempts are capped well below
+                            // the Picard budget: a stalled attempt falls
+                            // back to a direct tangent factorization.
+                            let solve_config = sonium_solvers::GmresConfig {
+                                max_iterations: config
+                                    .linear_solver_max_iterations
+                                    .clamp(1, 50),
+                                tolerance: config.linear_solver_tolerance,
+                                min_restart: Some(30),
+                                max_restart: Some(240),
+                                ..Default::default()
+                            };
+                            let preconditioner =
+                                sonium_solvers::IluPreconditioner::from_csr(&csr);
+                            let result = sonium_solvers::gmres_preconditioned_with_guess(
+                                &newton_operator,
+                                &preconditioner,
+                                &neg_residual,
+                                None,
+                                &solve_config,
+                            );
+                            finite_converged_solution(result.x, result.converged)
+                        }
+                        LinearSolverCpuPreconditionerKind::JacobiSchur
+                        | LinearSolverCpuPreconditionerKind::IlutSchur
+                        | LinearSolverCpuPreconditionerKind::IluSchur => {
+                            let block_config = match config.linear_solver_cpu_preconditioner {
+                                LinearSolverCpuPreconditionerKind::JacobiSchur => {
+                                    sonium_solvers::BlockPreconditionerConfig::Diagonal
+                                }
+                                LinearSolverCpuPreconditionerKind::IlutSchur => {
+                                    sonium_solvers::BlockPreconditionerConfig::Ilut(
+                                        sonium_solvers::IlutConfig::new(1.0e-3, 2, 1.0e-12),
+                                    )
+                                }
+                                _ => sonium_solvers::BlockPreconditionerConfig::Ilu,
+                            };
+                            let schur_ilut = sonium_solvers::BlockPreconditionerConfig::Ilut(
+                                sonium_solvers::IlutConfig::new(1.0e-3, 2, 1.0e-12),
+                            );
+                            let sp_config = sonium_solvers::SaddlePointConfig {
+                                block1_size: n_v,
+                                block1_config: block_config,
+                                block2_config: schur_ilut,
+                                schur_strategy: sonium_solvers::SchurStrategy::External,
+                                upper_triangular: true,
+                            };
+                            let mut fallback_config = sp_config.clone();
+                            fallback_config.block2_config =
+                                sonium_solvers::BlockPreconditionerConfig::Diagonal;
+                            let preconditioner = newton_schur_csr.as_ref().and_then(|schur| {
+                                sonium_solvers::SaddlePointPreconditioner::<f64>::try_from_matrix_with_schur(
+                                    &csr,
+                                    schur,
+                                    sp_config,
+                                )
+                                .or_else(|_| {
+                                    sonium_solvers::SaddlePointPreconditioner::<f64>::try_from_matrix_with_schur(
+                                        &csr,
+                                        schur,
+                                        fallback_config,
+                                    )
+                                })
+                                .ok()
+                            });
+                            match preconditioner {
+                                Some(preconditioner) => {
+                                    let solve_config = sonium_solvers::FgmresConfig {
+                                        max_iterations: config
+                                            .linear_solver_max_iterations
+                                            .clamp(1, 50),
+                                        restart: 50,
+                                        tolerance: config.linear_solver_tolerance,
+                                        print_interval: 0,
+                                        exact_residual_check_interval: 0,
+                                        convergence_check_interval: 1,
+                                    };
+                                    let result = sonium_solvers::fgmres_preconditioned(
+                                        &newton_operator,
+                                        &preconditioner,
+                                        &neg_residual,
+                                        None,
+                                        &solve_config,
+                                    );
+                                    if std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1") {
+                                        eprintln!(
+                                            "NS_PROFILE newton-krylov iters={} residual={:.3e} converged={}",
+                                            result.iterations, result.residual, result.converged
+                                        );
+                                    }
+                                    finite_converged_solution(result.x, result.converged)
+                                }
+                                None => None,
+                            }
+                        }
+                    }
+                } else {
+                    match solve_iterative_linear_system_with_plan(
+                        config,
+                        &linearization.state_jacobian,
+                        &neg_residual,
+                        None,
+                        n_v,
+                        newton_schur_csr.as_ref(),
+                        csr_structure_plan.as_ref(),
+                    ) {
+                        Some((solution, backend, _iterations)) => {
+                            if backend != requested_backend {
+                                backend_fell_back = true;
+                            }
+                            resolved_linear_solver_backend = if backend_fell_back {
+                                LinearSolverBackend::Cpu
+                            } else {
+                                backend
+                            };
+                            Some(solution)
+                        }
+                        None => None,
+                    }
+                };
+                let krylov_step =
+                    solved.filter(|step| step.iter().all(|value| value.is_finite()));
+                // Newton corrections are few (bounded by
+                // `max_newton_iterations`), and the Krylov solvers stall on
+                // the exact tangent for stiff immersed-boundary systems. On
+                // the CPU path, factor the tangent directly rather than
+                // abandoning the correction.
+                if krylov_step.is_none() && requested_backend == LinearSolverBackend::Cpu {
+                    solve_shifted_newton_step(
+                        &linearization.state_jacobian,
+                        &neg_residual,
+                        lm_mu,
+                        &mut lm_dscale,
+                        ptc_beta,
+                        &ptc_mass,
+                        &ptc_positions,
+                        &is_bc,
+                        &mut newton_symbolic,
+                    )
+                } else {
+                    krylov_step
+                }
+            };
+            // No preemptive trust region on the correction: a norm bound
+            // keyed to the current velocity scale also fires on the first
+            // cold-start step (zero velocity), weakening a Newton
+            // correction that plain residual acceptance would take at
+            // full length. Globalization lives in the acceptance test
+            // below instead: a rejected correction retries with halved
+            // damping, then with an escalated Levenberg shift.
+            if std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1") && step_solution.is_none() {
+                eprintln!(
+                    "NS_PROFILE newton iter={} no step (relative_residual={:.6e})",
+                    iter + 1,
+                    relative_residual
+                );
+            }
+            if let Some(step) = step_solution {
+                if profile_ns {
+                    let j = &linearization.state_jacobian;
+                    let mut lin_res = 0.0f64;
+                    for row in 0..j.num_rows {
+                        let mut sum = linearization.state_residual[row];
+                        for idx in j.row_ptrs[row]..j.row_ptrs[row + 1] {
+                            sum += j.values[idx] * step[j.col_indices[idx]];
+                        }
+                        lin_res += sum * sum;
+                    }
+                    let worst = (0..n_v)
+                        .max_by(|&a, &b| step[a].abs().total_cmp(&step[b].abs()))
+                        .unwrap_or(0);
+                    let worst_node = worst / dim;
+                    eprintln!(
+                        "NS_PROFILE newton worst_dof={} value={:.6e} node={} coords=({:.4},{:.4},{:.4})",
+                        worst,
+                        step[worst],
+                        worst_node,
+                        mesh.nodes[worst_node].x,
+                        mesh.nodes[worst_node].y,
+                        mesh.nodes[worst_node].z
+                    );
+                    eprintln!(
+                        "NS_PROFILE newton step |J*step+R|={:.6e} |R|={:.6e} |step_v|={:.6e} |step_p|={:.6e} mean_step_p={:.6e} lm_mu={:.6e} lm_dscale={:.6e} ptc_beta={:.6e}",
+                        lin_res.sqrt(),
+                        residual_norm,
+                        step[..n_v].iter().map(|v| v * v).sum::<f64>().sqrt(),
+                        step[n_v..].iter().map(|v| v * v).sum::<f64>().sqrt(),
+                        step[n_v..].iter().sum::<f64>() / (step.len() - n_v) as f64,
+                        lm_mu,
+                        lm_dscale.unwrap_or(-1.0),
+                        ptc_beta
+                    );
+                    let rv: f64 = linearization.state_residual[..n_v]
+                        .iter()
+                        .map(|v| v * v)
+                        .sum::<f64>()
+                        .sqrt();
+                    let rp: f64 = linearization.state_residual[n_v..]
+                        .iter()
+                        .map(|v| v * v)
+                        .sum::<f64>()
+                        .sqrt();
+                    let (umax_dof, umax) = velocity
+                        .iter()
+                        .enumerate()
+                        .map(|(dof, v)| (dof, v.abs()))
+                        .fold((0usize, 0.0_f64), |a, b| if b.1 > a.1 { b } else { a });
+                    let (rmax_dof, _) = linearization.state_residual[..n_v]
+                        .iter()
+                        .enumerate()
+                        .map(|(dof, v)| (dof, v.abs()))
+                        .fold((0usize, 0.0_f64), |a, b| if b.1 > a.1 { b } else { a });
+                    let un = &mesh.nodes[umax_dof / dim];
+                    let rn = &mesh.nodes[rmax_dof / dim];
+                    eprintln!(
+                        "NS_PROFILE newton blocks |R_v|={rv:.6e} |R_p|={rp:.6e} max|u|={umax:.6e} at ({:.4},{:.4},{:.4}) maxRv at ({:.4},{:.4},{:.4})",
+                        un.x, un.y, un.z, rn.x, rn.y, rn.z
+                    );
+                    eprintln!(
+                        "NS_PROFILE newton timing forms_ms={:.1} rest_ms={:.1} merge_ms={:.1}",
+                        forms_elapsed.as_secs_f64() * 1000.0,
+                        rest_elapsed.as_secs_f64() * 1000.0,
+                        merge_elapsed.as_secs_f64() * 1000.0
+                    );
+                }
+                // Pre-commit acceptance: the correction is applied
+                // only once a trial assembly confirms the residual
+                // decreases, so a rejected direction never pollutes
+                // the state. The full-length step is tried first; on
+                // rejection an inner search (step halving, then
+                // mass-shifted escalation, then Levenberg escalation)
+                // works from the same base state and tangent, each
+                // trial costing one residual assembly. When the search
+                // is exhausted the Picard update below owns this
+                // iteration instead of re-solving the same rejected
+                // correction.
+                let base_velocity = velocity.clone();
+                let base_pressure = pressure.clone();
+                let base_residual = residual_norm;
+                let base_jacobian = linearization.state_jacobian.clone();
+                let base_residual_vec = linearization.state_residual.clone();
+                let mut accepted_state: Option<(Vec<f64>, Vec<f64>)> = None;
+                {
+                    let trial_velocity: Vec<f64> = base_velocity
+                        .iter()
+                        .zip(step.iter().take(n_v))
+                        .map(|(base, delta)| base + delta)
+                        .collect();
+                    let trial_pressure: Vec<f64> = base_pressure
+                        .iter()
+                        .zip(step.iter().skip(n_v))
+                        .map(|(base, delta)| base + delta)
+                        .collect();
+                    if evaluate_trial(&trial_velocity, &trial_pressure) < base_residual {
+                        accepted_state = Some((trial_velocity, trial_pressure));
+                    }
+                }
+                // Rejected correction. Step halving globalizes
+                // ordinary overshoot and is exhausted first; then the
+                // mass-shifted and Levenberg escalations run: on
+                // developed-flow states the correction is polluted
+                // by near-null modes, and a shifted step can decrease
+                // the residual at full length where no length along
+                // the raw direction can.
+                let mut trial_damping = 0.5;
+                // Without the extended escalations the halving search
+                // is the only globalization, so it stays short: a
+                // correction that needs more than three halvings is
+                // left to the Picard update instead.
+                let damping_floor = if config.newton_extended_globalization {
+                    1.0 / 64.0
+                } else {
+                    1.0 / 8.0
+                };
+                while trial_damping >= damping_floor && accepted_state.is_none() {
+                    let trial_velocity: Vec<f64> = base_velocity
+                        .iter()
+                        .zip(step.iter().take(n_v))
+                        .map(|(base, delta)| base + trial_damping * delta)
+                        .collect();
+                    let trial_pressure: Vec<f64> = base_pressure
+                        .iter()
+                        .zip(step.iter().skip(n_v))
+                        .map(|(base, delta)| base + trial_damping * delta)
+                        .collect();
+                    if evaluate_trial(&trial_velocity, &trial_pressure)
+                        < base_residual
+                    {
+                        accepted_state = Some((trial_velocity, trial_pressure));
+                    }
+                    trial_damping *= 0.5;
+                }
+                if accepted_state.is_none() && config.newton_extended_globalization {
+                    // Pseudo-transient escalation: mass-shifted
+                    // corrections at escalating inverse pseudo-
+                    // timesteps. The inertia bound follows the flat
+                    // near-null valley instead of fighting it, so a
+                    // shifted step still makes branch progress where
+                    // both the raw direction and a diagonal shift
+                    // fail.
+                    if ptc_mass.is_none() {
+                        let mass_form = crate::forms::VectorMassForm {
+                            coefficient: config.rho,
+                        };
+                        let mass = crate::assembly::assemble_bilinear(
+                            &mass_form, v_space, v_space, mesh, 2,
+                        )
+                        .to_csr();
+                        ptc_positions = Some(ptc_mass_positions(&base_jacobian, &mass));
+                        ptc_mass = Some(mass);
+                    }
+                    if let (Some(mass), Some(positions)) = (&ptc_mass, &ptc_positions) {
+                        if ptc_beta_unit <= 0.0 {
+                            let tangent_scale =
+                                csr_median_diagonal(&base_jacobian).unwrap_or(1.0);
+                            let mass_scale = csr_median_diagonal(mass).unwrap_or(1.0);
+                            if mass_scale > 0.0 {
+                                ptc_beta_unit = tangent_scale / mass_scale;
+                            }
+                        }
+                        if ptc_beta_unit > 0.0 {
+                            let neg_base: Vec<f64> =
+                                base_residual_vec.iter().map(|value| -value).collect();
+                            // Start below the unit scale: the
+                            // marching regime (inverse pseudo-
+                            // timestep near the slow modes' own
+                            // rate) sits under the median-diagonal
+                            // scale, and over-shifting only crawls.
+                            let mut beta = if ptc_beta > 0.0 {
+                                ptc_beta * 4.0
+                            } else {
+                                ptc_beta_unit * 1.0e-2
+                            };
+                            let beta_cap = ptc_beta_unit * 1.0e4;
+                            let mut ptc_attempts = 0usize;
+                            while beta <= beta_cap && accepted_state.is_none() {
+                                // Escalating the shift only shrinks the
+                                // correction; if a few escalations have
+                                // not produced a real decrease, larger
+                                // shifts cannot either, and the
+                                // Levenberg search below gets its turn
+                                // instead of burning factorizations.
+                                ptc_attempts += 1;
+                                if ptc_attempts > 5 {
+                                    break;
+                                }
+                                let Some(ptc_step) = solve_ptc_newton_step(
+                                    &base_jacobian,
+                                    mass,
+                                    positions,
+                                    beta,
+                                    &neg_base,
+                                    &is_bc,
+                                    &mut newton_symbolic,
+                                ) else {
+                                    break;
+                                };
+                                // Trial candidates are not corrections:
+                                // only an accepted step below advances
+                                // `newton_steps`, so the stall exit cannot
+                                // fire while raw steps still progress.
+                                let trial_velocity: Vec<f64> = base_velocity
+                                    .iter()
+                                    .zip(ptc_step.iter().take(n_v))
+                                    .map(|(base, delta)| base + delta)
+                                    .collect();
+                                let trial_pressure: Vec<f64> = base_pressure
+                                    .iter()
+                                    .zip(ptc_step.iter().skip(n_v))
+                                    .map(|(base, delta)| base + delta)
+                                    .collect();
+                                let trial_residual =
+                                    evaluate_trial(&trial_velocity, &trial_pressure);
+                                if profile_ns {
+                                    eprintln!(
+                                        "NS_PROFILE ptc beta={beta:.6e} unit={ptc_beta_unit:.6e} trial={trial_residual:.6e} base={base_residual:.6e}"
+                                    );
+                                }
+                                // A shifted correction that decreases
+                                // the residual is real branch progress:
+                                // on developed-flow states it may be the
+                                // only decreasing direction available,
+                                // and rejecting it hands the iteration
+                                // to a Picard update that drifts the
+                                // exact residual upward. The stall exit
+                                // below still bounds a genuinely flat
+                                // iteration.
+                                if trial_residual < base_residual {
+                                    accepted_state = Some((trial_velocity, trial_pressure));
+                                }
+                                beta *= 4.0;
+                            }
+                        }
+                    }
+                }
+                if accepted_state.is_none() && config.newton_extended_globalization {
+                    if lm_dscale.is_none() {
+                        lm_dscale = csr_median_diagonal(&base_jacobian);
+                    }
+                    if let Some(dscale) = lm_dscale {
+                        let neg_base: Vec<f64> =
+                            base_residual_vec.iter().map(|value| -value).collect();
+                        // Restart the search inside the productive
+                        // shift range even when a previous stage left
+                        // the level saturated: starting above the cap
+                        // would skip the search entirely.
+                        let mut mu = if lm_mu > 0.0 {
+                            (lm_mu * 10.0).clamp(1.0e-3, 1.0)
+                        } else {
+                            1.0e-3
+                        };
+                        while mu <= 1.0e2 && accepted_state.is_none() {
+                            let Some(lm_step) = solve_levenberg_newton_step(
+                                &base_jacobian,
+                                mu * dscale,
+                                &neg_base,
+                                &mut newton_symbolic,
+                            ) else {
+                                break;
+                            };
+                            // See the mass-shifted search above: trial
+                            // candidates do not advance `newton_steps`.
+                            let trial_velocity: Vec<f64> = base_velocity
+                                .iter()
+                                .zip(lm_step.iter().take(n_v))
+                                .map(|(base, delta)| base + delta)
+                                .collect();
+                            let trial_pressure: Vec<f64> = base_pressure
+                                .iter()
+                                .zip(lm_step.iter().skip(n_v))
+                                .map(|(base, delta)| base + delta)
+                                .collect();
+                            // Same any-decrease bar as the
+                            // mass-shifted search above.
+                            if evaluate_trial(&trial_velocity, &trial_pressure)
+                                < base_residual
+                            {
+                                // Recorded only for the iteration's
+                                // profile print; the shift itself does
+                                // not carry into the next visit.
+                                lm_mu = mu;
+                                accepted_state = Some((trial_velocity, trial_pressure));
+                            }
+                            mu *= 10.0;
+                        }
+                    }
+                }
+                if let Some((trial_velocity, trial_pressure)) = accepted_state {
+                    let mut fixed_point_residual = Vec::with_capacity(n_total);
+                    fixed_point_residual.extend(
+                        trial_velocity
+                            .iter()
+                            .zip(&base_velocity)
+                            .map(|(next, base)| next - base),
+                    );
+                    fixed_point_residual.extend(
+                        trial_pressure
+                            .iter()
+                            .zip(&base_pressure)
+                            .map(|(next, base)| next - base),
+                    );
+                    // Defer the recorded Picard linearization's
+                    // operator assembly: intermediate records are
+                    // overwritten before anyone reads them, so only
+                    // the record live at a return point is built
+                    // (from this stashed base state, identically to
+                    // assembling it here).
+                    pending_picard_record = Some(PendingPicardRecord {
+                        base_velocity: base_velocity.clone(),
+                        base_pressure: base_pressure.clone(),
+                        fixed_point_step: fixed_point_residual,
+                        effective_viscosity: mu_eff,
+                    });
+                    velocity = trial_velocity;
+                    pressure = trial_pressure;
+                    newton_steps += 1;
+                    if profile_ns {
+                        eprintln!(
+                            "NS_PROFILE newton iter={} relative_residual={:.6e} lm_mu={:.6e}",
+                            iter + 1,
+                            relative_residual,
+                            lm_mu
+                        );
+                    }
+                    continue;
+                }
+            }
+        }
+
+        // Anderson mode: the Picard update below owns the state, but
+        // convergence is judged on the exact residual published above
+        // (same scale and target semantics as the Newton branch), not
+        // on the update size: callers configure `picard_tolerance` as
+        // the admissible nonlinear residual, and an accelerated update
+        // can become small before the state reaches the fixed point.
+        if config.anderson_depth > 0
+            && !config.use_newton_refinement
+            && let Some(linearization) = last_newton_linearization.as_ref()
+        {
+            let residual_norm = linearization
+                .state_residual
+                .iter()
+                .map(|value| value * value)
+                .sum::<f64>()
+                .sqrt();
+            let scale = *newton_residual_scale
+                .get_or_insert_with(|| residual_norm.max(f64::MIN_POSITIVE));
+            let relative_residual = residual_norm / scale;
+            final_residual = relative_residual;
+            let newton_target = if config.newton_tolerance > 0.0 {
+                config.picard_tolerance.min(config.newton_tolerance)
+            } else {
+                config.picard_tolerance
+            };
+            newton_relative_history.push(relative_residual);
+            // Convergence on stagnation additionally requires real
+            // (if slow) progress over the window: an accelerated
+            // history can bounce, and a flat-but-not-decreasing
+            // residual is a stall, not a converged floor.
+            let stagnated = newton_relative_history.len() > 10
+                && relative_residual
+                    >= 0.8 * newton_relative_history[newton_relative_history.len() - 11]
+                && relative_residual
+                    < newton_relative_history[newton_relative_history.len() - 11];
+            let window_stalled = newton_relative_history.len() > 10
+                && relative_residual
+                    >= 0.9 * newton_relative_history[newton_relative_history.len() - 11];
+            if iter + 1 >= config.min_picard_iterations
+                && relative_residual < config.picard_tolerance
+                && (relative_residual < newton_target || stagnated)
+            {
+                converged = true;
+                fulfill_picard_record!();
+                return NavierStokesResult {
+                    velocity,
+                    pressure,
+                    iterations: iter + 1,
+                    residual: final_residual,
+                    converged,
+                    resolved_linear_solver_backend,
+                    picard_linearization: last_linearization,
+                    newton_linearization: last_newton_linearization.clone(),
+                };
+            }
+            if relative_residual < newton_target {
+                // Refinement target met before the caller's minimum
+                // iteration count: park the converged state and let
+                // the loop head count out the remaining iterations.
+                newton_converged_relative = Some(relative_residual);
+                continue;
+            }
+            if iter >= 60 && window_stalled && relative_residual > config.picard_tolerance {
+                // A stalled accelerated iteration will not recover by
+                // spending the caller's whole budget; report the
+                // failure so continuation fallbacks can engage.
+                fulfill_picard_record!();
+                return NavierStokesResult {
+                    velocity,
+                    pressure,
+                    iterations: iter + 1,
+                    residual: final_residual,
+                    converged: false,
+                    resolved_linear_solver_backend,
+                    picard_linearization: last_linearization,
+                    newton_linearization: last_newton_linearization.clone(),
+                };
+            }
+        }
+
+        ensure_picard!();
+        assert!(picard_assembled);
         // UNIT5 (oc-opt G0): env-gated CSR stats for proxy validation.
         // Reports the Dirichlet-conditioned system the Krylov loop sees.
         if std::env::var("SONIUM_UNIT5_CSR_STATS").as_deref() == Ok("1") {
@@ -1949,28 +3617,23 @@ where
                 rhs_norm
             );
         }
-        let merge_elapsed = merge_start.elapsed();
-        let assemble_elapsed = iter_start.elapsed();
-
         // Solve
         let b: Vec<f64> = rhs;
         let solve_start = std::time::Instant::now();
         let mut linear_iterations: usize = 0;
 
         let x: Vec<f64> = if config.use_direct_solver {
-            // Opt-in execution policy for long steady QA runs. On the original
-            // 11876-DOF fan matrix, strict-pivot supernodal LU is substantially
-            // faster with the same independently checked linear residual. Its
-            // own measured wave-size gate decides whether parallelism pays off.
-            let factorization =
-                if std::env::var("SONIUM_STEADY_SUPERNODAL_LU").as_deref() == Ok("1") {
-                    sonium_solvers::direct::SparseLuFactorization::factorize_supernodal(&csr)
-                } else {
-                    sonium_solvers::direct::SparseLuFactorization::factorize(&csr)
-                };
-            match factorization.and_then(|lu| lu.solve(&b)) {
-                Ok(solution) => solution,
-                Err(_) => {
+            // Large systems use exact multifrontal LU; smaller systems
+            // keep the fixed-pattern supernodal path, whose symbolic
+            // analysis is cached and only the numeric phase repeats (a
+            // pattern mismatch falls back to full analysis). See
+            // [`factorize_steady_direct`].
+            match factorize_steady_direct(&csr, &mut picard_symbolic, 0.1)
+                .and_then(|factorization| factorization.solve(&b))
+            {
+                Some(solution) => solution,
+                None => {
+                    fulfill_picard_record!();
                     return NavierStokesResult {
                         velocity,
                         pressure,
@@ -2032,6 +3695,7 @@ where
                     x
                 }
                 None => {
+                    fulfill_picard_record!();
                     return NavierStokesResult {
                         velocity,
                         pressure,
@@ -2060,26 +3724,36 @@ where
             );
         }
 
-        // Extract velocity and pressure, then under-relax the nonlinear update.
+        // Extract velocity and pressure, then update the nonlinear
+        // iterate: plain under-relaxation, or Anderson acceleration of
+        // the same fixed-point map when `anderson_depth` is positive.
         let solved_velocity: Vec<f64> = x.iter().take(n_v).copied().collect();
         let solved_pressure: Vec<f64> = x.iter().skip(n_v).copied().collect();
-        let new_velocity = if picard_relaxation < 1.0 {
-            velocity
-                .iter()
-                .zip(solved_velocity.iter())
-                .map(|(previous, solved)| previous + picard_relaxation * (solved - previous))
-                .collect()
+        let (new_velocity, new_pressure) = if config.anderson_depth > 0 {
+            anderson_picard_update(
+                &velocity,
+                &pressure,
+                &solved_velocity,
+                &solved_pressure,
+                picard_relaxation,
+                config.anderson_depth,
+                &mut anderson_history,
+            )
+        } else if picard_relaxation < 1.0 {
+            (
+                velocity
+                    .iter()
+                    .zip(solved_velocity.iter())
+                    .map(|(previous, solved)| previous + picard_relaxation * (solved - previous))
+                    .collect(),
+                pressure
+                    .iter()
+                    .zip(solved_pressure.iter())
+                    .map(|(previous, solved)| previous + picard_relaxation * (solved - previous))
+                    .collect(),
+            )
         } else {
-            solved_velocity
-        };
-        let new_pressure = if picard_relaxation < 1.0 {
-            pressure
-                .iter()
-                .zip(solved_pressure.iter())
-                .map(|(previous, solved)| previous + picard_relaxation * (solved - previous))
-                .collect()
-        } else {
-            solved_pressure
+            (solved_velocity, solved_pressure)
         };
 
         let mut state = Vec::with_capacity(n_total);
@@ -2098,6 +3772,7 @@ where
                 .zip(&pressure)
                 .map(|(next, previous)| next - previous),
         );
+        pending_picard_record = None;
         last_linearization = Some(NavierStokesPicardLinearization {
             state_jacobian: csr.clone(),
             state,
@@ -2119,7 +3794,13 @@ where
 
         velocity = new_velocity;
         pressure = new_pressure;
-        final_residual = rel_change;
+        // In Anderson mode the reported residual is the exact
+        // nonlinear residual evaluated at the loop head; the update
+        // size only drives this progress print and the plain-Picard
+        // convergence acceptance below.
+        if config.anderson_depth == 0 {
+            final_residual = rel_change;
+        }
 
         if config.max_picard_iterations <= 5
             || (iter + 1) % 5 == 0
@@ -2132,7 +3813,10 @@ where
             );
         }
 
-        if iter + 1 >= config.min_picard_iterations && rel_change < config.picard_tolerance {
+        if config.anderson_depth == 0
+            && iter + 1 >= config.min_picard_iterations
+            && rel_change < config.picard_tolerance
+        {
             converged = true;
             return NavierStokesResult {
                 velocity,
@@ -2169,6 +3853,96 @@ where
 /// pressure couplings and, when supplied, algebraic turbulence viscosity
 /// sensitivity. The latter is valid only for the unique-peak contract
 /// admitted by [`super::turbulence::TurbulenceModel`].
+/// Per-element Newton contributions: local residual block, local
+/// tangent block, velocity DOFs, and pressure DOFs.
+type ElementNewtonContributions = (Vec<f64>, Vec<f64>, Vec<usize>, Vec<usize>);
+
+/// Symbolic LU analysis for a fixed-pattern operator, cached by
+/// the caller and reused across iterations (only the numeric phase
+/// repeats). Uses the solver's default (COLAMD) analysis: on the
+/// monolithic velocity-pressure saddle pattern it produces
+/// substantially less fill than a nested-dissection permutation
+/// (17.6M vs 24.0M factor nonzeros on the 11876-DOF fan system,
+/// measured), because dissection separators mix the velocity and
+/// pressure blocks.
+fn analyze_lu_symbolic(
+    matrix: &sonium_solvers::CsrMatrix<f64>,
+) -> Option<sonium_solvers::direct::SparseLuSymbolic> {
+    sonium_solvers::direct::SparseLuFactorization::analyze_supernodal(matrix).ok()
+}
+
+/// Cached mapping from a deterministic triplet stream to CSR value
+/// slots. The sparsity pattern is fixed for fixed spaces,
+/// stabilization structure, and mesh, so after one triplet assembly
+/// the same stream can be scattered directly into CSR order instead
+/// of re-sorting the triplets on every iteration. Duplicate entries
+/// in the stream point at the same slot and keep their accumulation
+/// order, so scattered values are identical to the sorted build.
+struct CsrScatterPlan {
+    row_ptrs: Vec<usize>,
+    col_indices: Vec<usize>,
+    slots: Vec<u32>,
+}
+
+impl CsrScatterPlan {
+    /// Build the plan from a triplet stream and the CSR matrix that
+    /// stream produces.
+    fn from_triplets(
+        triplets: &crate::assembly::TripletMatrix<f64>,
+        csr: &sonium_solvers::CsrMatrix<f64>,
+    ) -> Self {
+        let mut slots = Vec::with_capacity(triplets.rows.len());
+        for (&row, &col) in triplets.rows.iter().zip(triplets.cols.iter()) {
+            let segment = &csr.col_indices[csr.row_ptrs[row]..csr.row_ptrs[row + 1]];
+            let offset = segment
+                .binary_search_by(|probe| probe.cmp(&col))
+                .expect("triplet stream entry must exist in the CSR pattern");
+            slots.push((csr.row_ptrs[row] + offset) as u32);
+        }
+        Self {
+            row_ptrs: csr.row_ptrs.clone(),
+            col_indices: csr.col_indices.clone(),
+            slots,
+        }
+    }
+
+    /// Wrap values already scattered into CSR order by the assembly
+    /// reduction into a fresh CSR matrix.
+    fn matrix_from_scattered(&self, values: Vec<f64>) -> sonium_solvers::CsrMatrix<f64> {
+        debug_assert_eq!(values.len(), self.col_indices.len());
+        sonium_solvers::CsrMatrix::from_raw_parts(
+            self.row_ptrs.len() - 1,
+            self.row_ptrs.len() - 1,
+            self.row_ptrs.clone(),
+            self.col_indices.clone(),
+            values,
+        )
+    }
+
+    /// Scatter values in triplet-stream order into a fresh CSR matrix.
+    fn scatter(&self, triplet_values: &[f64]) -> sonium_solvers::CsrMatrix<f64> {
+        debug_assert_eq!(triplet_values.len(), self.slots.len());
+        let mut values = vec![0.0; self.col_indices.len()];
+        for (index, &slot) in self.slots.iter().enumerate() {
+            values[slot as usize] += triplet_values[index];
+        }
+        sonium_solvers::CsrMatrix::from_raw_parts(
+            self.row_ptrs.len() - 1,
+            self.row_ptrs.len() - 1,
+            self.row_ptrs.clone(),
+            self.col_indices.clone(),
+            values,
+        )
+    }
+}
+
+/// Tangent output: the raw triplet matrix, or values already
+/// scattered into CSR order by a [`CsrScatterPlan`].
+enum AssembledTangent {
+    Triplets(crate::assembly::TripletMatrix<f64>),
+    Scattered(Vec<f64>),
+}
+
 #[allow(clippy::too_many_arguments)]
 fn assemble_complete_newton_linearization<VSpace, PSpace, ForceFn, ForceJacFn>(
     mesh: &crate::mesh::Mesh,
@@ -2182,22 +3956,82 @@ fn assemble_complete_newton_linearization<VSpace, PSpace, ForceFn, ForceJacFn>(
     body_force_fn: &ForceFn,
     body_force_jacobian_fn: &ForceJacFn,
     quad_order: usize,
+    want_tangent: bool,
 ) -> (Vec<f64>, crate::assembly::TripletMatrix<f64>)
 where
-    VSpace: crate::spaces::FunctionSpace,
-    PSpace: crate::spaces::FunctionSpace,
-    ForceFn: Fn([f64; 3], [f64; 3]) -> Vec<f64>,
-    ForceJacFn: Fn([f64; 3], [f64; 3]) -> [[f64; 3]; 3],
+    VSpace: crate::spaces::FunctionSpace + Sync,
+    PSpace: crate::spaces::FunctionSpace + Sync,
+    ForceFn: Fn([f64; 3], [f64; 3]) -> Vec<f64> + Sync,
+    ForceJacFn: Fn([f64; 3], [f64; 3]) -> [[f64; 3]; 3] + Sync,
+{
+    match assemble_complete_newton_linearization_planned(
+        mesh,
+        v_space,
+        p_space,
+        config,
+        viscous_mu,
+        viscous_mu_gradient,
+        velocity,
+        pressure,
+        body_force_fn,
+        body_force_jacobian_fn,
+        quad_order,
+        want_tangent,
+        None,
+    ) {
+        (residual, AssembledTangent::Triplets(tangent)) => (residual, tangent),
+        (_, AssembledTangent::Scattered(_)) => {
+            unreachable!("no scatter plan was supplied")
+        }
+    }
+}
+
+/// [`assemble_complete_newton_linearization`] with an optional
+/// [`CsrScatterPlan`]: when a plan is supplied, tangent values are
+/// scattered directly into CSR order during the reduction.
+#[allow(clippy::too_many_arguments)]
+fn assemble_complete_newton_linearization_planned<VSpace, PSpace, ForceFn, ForceJacFn>(
+    mesh: &crate::mesh::Mesh,
+    v_space: &VSpace,
+    p_space: &PSpace,
+    config: &NavierStokesConfig,
+    viscous_mu: f64,
+    viscous_mu_gradient: Option<&[f64]>,
+    velocity: &[f64],
+    pressure: &[f64],
+    body_force_fn: &ForceFn,
+    body_force_jacobian_fn: &ForceJacFn,
+    quad_order: usize,
+    want_tangent: bool,
+    scatter_plan: Option<&CsrScatterPlan>,
+) -> (Vec<f64>, AssembledTangent)
+where
+    VSpace: crate::spaces::FunctionSpace + Sync,
+    PSpace: crate::spaces::FunctionSpace + Sync,
+    ForceFn: Fn([f64; 3], [f64; 3]) -> Vec<f64> + Sync,
+    ForceJacFn: Fn([f64; 3], [f64; 3]) -> [[f64; 3]; 3] + Sync,
 {
     let n_v = v_space.num_global_dofs(mesh);
     let n_p = p_space.num_global_dofs(mesh);
     let n_total = n_v + n_p;
     let dim = mesh.dimension;
-    let mut residual = vec![0.0; n_total];
-    let mut tangent = crate::assembly::TripletMatrix::new(n_total, n_total);
     let rho = config.rho;
     let viscous_mu_per_element = config.transported_eddy_viscosity_per_element.as_deref();
-    for element_index in 0..mesh.num_elements() {
+    // Element contributions are independent; collect them in element
+    // order (rayon above the shared grain gate) and reduce serially so
+    // the floating-point accumulation order is unchanged.
+    // Contributions are accumulated into per-element dense blocks
+    // (velocity DOFs first, then pressure) across quadrature points
+    // and only then emitted as triplets: emitting per quadrature
+    // point would multiply the triplet count (and the CSR sort) by
+    // the number of quadrature points per element. The accumulation
+    // order within an element matches the quadrature sequence, so
+    // the summed values are unchanged.
+    let element_contributions: Vec<ElementNewtonContributions> =
+        crate::parallelism::collect_indexed(
+            mesh.num_elements(),
+            crate::parallelism::ELEMENTS_PER_THREAD,
+            |element_index| {
         let element = &mesh.elements[element_index];
         let element_viscous_mu = viscous_mu_per_element
             .map(|viscosities| viscosities[element_index])
@@ -2205,6 +4039,14 @@ where
         let element_nu = element_viscous_mu / rho.max(f64::EPSILON);
         let velocity_dofs = v_space.local_to_global(mesh, element_index);
         let pressure_dofs = p_space.local_to_global(mesh, element_index);
+        let n_local_v = velocity_dofs.len();
+        let n_local = n_local_v + pressure_dofs.len();
+        let mut residual_local = vec![0.0; n_local];
+        let mut tangent_local = if want_tangent {
+            vec![0.0; n_local * n_local]
+        } else {
+            Vec::new()
+        };
         let local_velocity: Vec<_> = velocity_dofs.iter().map(|&dof| velocity[dof]).collect();
         let local_pressure: Vec<_> = pressure_dofs.iter().map(|&dof| pressure[dof]).collect();
         let quadrature = QuadratureRule::new(element.element_type, quad_order);
@@ -2241,13 +4083,16 @@ where
                 super::stabilisation::stabilisation_tau(velocity_magnitude, h, element_nu, None);
             let tau_lsic = tau * velocity_magnitude * h * 0.5;
             let force = body_force_fn(v_test.physical_coords, point_velocity(&u, dim));
-            let force_jacobian =
-                body_force_jacobian_fn(v_test.physical_coords, point_velocity(&u, dim));
+            let force_jacobian = if want_tangent {
+                body_force_jacobian_fn(v_test.physical_coords, point_velocity(&u, dim))
+            } else {
+                [[0.0; 3]; 3]
+            };
 
             let div_u = (0..dim)
                 .map(|component| grad_u[component][component])
                 .sum::<f64>();
-            for (local_row, &global_row) in velocity_dofs.iter().enumerate() {
+            for (local_row, &_global_row) in velocity_dofs.iter().enumerate() {
                 let component = local_row % dim;
                 let test_value = v_test.vector_value(local_row, component);
                 let test_gradient = (0..dim)
@@ -2273,8 +4118,9 @@ where
                     row_residual -=
                         tau * streamline_test * force.get(component).copied().unwrap_or(0.0);
                 }
-                residual[global_row] += row_residual * weight;
+                residual_local[local_row] += row_residual * weight;
 
+                if want_tangent {
                 for (local_column, &global_column) in velocity_dofs.iter().enumerate() {
                     let column_component = local_column % dim;
                     let delta_u = (0..dim)
@@ -2338,10 +4184,10 @@ where
                             + tau * delta_streamline_test * force_component
                             + tau * streamline_test * delta_force_component;
                     }
-                    tangent.push(global_row, global_column, value * weight);
+                    tangent_local[local_row * n_local + local_column] += value * weight;
                 }
 
-                for (local_column, &global_column) in pressure_dofs.iter().enumerate() {
+                for (local_column, &_global_column) in pressure_dofs.iter().enumerate() {
                     let pressure_basis = p_test.value(local_column);
                     let pressure_gradient_basis = (0..dim)
                         .map(|direction| p_test.grad(local_column, direction))
@@ -2350,11 +4196,12 @@ where
                     if config.use_residual_stabilisation {
                         value += tau * streamline_test * pressure_gradient_basis[component];
                     }
-                    tangent.push(global_row, n_v + global_column, value * weight);
+                    tangent_local[local_row * n_local + n_local_v + local_column] += value * weight;
+                }
                 }
             }
 
-            for (local_row, &global_row) in pressure_dofs.iter().enumerate() {
+            for (local_row, &_global_row) in pressure_dofs.iter().enumerate() {
                 let test_value = p_test.value(local_row);
                 let test_gradient = (0..dim)
                     .map(|direction| p_test.grad(local_row, direction))
@@ -2374,9 +4221,10 @@ where
                             * grad_dot_pressure(&test_gradient, &pressure_gradient)
                         + tau / rho.max(f64::EPSILON) * grad_dot_force;
                 }
-                residual[n_v + global_row] += row_residual * weight;
+                residual_local[n_local_v + local_row] += row_residual * weight;
 
-                for (local_column, &global_column) in velocity_dofs.iter().enumerate() {
+                if want_tangent {
+                for (local_column, &_global_column) in velocity_dofs.iter().enumerate() {
                     let column_component = local_column % dim;
                     let delta_u = (0..dim)
                         .map(|direction| v_test.vector_value(local_column, direction))
@@ -2423,10 +4271,10 @@ where
                         // state dependence is intentionally velocity-only.
                         let _ = delta_velocity_magnitude;
                     }
-                    tangent.push(n_v + global_row, global_column, value * weight);
+                    tangent_local[(n_local_v + local_row) * n_local + local_column] += value * weight;
                 }
 
-                for (local_column, &global_column) in pressure_dofs.iter().enumerate() {
+                for (local_column, &_global_column) in pressure_dofs.iter().enumerate() {
                     let pressure_gradient_basis = (0..dim)
                         .map(|direction| p_test.grad(local_column, direction))
                         .collect::<Vec<_>>();
@@ -2436,13 +4284,91 @@ where
                     } else {
                         0.0
                     };
-                    tangent.push(n_v + global_row, n_v + global_column, value * weight);
+                    tangent_local[(n_local_v + local_row) * n_local + n_local_v + local_column] +=
+                        value * weight;
+                }
+                }
+            }
+        }
+                (residual_local, tangent_local, velocity_dofs, pressure_dofs)
+            },
+        );
+    let mut residual = vec![0.0; n_total];
+    let mut tangent = crate::assembly::TripletMatrix::new(n_total, n_total);
+    // With a scatter plan the triplet matrix stays empty and values
+    // land directly in CSR order; the emission sequence is identical.
+    let mut scattered = scatter_plan.map(|plan| vec![0.0; plan.col_indices.len()]);
+    let mut scatter_cursor = 0usize;
+    for (residual_local, tangent_local, velocity_dofs, pressure_dofs) in element_contributions {
+        let n_local_v = velocity_dofs.len();
+        let n_local = n_local_v + pressure_dofs.len();
+        for (local_row, &global_row) in velocity_dofs.iter().enumerate() {
+            residual[global_row] += residual_local[local_row];
+        }
+        for (local_row, &global_row) in pressure_dofs.iter().enumerate() {
+            residual[n_v + global_row] += residual_local[n_local_v + local_row];
+        }
+        if want_tangent {
+            for (local_row, &global_row) in velocity_dofs.iter().enumerate() {
+                let row_base = local_row * n_local;
+                for (local_column, &global_column) in velocity_dofs.iter().enumerate() {
+                    let value = tangent_local[row_base + local_column];
+                    match (&mut scattered, scatter_plan) {
+                        (Some(values), Some(plan)) => {
+                            values[plan.slots[scatter_cursor] as usize] += value;
+                            scatter_cursor += 1;
+                        }
+                        _ => tangent.push(global_row, global_column, value),
+                    }
+                }
+                for (local_column, &global_column) in pressure_dofs.iter().enumerate() {
+                    let value = tangent_local[row_base + n_local_v + local_column];
+                    match (&mut scattered, scatter_plan) {
+                        (Some(values), Some(plan)) => {
+                            values[plan.slots[scatter_cursor] as usize] += value;
+                            scatter_cursor += 1;
+                        }
+                        _ => tangent.push(global_row, n_v + global_column, value),
+                    }
+                }
+            }
+            for (local_row, &global_row) in pressure_dofs.iter().enumerate() {
+                let row_base = (n_local_v + local_row) * n_local;
+                for (local_column, &global_column) in velocity_dofs.iter().enumerate() {
+                    let value = tangent_local[row_base + local_column];
+                    match (&mut scattered, scatter_plan) {
+                        (Some(values), Some(plan)) => {
+                            values[plan.slots[scatter_cursor] as usize] += value;
+                            scatter_cursor += 1;
+                        }
+                        _ => tangent.push(n_v + global_row, global_column, value),
+                    }
+                }
+                for (local_column, &global_column) in pressure_dofs.iter().enumerate() {
+                    let value = tangent_local[row_base + n_local_v + local_column];
+                    match (&mut scattered, scatter_plan) {
+                        (Some(values), Some(plan)) => {
+                            values[plan.slots[scatter_cursor] as usize] += value;
+                            scatter_cursor += 1;
+                        }
+                        _ => tangent.push(n_v + global_row, n_v + global_column, value),
+                    }
                 }
             }
         }
     }
 
-    (residual, tangent)
+    let assembled = match scattered {
+        Some(values) => {
+            debug_assert_eq!(
+                scatter_plan.map(|plan| plan.slots.len()),
+                Some(scatter_cursor)
+            );
+            AssembledTangent::Scattered(values)
+        }
+        None => AssembledTangent::Triplets(tangent),
+    };
+    (residual, assembled)
 }
 
 fn velocity_at(tab: &BasisTabulation, local_solution: &[f64], dim: usize) -> Vec<f64> {
@@ -2545,11 +4471,11 @@ pub fn assemble_bdf_newton_linearization<VSpace, PSpace, BcFn, ForceFn, ForceJac
     viscous_mu_gradient: Option<&[f64]>,
 ) -> Option<(Vec<f64>, sonium_solvers::CsrMatrix<f64>)>
 where
-    VSpace: crate::spaces::FunctionSpace,
-    PSpace: crate::spaces::FunctionSpace,
+    VSpace: crate::spaces::FunctionSpace + Sync,
+    PSpace: crate::spaces::FunctionSpace + Sync,
     BcFn: Fn(f64, f64, f64) -> Vec<f64>,
-    ForceFn: Fn([f64; 3]) -> Vec<f64>,
-    ForceJacFn: Fn([f64; 3]) -> [[f64; 3]; 3],
+    ForceFn: Fn([f64; 3]) -> Vec<f64> + Sync,
+    ForceJacFn: Fn([f64; 3]) -> [[f64; 3]; 3] + Sync,
 {
     // The segregated transported field is intentionally lagged in the
     // momentum solve. Its scalar/momentum cross-derivative is not available
@@ -2616,6 +4542,7 @@ where
         &body_force,
         &body_force_jacobian,
         workspace.quad_order,
+        true,
     );
 
     let coefficients = super::time_stepping::BdfCoefficients::for_order_variable(
@@ -3889,6 +5816,12 @@ fn solve_iterative_cpu(
                 &solve_config,
             );
             let iterations = result.iterations;
+            if std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1") {
+                eprintln!(
+                    "NS_PROFILE schur fgmres iters={} residual={:.3e} converged={}",
+                    result.iterations, result.residual, result.converged
+                );
+            }
             finite_converged_solution(result.x, result.converged)
                 .map(|solution| (solution, false, iterations))
         }
@@ -6102,6 +8035,90 @@ mod tests {
     use crate::mesh::{BoundaryType, ElementType, Mesh, Point, unit_square_triangles};
     use crate::spaces::{FunctionSpace, H1Space, VectorH1Space};
     use sonium_solvers::LinearOperator;
+
+    #[test]
+    fn csr_scatter_plan_matches_sorted_triplet_build() {
+        // Duplicate entries and unsorted columns exercise the slot
+        // mapping; the scattered build must equal the sorted build
+        // exactly, including accumulation order.
+        let entries = [
+            (2usize, 0usize, 1.5),
+            (0, 2, -2.0),
+            (2, 0, 0.5),
+            (0, 0, 3.0),
+            (2, 2, 4.0),
+            (1, 1, -1.0),
+            (0, 2, 0.25),
+        ];
+        let mut triplets = crate::assembly::TripletMatrix::new(3, 3);
+        for &(row, col, value) in &entries {
+            triplets.push(row, col, value);
+        }
+        let sorted = triplets.to_csr();
+        let plan = CsrScatterPlan::from_triplets(&triplets, &sorted);
+        let values: Vec<f64> = entries.iter().map(|entry| entry.2).collect();
+        let scattered = plan.scatter(&values);
+        assert_eq!(scattered.row_ptrs, sorted.row_ptrs);
+        assert_eq!(scattered.col_indices, sorted.col_indices);
+        assert_eq!(scattered.values, sorted.values);
+        // Values already in CSR order round-trip through the plan.
+        let wrapped = plan.matrix_from_scattered(scattered.values.clone());
+        assert_eq!(wrapped.values, sorted.values);
+    }
+
+    #[test]
+    fn steady_direct_factorization_uses_multifrontal_only_at_large_sizes() {
+        let diagonal = |n: usize| {
+            let row_ptrs: Vec<usize> = (0..=n).collect();
+            let col_indices: Vec<usize> = (0..n).collect();
+            let values = vec![2.0; n];
+            sonium_solvers::CsrMatrix::from_raw_parts(n, n, row_ptrs, col_indices, values)
+        };
+        let rhs: Vec<f64> = (0..8).map(|index| index as f64 + 1.0).collect();
+
+        let mut small_symbolic = SteadyDirectSymbolics::default();
+        let small = factorize_steady_direct(&diagonal(8), &mut small_symbolic, 0.1)
+            .expect("small diagonal system must factorize");
+        assert!(matches!(
+            small,
+            SteadyDirectFactorization::Supernodal(_)
+        ));
+        let small_solution = small.solve(&rhs).expect("small diagonal solve");
+        for (actual, expected) in small_solution.iter().zip(&rhs) {
+            assert!((actual - expected / 2.0).abs() <= 1.0e-12);
+        }
+
+        let large_n = EXACT_MULTIFRONTAL_MIN_ROWS + 4;
+        let large_rhs: Vec<f64> = (0..large_n).map(|index| (index % 17) as f64 - 8.0).collect();
+        let mut large_symbolic = SteadyDirectSymbolics::default();
+        let large = factorize_steady_direct(&diagonal(large_n), &mut large_symbolic, 0.1)
+            .expect("large diagonal system must factorize");
+        assert!(matches!(
+            large,
+            SteadyDirectFactorization::Multifrontal(_)
+        ));
+        assert!(
+            large_symbolic.lu.is_none() && large_symbolic.multifrontal.is_some(),
+            "the multifrontal path must cache its tree, not the supernodal analysis"
+        );
+        // A second factorization with new values reuses the cached tree.
+        let mut changed = diagonal(large_n);
+        for value in changed.values.iter_mut() {
+            *value = 4.0;
+        }
+        let refactored = factorize_steady_direct(&changed, &mut large_symbolic, 0.1)
+            .expect("large diagonal refactorization must succeed");
+        let refactored_solution = refactored
+            .solve(&large_rhs)
+            .expect("large diagonal refactorized solve");
+        for (actual, expected) in refactored_solution.iter().zip(&large_rhs) {
+            assert!((actual - expected / 4.0).abs() <= 1.0e-12);
+        }
+        let large_solution = large.solve(&large_rhs).expect("large diagonal solve");
+        for (actual, expected) in large_solution.iter().zip(&large_rhs) {
+            assert!((actual - expected / 2.0).abs() <= 1.0e-12);
+        }
+    }
 
     #[test]
     fn pressure_gauge_respects_closed_and_natural_open_velocity_boundaries() {
@@ -9232,6 +11249,7 @@ mod tests {
             &|_coords, _velocity| vec![0.0; 3],
             &|_coords, _velocity| [[0.0; 3]; 3],
             2,
+            true,
         );
         let (minus_residual, _) = assemble_complete_newton_linearization(
             &minus_mesh,
@@ -9245,6 +11263,7 @@ mod tests {
             &|_coords, _velocity| vec![0.0; 3],
             &|_coords, _velocity| [[0.0; 3]; 3],
             2,
+            true,
         );
 
         for row in 0..analytic.len() {
@@ -9328,6 +11347,7 @@ mod tests {
             &|coords, velocity| body_force(coords, velocity).to_vec(),
             &|_coords, _velocity| [[0.0; 3]; 3],
             2,
+            true,
         );
         let (minus_residual, _) = assemble_complete_newton_linearization(
             &minus_mesh,
@@ -9341,6 +11361,7 @@ mod tests {
             &|coords, velocity| body_force(coords, velocity).to_vec(),
             &|_coords, _velocity| [[0.0; 3]; 3],
             2,
+            true,
         );
         for row in 0..analytic.len() {
             let centered = (plus_residual[row] - minus_residual[row]) / (2.0 * step);
