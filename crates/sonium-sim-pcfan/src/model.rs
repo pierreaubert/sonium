@@ -811,6 +811,12 @@ pub enum PcFanCpuPreconditionerKind {
     #[default]
     Ilu,
     JacobiSchur,
+    /// Block saddle-point preconditioner with ILUT on the velocity block.
+    ///
+    /// The FEM-recommended choice for these saddle systems: monolithic
+    /// ILU(0) is fragile on the velocity/pressure scale separation once
+    /// the immersed penalty terms stiffen the momentum block.
+    IlutSchur,
 }
 
 impl PcFanCpuPreconditionerKind {
@@ -821,6 +827,7 @@ impl PcFanCpuPreconditionerKind {
         match self {
             Self::Ilu => Kind::Ilu,
             Self::JacobiSchur => Kind::JacobiSchur,
+            Self::IlutSchur => Kind::IlutSchur,
         }
     }
 }
@@ -1272,7 +1279,10 @@ impl Default for PcFanCfdConfig {
             max_relative_energy_imbalance: default_max_relative_energy_imbalance(),
             linear_solver_max_iterations: default_linear_solver_max_iterations(),
             linear_solver_tolerance: default_linear_solver_tolerance(),
-            cpu_preconditioner: PcFanCpuPreconditionerKind::Ilu,
+            // Block ILUT-Schur, not monolithic ILU: the implicit immersed
+            // penalty block is orders of magnitude stiffer than the viscous
+            // block, and ILU(0) stalls on that scale separation.
+            cpu_preconditioner: PcFanCpuPreconditionerKind::IlutSchur,
             turbulence: PcFanTurbulenceModel::Laminar,
             mesh_pattern: PcFanCfdMeshPattern::Symmetric,
             backend: PcFanCfdBackend::Auto,

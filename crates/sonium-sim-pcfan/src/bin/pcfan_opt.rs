@@ -1810,6 +1810,7 @@ fn build_config(cli: &Cli) -> PcFanConfig {
         "jacobi-schur" | "jacobi_schur" | "schur" => {
             sonium_sim_pcfan::PcFanCpuPreconditionerKind::JacobiSchur
         }
+        "ilut-schur" | "ilut_schur" => sonium_sim_pcfan::PcFanCpuPreconditionerKind::IlutSchur,
         other => {
             eprintln!("warning: unknown --cfd-cpu-precond '{other}', defaulting to ilu");
             sonium_sim_pcfan::PcFanCpuPreconditionerKind::Ilu

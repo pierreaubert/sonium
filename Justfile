@@ -1901,6 +1901,7 @@ _qa-run bin timeout_seconds="180" expected_case_id="":
                 break
 
     def select_structured_record(output):
+        first_candidate = None
         for line in output.splitlines():
             prefixed = line.startswith("QA_RESULT:")
             payload = line.split(":", 1)[1].strip() if prefixed else line.strip()
@@ -1917,8 +1918,11 @@ _qa-run bin timeout_seconds="180" expected_case_id="":
                     continue
                 if expected_case_id and candidate.get("case_id") != expected_case_id:
                     continue
-                return candidate
-        return None
+                if first_candidate is None:
+                    first_candidate = candidate
+                if candidate.get("case_id") == case_id:
+                    return candidate
+        return first_candidate
 
     def emit(status, returncode, output, *, timed_out=False):
         requested_backend = env.get("SONIUM_REQUIRE_BACKEND") or env.get("SONIUM_BACKEND")
@@ -2246,6 +2250,7 @@ _qa-run-features bin timeout_seconds features expected_case_id="":
                 break
 
     def select_structured_record(output):
+        first_candidate = None
         for line in output.splitlines():
             prefixed = line.startswith("QA_RESULT:")
             payload = line.split(":", 1)[1].strip() if prefixed else line.strip()
@@ -2262,8 +2267,11 @@ _qa-run-features bin timeout_seconds features expected_case_id="":
                     continue
                 if expected_case_id and candidate.get("case_id") != expected_case_id:
                     continue
-                return candidate
-        return None
+                if first_candidate is None:
+                    first_candidate = candidate
+                if candidate.get("case_id") == case_id:
+                    return candidate
+        return first_candidate
 
     def emit(status, returncode, output, *, timed_out=False):
         requested_backend = env.get("SONIUM_REQUIRE_BACKEND") or env.get("SONIUM_BACKEND")

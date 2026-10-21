@@ -67,6 +67,31 @@ const SOLID_BOUNDARY_INFLUENCE_CELLS: f64 = 0.55;
 const IMMERSED_SOLID_MIN_RELAXATION_S: f64 = 0.005;
 const IMMERSED_SOLID_MAX_RELAXATION_S: f64 = 0.050;
 const FAN_PICARD_RELAXATION: f64 = 0.01;
+
+/// Picard relaxation for loose continuation stages.
+///
+/// The production 1% relaxation keeps cold and final solves stable,
+/// but on developed-flow ramp stages the exact Newton correction is
+/// routinely rejected and the Picard update is the only progress:
+/// at 1% it crawls at rel_change ~1e-3 until the stage budget
+/// expires. At 10% the same stages converge (the 8-cell upper ramp
+/// stalls at 0.36 speed fraction with 1% and converges with 10%),
+/// while Newton remains the primary corrector on every stage.
+const LOOSE_STAGE_PICARD_RELAXATION: f64 = 0.1;
+
+/// Diagnostic override for the steady Picard relaxation factor.
+///
+/// Production uses [`FAN_PICARD_RELAXATION`] (or
+/// [`LOOSE_STAGE_PICARD_RELAXATION`] for loose continuation stages);
+/// `SONIUM_PCFAN_PICARD_RELAXATION` exists only to probe fixed-point
+/// stability from examples and tests.
+fn fan_picard_relaxation(default: f64) -> f64 {
+    std::env::var("SONIUM_PCFAN_PICARD_RELAXATION")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0 && *value <= 1.0)
+        .unwrap_or(default)
+}
 const ACTUATOR_INDUCED_VELOCITY_GAIN: f64 = 0.01;
 const ACTUATOR_MIN_RADIAL_INFLUENCE_M: f64 = 0.010;
 const ACTUATOR_MIN_AXIAL_INFLUENCE_M: f64 = 0.015;
@@ -6116,6 +6141,7 @@ pub fn build_pc_fan_cfd_resolved_transient_objective_state_gradients(
                     let velocity = velocity_vectors(&step.state[..velocity_dimension], nodes.len());
                     let signed_flow = boundary_airflow_cfm(
                         &nodes,
+                        &mesh.elements,
                         &velocity,
                         domain.max_corner.z,
                         domain.outlet_area_m2,
@@ -6132,6 +6158,7 @@ pub fn build_pc_fan_cfd_resolved_transient_objective_state_gradients(
                     let sign = signed_flow.signum();
                     for (node, weight) in boundary_airflow_state_weights(
                         &nodes,
+                        &mesh.elements,
                         domain.max_corner.z,
                         domain.outlet_area_m2,
                         boundary_tolerance,
@@ -7543,6 +7570,7 @@ fn solve_pc_fan_cfd_rotating_wall_transient_with_initial_state(
         let velocity_m_s = velocity_vectors(&state.velocity, nodes.len());
         let inlet_airflow_cfm = boundary_airflow_cfm(
             &nodes,
+            &mesh.elements,
             &velocity_m_s,
             domain.min_corner.z,
             domain.inlet_area_m2,
@@ -7550,6 +7578,7 @@ fn solve_pc_fan_cfd_rotating_wall_transient_with_initial_state(
         );
         let outlet_airflow_cfm = boundary_airflow_cfm(
             &nodes,
+            &mesh.elements,
             &velocity_m_s,
             domain.max_corner.z,
             domain.outlet_area_m2,
@@ -8029,6 +8058,7 @@ pub fn evaluate_pc_fan_cfd_newton_state_linearization(
     evaluate_pc_fan_cfd_newton_linearization_with_policy(config, design, initial_state, false)
 }
 
+
 fn evaluate_pc_fan_cfd_newton_linearization_with_policy(
     config: &PcFanConfig,
     design: &PcFanDesignVariables,
@@ -8314,6 +8344,7 @@ mod actuator_objective_tests {
         match objective {
             PcFanResolvedFlowObjective::Airflow => boundary_airflow_cfm(
                 &nodes,
+                &mesh.elements,
                 &velocity,
                 domain.max_corner.z,
                 domain.outlet_area_m2,
@@ -9609,6 +9640,7 @@ pub fn build_pc_fan_cfd_resolved_state_objective_gradient(
             let velocity = velocity_vectors(&source.state[..velocity_dimension], nodes.len());
             let signed_flow = boundary_airflow_cfm(
                 &nodes,
+                &mesh.elements,
                 &velocity,
                 domain.max_corner.z,
                 domain.outlet_area_m2,
@@ -9625,6 +9657,7 @@ pub fn build_pc_fan_cfd_resolved_state_objective_gradient(
             let sign = signed_flow.signum();
             for (node, weight) in boundary_airflow_state_weights(
                 &nodes,
+                &mesh.elements,
                 domain.max_corner.z,
                 domain.outlet_area_m2,
                 boundary_tolerance,
@@ -10090,6 +10123,7 @@ pub fn build_pc_fan_cfd_resolved_objective_derivatives_legacy(
         PcFanResolvedFlowObjective::Airflow => {
             let signed_flow = boundary_airflow_cfm(
                 &nodes,
+                &mesh.elements,
                 &velocity,
                 domain.max_corner.z,
                 domain.outlet_area_m2,
@@ -10101,6 +10135,7 @@ pub fn build_pc_fan_cfd_resolved_objective_derivatives_legacy(
             let sign = signed_flow.signum();
             for (node, weight) in boundary_airflow_state_weights(
                 &nodes,
+                &mesh.elements,
                 domain.max_corner.z,
                 domain.outlet_area_m2,
                 boundary_tolerance,
@@ -10343,13 +10378,50 @@ pub fn try_solve_pc_fan_cfd_mesh_convergence(
     let max_cells = convergence.max_cells;
     let min_levels = convergence.min_levels;
     let mut levels = Vec::new();
+    let mut previous: Option<(PcFanConfig, PcFanCfdFlowSolution)> = None;
 
     for cells in start_cells..=max_cells {
         let mut level_config = config.clone();
         level_config.cfd.cells_x = cells;
         level_config.cfd.cells_y = cells;
         level_config.cfd.cells_z = cells;
-        let solution = solve_pc_fan_cfd_mean_flow_for_geometry(&level_config, design, &geometry);
+        // Warm-start each level from the previous level's field: the
+        // solve is still the full production solve at this mesh, only
+        // the initial guess is prolongated.
+        let solution = match &previous {
+            Some((previous_config, previous_solution)) => {
+                let level_domain = geometry.build_cfd_domain(&level_config);
+                let previous_domain = geometry.build_cfd_domain(previous_config);
+                let source_mesh = pc_fan_cfd_mesh_for_domain(previous_config, &previous_domain);
+                let target_mesh = pc_fan_cfd_mesh_for_domain(&level_config, &level_domain);
+                match crate::state_transfer::transfer_pc_fan_cfd_state(
+                    &source_mesh,
+                    &target_mesh,
+                    &previous_solution.velocity_m_s,
+                    &previous_solution.pressure_pa,
+                ) {
+                    Ok(transfer) => {
+                        let velocity: Vec<f64> = transfer
+                            .velocity_m_s
+                            .iter()
+                            .flat_map(|velocity| velocity.iter().copied())
+                            .collect();
+                        solve_cfd_domain(
+                            &level_config,
+                            design,
+                            &geometry,
+                            &level_domain,
+                            Some((&velocity, &transfer.pressure_pa)),
+                        )
+                    }
+                    Err(_) => {
+                        solve_pc_fan_cfd_mean_flow_for_geometry(&level_config, design, &geometry)
+                    }
+                }
+            }
+            None => solve_pc_fan_cfd_mean_flow_for_geometry(&level_config, design, &geometry),
+        };
+        previous = Some((level_config, solution.clone()));
         let airflow_relative_change = levels.last().map(|previous: &PcFanCfdMeshLevel| {
             relative_change(solution.airflow_cfm, previous.solution.airflow_cfm)
         });
@@ -10720,6 +10792,13 @@ fn build_pc_fan_cfd_body_fitted_mesh(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SteadySolvePurpose {
     Production,
+    /// A bounded loose continuation stage: branch-tracking scaffolding
+    /// whose state is carried onward whether or not it converged. Its
+    /// Newton corrections use the cheap globalization (full step plus
+    /// halving); the mass-shifted and Levenberg escalations are left
+    /// to production solves, where their factorization cost is spent
+    /// on a state that must actually converge.
+    LooseStage,
     PicardMapProbe,
     NewtonStateProbe,
 }
@@ -10731,15 +10810,758 @@ fn solve_cfd_domain(
     domain: &PcFanCfdDomain,
     initial_state: Option<(&[f64], &[f64])>,
 ) -> PcFanCfdFlowSolution {
-    solve_cfd_domain_with_derivative_policy(
+    let target_cells = [
+        config.cfd.cells_x.max(1),
+        config.cfd.cells_y.max(1),
+        config.cfd.cells_z.max(1),
+    ];
+    // Load continuation: at rest the exact tangent has no inertial
+    // stiffness (the convection derivative vanishes), so a cold Newton
+    // correction overshoots by orders of magnitude at the blade tip.
+    // Production solves therefore continue in rotor speed and mesh size;
+    // only the final stage runs the caller's exact configuration and
+    // publishes derivatives. Small meshes and short-budget probes keep
+    // the direct single-attempt path.
+    let continuation = initial_state.is_none()
+        && config.cfd.max_picard_iterations > 2
+        && !target_cells.iter().all(|&cells| cells <= 2)
+        && config.operating_point.rpm.abs() > f64::EPSILON;
+    if !continuation {
+        return solve_cfd_domain_with_derivative_policy(
+            config,
+            design,
+            geometry,
+            domain,
+            initial_state,
+            true,
+            SteadySolvePurpose::Production,
+        );
+    }
+    // Mesh continuation first: prolongation through unit mesh
+    // increments raises the effective Reynolds number more gently
+    // than a viscosity ladder on the target mesh, and the coarse
+    // levels are cheap. It is only attempted when the target is
+    // within the range whose intermediate levels converge: on finer
+    // targets the unit-increment levels stall in the flat valley
+    // (observed at the fourth level) and the attempt would only
+    // consume the budget the parameter continuations need.
+    let target_max = target_cells.iter().copied().max().unwrap_or(1);
+    let mesh_continuation_attempt = target_max <= 4;
+    // Coarse-mesh parameter traversal: the (viscosity, speed)
+    // continuation that tracks the branch around the fold costs
+    // about the same number of iterations on any mesh, so run its
+    // descent where iterations are cheap, prolongate the converged
+    // coarse field, and finish the ramp and production solve on the
+    // target mesh. A failed finish falls through to the
+    // target-mesh continuations below.
+    if target_max >= 4
+        && let Some(solution) =
+            solve_cfd_domain_coarse_traversal(config, design, geometry, domain, target_cells)
+    {
+        return solution;
+    }
+    if mesh_continuation_attempt
+        && std::env::var("SONIUM_PCFAN_NO_MESH_CONT").is_err()
+        && let Some(solution) =
+            solve_cfd_domain_mesh_continuation(config, design, geometry, target_cells)
+    {
+        return solution;
+    }
+    // Two-parameter continuation: descend viscosity and rotor speed
+    // jointly around the fold that blocks each single-parameter path,
+    // then ramp the speed back up at physical viscosity. This runs
+    // before the strict viscosity continuation, whose bisection
+    // around the fold would otherwise consume the caller's budget.
+    if std::env::var("SONIUM_PCFAN_NO_TWO_PARAM_CONT").is_err()
+        && let Some(solution) =
+            solve_cfd_domain_two_parameter_continuation(config, design, geometry, domain)
+    {
+        return solution;
+    }
+    // Viscosity continuation: at a hundredfold viscosity the
+    // system is diffusion-dominated and Newton converges from any
+    // start; warm-started stages then track the solution branch down
+    // to the physical viscosity. The target-mesh speed ramp remains
+    // as the last fallback.
+    if std::env::var("SONIUM_PCFAN_NO_VISC_CONT").is_err()
+        && let Some(solution) =
+            solve_cfd_domain_viscosity_continuation(config, design, geometry, domain, target_cells)
+    {
+        return solution;
+    }
+    // Mesh continuation: ramp the rotor speed on a coarse mesh
+    // (cheap), then prolongate through warm-started solves up to the
+    // target mesh at full speed. Only a converged target-mesh solution
+    // is accepted from this path; otherwise the target-mesh speed ramp
+    // below remains the fallback.
+    if mesh_continuation_attempt
+        && std::env::var("SONIUM_PCFAN_NO_MESH_CONT").is_err()
+        && let Some(solution) =
+            solve_cfd_domain_mesh_continuation(config, design, geometry, target_cells)
+    {
+        return solution;
+    }
+    solve_cfd_domain_rpm_ladder(config, design, geometry, domain)
+}
+
+/// State carried between continuation stages: flattened velocity and
+/// pressure on the stage mesh.
+type ContinuationState = (Vec<f64>, Vec<f64>);
+
+/// A converged continuation point: (viscosity scale, speed fraction)
+/// parameters with the state converged there.
+type ContinuationPoint = ((f64, f64), ContinuationState);
+
+/// Branch-track on a coarse mesh, then finish on the target mesh.
+///
+/// The two-parameter continuation below costs about the same number
+/// of iterations on any mesh, but its iterations are far cheaper on
+/// a coarse mesh. Run the viscosity/speed descent and the lower
+/// speed ramp there, prolongate the transfer-point state onto the
+/// target mesh, then run the remaining speed ramp and the production
+/// finish on the target mesh so the discretization-sensitive part of
+/// the path still tracks the target mesh's own branch. Returns the
+/// target-mesh solution only when the production finish converges;
+/// otherwise the caller's target-mesh continuations remain as the
+/// fallback.
+fn solve_cfd_domain_coarse_traversal(
+    config: &PcFanConfig,
+    design: &PcFanDesignVariables,
+    geometry: &PcFanGeometry,
+    domain: &PcFanCfdDomain,
+    target_cells: [usize; 3],
+) -> Option<PcFanCfdFlowSolution> {
+    const COARSE_MAX: usize = 3;
+    // Bound the production finish like the mesh-continuation target
+    // level: a prolongated state separated from the target-mesh
+    // branch by the flat valley must not consume the caller's whole
+    // budget before the fallbacks run.
+    const WARM_FINISH_ITERATION_CAP: usize = 120;
+    let target_max = target_cells.iter().copied().max().unwrap_or(1);
+    let mut coarse_config = config.clone();
+    for (axis, target) in [
+        &mut coarse_config.cfd.cells_x,
+        &mut coarse_config.cfd.cells_y,
+        &mut coarse_config.cfd.cells_z,
+    ]
+    .into_iter()
+    .zip(target_cells.iter())
+    {
+        *axis = (*target * COARSE_MAX / target_max).max(1);
+    }
+    let coarse_domain = geometry.build_cfd_domain(&coarse_config);
+    // The coarse mesh runs the descent down to the (3x viscosity,
+    // 3.5% speed) stage. There the coarse and target fields still
+    // agree on the through-flow (within ~2x) and the problem is
+    // diffusion-dominated, so the target mesh's solution is the
+    // unique continuation of the transferred field: transferring
+    // further down, where the coarse through-flow collapses ~20x
+    // below the target's, hands the fine mesh a field that settles
+    // into the reversed-flow basin (the converged target branch
+    // then pumps backward, which the mass-balance gate rejects).
+    // The target mesh re-solves the transfer stage itself, then
+    // runs the remaining descent and the speed ramp on its own
+    // branch.
+    let split = 12;
+    let descent = &TWO_PARAMETER_STAGES[..split];
+    let ramp = &TWO_PARAMETER_STAGES[split..];
+    let anchor_parameters = descent
+        .last()
+        .expect("descent stage sequence must be non-empty")
+        .to_owned();
+    let coarse_state =
+        run_two_parameter_stages(&coarse_config, design, geometry, &coarse_domain, descent, None);
+    let source_mesh = pc_fan_cfd_mesh_for_domain(&coarse_config, &coarse_domain);
+    let target_mesh = pc_fan_cfd_mesh_for_domain(config, domain);
+    // The carried state is a flat per-node velocity field; regroup
+    // it into nodal vectors for the state transfer.
+    let coarse_velocity: Vec<[f64; 3]> =
+        coarse_state.0.as_chunks::<3>().0.to_vec();
+    let transfer = crate::state_transfer::transfer_pc_fan_cfd_state(
+        &source_mesh,
+        &target_mesh,
+        &coarse_velocity,
+        &coarse_state.1,
+    )
+    .ok()?;
+    let velocity: Vec<f64> = transfer
+        .velocity_m_s
+        .iter()
+        .flat_map(|velocity| velocity.iter().copied())
+        .collect();
+    stage_trace(format!(
+        "coarse traversal prolongated {}x{}x{} -> {}x{}x{}",
+        coarse_config.cfd.cells_x,
+        coarse_config.cfd.cells_y,
+        coarse_config.cfd.cells_z,
+        config.cfd.cells_x,
+        config.cfd.cells_y,
+        config.cfd.cells_z
+    ));
+    let anchored_state = run_two_parameter_stages(
         config,
         design,
         geometry,
         domain,
-        initial_state,
+        &[anchor_parameters],
+        Some((anchor_parameters, (velocity, transfer.pressure_pa))),
+    );
+    let anchor = (anchor_parameters, anchored_state);
+    let state = run_two_parameter_stages(config, design, geometry, domain, ramp, Some(anchor));
+    let mut finish_config = config.clone();
+    finish_config.cfd.max_picard_iterations =
+        finish_config.cfd.max_picard_iterations.min(WARM_FINISH_ITERATION_CAP);
+    let solution = solve_cfd_domain_with_derivative_policy(
+        &finish_config,
+        design,
+        geometry,
+        domain,
+        Some((state.0.as_slice(), state.1.as_slice())),
         true,
         SteadySolvePurpose::Production,
-    )
+    );
+    // A converged solution on the reversed-flow branch is not the
+    // fan's operating point: reject it so the caller's remaining
+    // continuations can still find the forward branch.
+    (solution.converged && solution.conservation.inlet_mass_flow_kg_s > 0.0).then_some(solution)
+}
+
+/// Two-parameter (viscosity, rotor-speed) continuation on one mesh.
+///
+/// On refined meshes the steady branch folds in each single
+/// parameter: at full speed it folds near thirteenfold viscosity, and
+/// the fold scale drops roughly in proportion to rotor speed, so
+/// descending viscosity while backing the speed off tracks the branch
+/// around the fold to physical viscosity at a few percent of full
+/// speed. Intermediate stages are loose (bounded iterations, caller
+/// tolerance relaxed to `1e-3`) and the chain carries each stage's
+/// state regardless of convergence, like the speed ladder: near-fold
+/// patches only need a state close enough for the next stage, and the
+/// final stage runs the caller's exact configuration and must
+/// converge for the path to be accepted.
+fn solve_cfd_domain_two_parameter_continuation(
+    config: &PcFanConfig,
+    design: &PcFanDesignVariables,
+    geometry: &PcFanGeometry,
+    domain: &PcFanCfdDomain,
+) -> Option<PcFanCfdFlowSolution> {
+    let state = run_two_parameter_stages(config, design, geometry, domain, TWO_PARAMETER_STAGES, None);
+    let solution = solve_cfd_domain_with_derivative_policy(
+        config,
+        design,
+        geometry,
+        domain,
+        Some((state.0.as_slice(), state.1.as_slice())),
+        true,
+        SteadySolvePurpose::Production,
+    );
+    solution.converged.then_some(solution)
+}
+
+/// (viscosity scale, rotor-speed fraction) stages: a short
+/// viscosity descent at full speed, then a lockstep joint descent
+/// that holds the viscosity/speed ratio in the band that stays on
+/// the easy side of the fold (descending viscosity to near-physical
+/// values at full speed stalls on fine meshes, whose fold sits at
+/// higher viscosity multiples), then the speed ramp at physical
+/// viscosity. The descent ends at physical viscosity and the lowest
+/// speed (index 15); the remaining stages are the speed ramp. The upper ramp
+/// keeps each speed ratio at or below about 1.3, with an extra 0.31
+/// step where the 8-cell branch is tightest (0.28 -> 0.36 otherwise
+/// falls off and burns the full loose-stage budget plus bisection
+/// retries, which cost far more than the extra converged stages).
+const TWO_PARAMETER_STAGES: &[(f64, f64)] = &[
+    (512.0, 1.0),
+    (256.0, 1.0),
+    (128.0, 1.0),
+    (64.0, 1.0),
+    (48.0, 0.65),
+    (32.0, 0.45),
+    (24.0, 0.3),
+    (16.0, 0.2),
+    (12.0, 0.14),
+    (8.0, 0.1),
+    (6.0, 0.07),
+    (4.0, 0.05),
+    (3.0, 0.035),
+    (2.0, 0.025),
+    (1.5, 0.018),
+    (1.0, 0.015),
+    (1.0, 0.0225),
+    (1.0, 0.033),
+    (1.0, 0.0415),
+    (1.0, 0.05),
+    (1.0, 0.075),
+    (1.0, 0.11),
+    (1.0, 0.17),
+    (1.0, 0.22),
+    (1.0, 0.28),
+    (1.0, 0.31),
+    (1.0, 0.36),
+    (1.0, 0.46),
+    (1.0, 0.59),
+    (1.0, 0.75),
+    (1.0, 0.97),
+];
+
+/// Run a sequence of two-parameter loose stages, warm-chaining the
+/// state and bisecting failed steps toward the last converged
+/// stage. `initial` is the last converged point before the sequence
+/// (its parameters anchor the first bisection when a stage fails).
+/// Returns the state carried out of the last stage.
+fn run_two_parameter_stages(
+    config: &PcFanConfig,
+    design: &PcFanDesignVariables,
+    geometry: &PcFanGeometry,
+    domain: &PcFanCfdDomain,
+    stages: &[(f64, f64)],
+    initial: Option<ContinuationPoint>,
+) -> ContinuationState {
+    // Loose stages only need to track the branch: they run with a
+    // bounded iteration budget and carry their state onward either
+    // way. When a stage does not converge, the parameter step is
+    // bisected toward the last converged stage, restarting from that
+    // stage's state (a failed attempt must not poison the retry), so
+    // a mesh whose branch folds earlier (finer meshes fold at higher
+    // viscosity multiples) inserts the intermediate points it needs
+    // instead of crawling off-branch for the full budget.
+    // Stage budget: the lowest-speed stage (physical viscosity,
+    // 1.5% speed) crawls through the flat valley and reaches a
+    // relative residual of 8.6e-3 at iteration 24, converging a few
+    // iterations later; a 24 cap cuts it off and the bisection
+    // retries then cost far more than the extra iterations.
+    const LOOSE_STAGE_ITERATION_CAP: usize = 32;
+    const MAX_STAGE_BISECTIONS: usize = 3;
+    let mut state: Option<ContinuationState> =
+        initial.as_ref().map(|(_, state)| state.clone());
+    let mut last_converged: Option<ContinuationPoint> = initial;
+    for &(target_viscosity, target_rpm) in stages {
+        // One bounded loose attempt at the given parameters, started
+        // from `initial`; returns the convergence flag and the state
+        // to carry onward.
+        let run_loose_stage = |viscosity_scale: f64,
+                               rpm_fraction: f64,
+                               initial: Option<&(Vec<f64>, Vec<f64>)>,
+                               iteration_cap: usize|
+         -> (bool, (Vec<f64>, Vec<f64>)) {
+            stage_trace(format!(
+                "two-param viscosity x{viscosity_scale} rpm x{rpm_fraction} cells={}x{}x{}",
+                config.cfd.cells_x, config.cfd.cells_y, config.cfd.cells_z
+            ));
+            let mut stage_config = config.clone();
+            stage_config.operating_point.dynamic_viscosity_pa_s *= viscosity_scale;
+            stage_config.operating_point.rpm = config.operating_point.rpm * rpm_fraction;
+            stage_config.cfd.max_picard_iterations =
+                stage_config.cfd.max_picard_iterations.min(iteration_cap);
+            // Branch tracking does not need the last decade of the
+            // exact residual: at 1e-4 the flat-valley stages spend
+            // 15-19 iterations per stage, while 1e-3 keeps the warm
+            // start on-branch for the next stage. The production
+            // finish still enforces the caller's exact tolerance.
+            stage_config.cfd.nonlinear_tolerance = stage_config.cfd.nonlinear_tolerance.max(1.0e-3);
+            let stage = solve_cfd_domain_with_derivative_policy(
+                &stage_config,
+                design,
+                geometry,
+                domain,
+                initial.map(|(velocity, pressure)| (velocity.as_slice(), pressure.as_slice())),
+                false,
+                SteadySolvePurpose::LooseStage,
+            );
+            let stage_state = (
+                stage
+                    .velocity_m_s
+                    .iter()
+                    .flat_map(|velocity| velocity.iter().copied())
+                    .collect(),
+                stage.pressure_pa.clone(),
+            );
+            stage_trace(format!(
+                "two-param viscosity x{viscosity_scale} rpm x{rpm_fraction} converged={} iterations={} inlet_kg_s={:.6e}",
+                stage.converged, stage.iterations, stage.conservation.inlet_mass_flow_kg_s
+            ));
+            (stage.converged, stage_state)
+        };
+        let (converged, stage_state) = run_loose_stage(
+            target_viscosity,
+            target_rpm,
+            state.as_ref(),
+            LOOSE_STAGE_ITERATION_CAP,
+        );
+        state = Some(stage_state);
+        if converged {
+            last_converged = Some((
+                (target_viscosity, target_rpm),
+                state.clone().expect("stage state recorded"),
+            ));
+            continue;
+        }
+        // Step too large for this mesh: bisect from the last converged
+        // stage, restoring its state for every retry. A failed
+        // midpoint shrinks the pending step and bisects again instead
+        // of giving up, so the sequence keeps inserting the
+        // intermediate points this mesh needs rather than jumping to
+        // the next, larger stage from a state that is already too far
+        // off the branch.
+        if let Some(((mut low_viscosity, mut low_rpm), mut low_state)) = last_converged.clone() {
+            let mut pending_viscosity = target_viscosity;
+            let mut pending_rpm = target_rpm;
+            for _ in 0..MAX_STAGE_BISECTIONS {
+                let mid_viscosity = (low_viscosity * pending_viscosity).sqrt();
+                let mid_rpm = 0.5 * (low_rpm + pending_rpm);
+                let (mid_converged, mid_state) =
+                    run_loose_stage(mid_viscosity, mid_rpm, Some(&low_state), LOOSE_STAGE_ITERATION_CAP);
+                if !mid_converged {
+                    pending_viscosity = mid_viscosity;
+                    pending_rpm = mid_rpm;
+                    state = Some(low_state.clone());
+                    continue;
+                }
+                last_converged = Some(((mid_viscosity, mid_rpm), mid_state.clone()));
+                low_viscosity = mid_viscosity;
+                low_rpm = mid_rpm;
+                low_state = mid_state;
+                let (target_converged, target_state) =
+                    run_loose_stage(target_viscosity, target_rpm, Some(&low_state), LOOSE_STAGE_ITERATION_CAP);
+                state = Some(target_state);
+                if target_converged {
+                    last_converged = Some((
+                        (target_viscosity, target_rpm),
+                        state.clone().expect("stage state recorded"),
+                    ));
+                    break;
+                }
+                // Keep the on-branch midpoint state, not the failed
+                // target attempt's state, for the next stage.
+                state = Some(low_state.clone());
+                pending_viscosity = target_viscosity;
+                pending_rpm = target_rpm;
+            }
+        }
+    }
+    state.expect("two-parameter stage sequence must be non-empty")
+}
+
+/// Temporary diagnostic: continuation stage tracing.
+fn stage_trace(message: String) {
+    if std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1") {
+        eprintln!("STAGE {message}");
+    }
+}
+
+/// Rotor-speed continuation on one mesh: warm-started stages at
+/// increasing fractions of the configured speed. Only the final stage
+/// runs the caller's exact configuration and publishes derivatives.
+fn solve_cfd_domain_rpm_ladder(
+    config: &PcFanConfig,
+    design: &PcFanDesignVariables,
+    geometry: &PcFanGeometry,
+    domain: &PcFanCfdDomain,
+) -> PcFanCfdFlowSolution {
+    let mut state: Option<(Vec<f64>, Vec<f64>)> = None;
+    let mut solution = None;
+    // Fine ladder at the bottom: the first stages are nearly linear, and
+    // each warm start keeps the exact tangent's inertial stiffness
+    // representative of the developed swirl.
+    for fraction in [
+        1.0 / 600.0,
+        1.0 / 300.0,
+        1.0 / 150.0,
+        1.0 / 60.0,
+        1.0 / 30.0,
+        1.0 / 12.0,
+        1.0 / 6.0,
+        1.0 / 3.0,
+        1.0,
+    ] {
+        stage_trace(format!(
+            "rpm ladder fraction={fraction:.5} cells={}x{}x{}",
+            config.cfd.cells_x, config.cfd.cells_y, config.cfd.cells_z
+        ));
+        let mut stage_config = config.clone();
+        stage_config.operating_point.rpm = config.operating_point.rpm * fraction;
+        if fraction < 1.0 {
+            stage_config.cfd.max_picard_iterations =
+                stage_config.cfd.max_picard_iterations.min(48);
+            stage_config.cfd.nonlinear_tolerance =
+                stage_config.cfd.nonlinear_tolerance.max(1.0e-4);
+        }
+        let stage = solve_cfd_domain_with_derivative_policy(
+            &stage_config,
+            design,
+            geometry,
+            domain,
+            state
+                .as_ref()
+                .map(|(velocity, pressure)| (velocity.as_slice(), pressure.as_slice())),
+            fraction >= 1.0,
+            if fraction >= 1.0 {
+                SteadySolvePurpose::Production
+            } else {
+                SteadySolvePurpose::LooseStage
+            },
+        );
+        state = Some((
+            stage
+                .velocity_m_s
+                .iter()
+                .flat_map(|velocity| velocity.iter().copied())
+                .collect(),
+            stage.pressure_pa.clone(),
+        ));
+        solution = Some(stage);
+    }
+    solution.expect("continuation ladder has a final stage")
+}
+
+/// Mesh continuation: ramp the rotor speed on the coarsest mesh, then
+/// prolongate the state through warm-started full-speed solves up to
+/// the target mesh. Returns the target-mesh solution only when it
+/// converged; returns `None` (caller falls back to the target-mesh
+/// speed ramp) when the mesh ladder is degenerate or a state transfer
+/// fails.
+fn solve_cfd_domain_mesh_continuation(
+    config: &PcFanConfig,
+    design: &PcFanDesignVariables,
+    geometry: &PcFanGeometry,
+    target_cells: [usize; 3],
+) -> Option<PcFanCfdFlowSolution> {
+    let target_max = target_cells.iter().copied().max().unwrap_or(1);
+    // Unit mesh increments: each prolongation is a mild perturbation,
+    // so every warm-started solve stays inside the Newton basin (the
+    // coarse-to-target jump does not).
+    let mut level_maxes: Vec<usize> = (2..target_max).collect();
+    level_maxes.push(target_max);
+    if level_maxes.len() < 2 {
+        return None;
+    }
+    let mut previous: Option<(PcFanConfig, PcFanCfdFlowSolution)> = None;
+    let mut solution = None;
+    for &level_max in &level_maxes {
+        let mut level_config = config.clone();
+        for (axis, target) in [
+            &mut level_config.cfd.cells_x,
+            &mut level_config.cfd.cells_y,
+            &mut level_config.cfd.cells_z,
+        ]
+        .into_iter()
+        .zip(target_cells.iter())
+        {
+            *axis = (*target * level_max / target_max).max(1);
+        }
+        let level_domain = geometry.build_cfd_domain(&level_config);
+        let is_target = level_max == target_max;
+        if !is_target {
+            // Intermediate levels are the continuation path itself:
+            // each must converge to the caller's tolerance so the next
+            // level prolongates from an on-branch state (a loosely
+            // converged intermediate returns a state about as far from
+            // the fine-mesh branch as a cold start). Their budget stays
+            // bounded so a struggling level cannot consume the caller's
+            // whole solve allowance.
+            level_config.cfd.max_picard_iterations =
+                level_config.cfd.max_picard_iterations.min(200);
+            level_config.cfd.nonlinear_tolerance = config.cfd.nonlinear_tolerance;
+        } else {
+            // Bound the target attempt as well: when the prolongated
+            // state is separated from the target-mesh branch by the
+            // flat valley, the direct solve crawls for thousands of
+            // iterations, and the caller's remaining fallbacks (the
+            // two-parameter continuation in particular) must get their
+            // turn within the caller's budget.
+            level_config.cfd.max_picard_iterations =
+                level_config.cfd.max_picard_iterations.min(120);
+        }
+        stage_trace(format!(
+            "mesh level_max={level_max} cells={}x{}x{} target={is_target}",
+            level_config.cfd.cells_x, level_config.cfd.cells_y, level_config.cfd.cells_z
+        ));
+        let level_solution = match &previous {
+            None => {
+                // The coarsest mesh solves cold at full speed (its
+                // numerical diffusion keeps the discrete problem
+                // tame); the speed ramp is only the fallback.
+                let direct = solve_cfd_domain_with_derivative_policy(
+                    &level_config,
+                    design,
+                    geometry,
+                    &level_domain,
+                    None,
+                    false,
+                    SteadySolvePurpose::LooseStage,
+                );
+                if direct.converged {
+                    direct
+                } else {
+                    solve_cfd_domain_rpm_ladder(&level_config, design, geometry, &level_domain)
+                }
+            }
+            Some((previous_config, previous_solution)) => {
+                let previous_domain = geometry.build_cfd_domain(previous_config);
+                let source_mesh = pc_fan_cfd_mesh_for_domain(previous_config, &previous_domain);
+                let target_mesh = pc_fan_cfd_mesh_for_domain(&level_config, &level_domain);
+                let transfer = crate::state_transfer::transfer_pc_fan_cfd_state(
+                    &source_mesh,
+                    &target_mesh,
+                    &previous_solution.velocity_m_s,
+                    &previous_solution.pressure_pa,
+                )
+                .ok()?;
+                let velocity: Vec<f64> = transfer
+                    .velocity_m_s
+                    .iter()
+                    .flat_map(|velocity| velocity.iter().copied())
+                    .collect();
+                solve_cfd_domain_with_derivative_policy(
+                    &level_config,
+                    design,
+                    geometry,
+                    &level_domain,
+                    Some((&velocity, &transfer.pressure_pa)),
+                    is_target,
+                    if is_target {
+                        SteadySolvePurpose::Production
+                    } else {
+                        SteadySolvePurpose::LooseStage
+                    },
+                )
+            }
+        };
+        if !level_solution.converged {
+            // An unconverged level prolongates a state about as far
+            // from the next level's branch as a cold start, so the
+            // remaining levels would only burn the caller's budget.
+            // Fail fast and let the caller's next fallback run.
+            return None;
+        }
+        previous = Some((level_config, level_solution.clone()));
+        solution = Some(level_solution);
+    }
+    let solution = solution?;
+    solution.converged.then_some(solution)
+}
+
+/// Viscosity continuation: solve at a highly multiplied dynamic
+/// viscosity (diffusion-dominated, Newton converges from a cold start
+/// through the mesh-continuation path), then warm-start a ladder of
+/// solves at decreasing viscosity on the target mesh, tracking the
+/// solution branch to the physical viscosity. A stage that fails to
+/// converge is retried at the geometric mean of the last accepted and
+/// attempted scales, so the warm start always restarts from a
+/// converged state; giving up returns `None` and lets the caller's
+/// next fallback run instead of drifting along an unconverged chain.
+/// Returns the physical-viscosity solution only when it converged.
+fn solve_cfd_domain_viscosity_continuation(
+    config: &PcFanConfig,
+    design: &PcFanDesignVariables,
+    geometry: &PcFanGeometry,
+    domain: &PcFanCfdDomain,
+    target_cells: [usize; 3],
+) -> Option<PcFanCfdFlowSolution> {
+    // The descent starts at 512x: on the target meshes of interest the
+    // tangent's near-null mode only becomes benign at several-hundredfold
+    // viscosity, and the high stages then converge in a few iterations.
+    // Intermediate stages solve to the caller's tolerance (a loosely
+    // converged stage prolongates off-branch about as poorly as a cold
+    // start), with a bounded per-stage budget.
+    const MAX_STAGE_ATTEMPTS: usize = 40;
+    let mut state: Option<(Vec<f64>, Vec<f64>)> = None;
+    let mut accepted_scale = 512.0;
+    let mut attempt_scale = 512.0;
+    let mut attempts = 0usize;
+    loop {
+        attempts += 1;
+        if attempts > MAX_STAGE_ATTEMPTS {
+            return None;
+        }
+        let viscosity_scale = attempt_scale;
+        let is_physical = viscosity_scale <= 1.0;
+        stage_trace(format!("viscosity x{viscosity_scale}"));
+        let mut stage_config = config.clone();
+        stage_config.operating_point.dynamic_viscosity_pa_s *= viscosity_scale;
+        if !is_physical {
+            stage_config.cfd.max_picard_iterations =
+                stage_config.cfd.max_picard_iterations.min(200);
+            stage_config.cfd.nonlinear_tolerance = config.cfd.nonlinear_tolerance;
+        }
+        let stage_solution = if state.is_none() {
+            // At the starting viscosity the system is diffusion-
+            // dominated and the exact Newton iteration converges from a
+            // cold start on the target mesh; only pay for the mesh-
+            // continuation ramp when that direct attempt fails.
+            let direct = solve_cfd_domain_with_derivative_policy(
+                &stage_config,
+                design,
+                geometry,
+                domain,
+                None,
+                false,
+                SteadySolvePurpose::LooseStage,
+            );
+            if direct.converged {
+                direct
+            } else {
+                match solve_cfd_domain_mesh_continuation(
+                    &stage_config,
+                    design,
+                    geometry,
+                    target_cells,
+                ) {
+                    Some(solution) => solution,
+                    None => solve_cfd_domain_rpm_ladder(&stage_config, design, geometry, domain),
+                }
+            }
+        } else {
+            solve_cfd_domain_with_derivative_policy(
+                &stage_config,
+                design,
+                geometry,
+                domain,
+                state
+                    .as_ref()
+                    .map(|(velocity, pressure)| (velocity.as_slice(), pressure.as_slice())),
+                is_physical,
+                if is_physical {
+                    SteadySolvePurpose::Production
+                } else {
+                    SteadySolvePurpose::LooseStage
+                },
+            )
+        };
+        if stage_solution.converged {
+            state = Some((
+                stage_solution
+                    .velocity_m_s
+                    .iter()
+                    .flat_map(|velocity| velocity.iter().copied())
+                    .collect(),
+                stage_solution.pressure_pa.clone(),
+            ));
+            accepted_scale = attempt_scale;
+            if is_physical {
+                return Some(stage_solution);
+            }
+            attempt_scale = (attempt_scale * 0.5).max(1.0);
+        } else {
+            // Bisect in log space between the last accepted scale and
+            // the failed attempt, then retry from the accepted state.
+            // Before the first acceptance, bisect upward instead: a
+            // still more viscous cold start is strictly easier.
+            let anchor = if state.is_some() {
+                accepted_scale
+            } else {
+                attempt_scale * 2.0
+            };
+            let next_scale = (anchor * attempt_scale).sqrt();
+            if !next_scale.is_finite() || next_scale <= 1.0 || next_scale >= attempt_scale * 2.0 {
+                return None;
+            }
+            if (next_scale - attempt_scale).abs() <= 1.0e-12 * attempt_scale {
+                return None;
+            }
+            attempt_scale = next_scale;
+        }
+    }
 }
 
 fn solve_cfd_domain_with_derivative_policy(
@@ -10804,7 +11626,11 @@ fn solve_cfd_domain_with_derivative_policy(
         max_picard_iterations: config.cfd.max_picard_iterations.max(1),
         min_picard_iterations: 20.min(config.cfd.max_picard_iterations.max(1)),
         picard_tolerance: config.cfd.nonlinear_tolerance,
-        picard_relaxation: FAN_PICARD_RELAXATION,
+        picard_relaxation: fan_picard_relaxation(if purpose == SteadySolvePurpose::LooseStage {
+            LOOSE_STAGE_PICARD_RELAXATION
+        } else {
+            FAN_PICARD_RELAXATION
+        }),
         linear_solver_max_iterations: config.cfd.linear_solver_max_iterations.max(1),
         linear_solver_tolerance: config.cfd.linear_solver_tolerance,
         linear_solver_cpu_preconditioner: config.cfd.cpu_preconditioner.into_fem(),
@@ -10832,7 +11658,11 @@ fn solve_cfd_domain_with_derivative_policy(
         linear_solver_ir_inner_tolerance: config.cfd.solver_ir_inner_tolerance,
         ..NavierStokesConfig::default()
     };
-    if purpose != SteadySolvePurpose::Production && initial_state.is_some() {
+    if !matches!(
+        purpose,
+        SteadySolvePurpose::Production | SteadySolvePurpose::LooseStage
+    ) && initial_state.is_some()
+    {
         // A map probe must evaluate exactly one production Picard update at
         // the supplied state. It must not silently continue to a converged
         // solve, or the finite-difference residual would be for a different
@@ -10841,7 +11671,49 @@ fn solve_cfd_domain_with_derivative_policy(
         ns_config.min_picard_iterations = 1;
         ns_config.picard_tolerance = 0.0;
     }
+    if matches!(
+        purpose,
+        SteadySolvePurpose::Production | SteadySolvePurpose::LooseStage
+    ) && config.cfd.max_picard_iterations > 1
+    {
+        // Damped Newton refinement on the exact tangent: the heavily
+        // under-relaxed Picard iteration alone creeps toward the fixed
+        // point and cannot reach production nonlinear tolerances in a
+        // practical iteration count. A one-iteration budget is a linearized
+        // map probe (backend parity fixtures), not a solve, and must keep
+        // the single Picard update semantics.
+        ns_config.use_newton_refinement = std::env::var("SONIUM_PCFAN_NO_NEWTON").is_err();
+        ns_config.max_newton_iterations = ns_config.max_picard_iterations;
+        // Loose continuation stages get the cheap globalization: the
+        // outer parameter stepping, not per-iteration shift searches,
+        // is what tracks the branch there.
+        ns_config.newton_extended_globalization = purpose == SteadySolvePurpose::Production;
+        if purpose == SteadySolvePurpose::LooseStage {
+            // Loose stages only track the branch: refining the exact
+            // residual to the production Newton tolerance (1e-10)
+            // wastes the last quadratic-tail iterations of every
+            // stage. The caller's stage tolerance is the target.
+            ns_config.newton_tolerance = ns_config.picard_tolerance;
+        }
+        if initial_state.is_some() {
+            // Warm-started solves are already near the branch. There
+            // the mass-shifted/Levenberg escalation accepts near-null
+            // decreasing steps and crawls along the valley (observed
+            // in prolongated mesh-level solves), while the raw
+            // correction with halving converges. Cold production
+            // solves keep the full escalation ladder.
+            ns_config.newton_extended_globalization = false;
+        }
 
+        if ns_config.use_newton_refinement {
+            // Newton convergence is judged on the exact assembled
+            // residual, which is meaningful from the first iteration.
+            // The Picard settle floor (20 iterations) only delays that
+            // return, and Picard-owned iterations after a failed
+            // Newton step then drift a state Newton already converged.
+            ns_config.min_picard_iterations = 1;
+        }
+    }
     let solid_boundary_velocity_conditions = solid_boundary_conditions.clone();
     let bc_fn = move |x: f64, y: f64, z: f64| -> Vec<f64> {
         if let Some(velocity) =
@@ -11140,6 +12012,7 @@ fn solve_cfd_domain_with_derivative_policy(
         });
     let signed_inlet_airflow_cfm = boundary_airflow_cfm(
         &nodes,
+        &mesh.elements,
         &velocity_m_s,
         domain.min_corner.z,
         domain.inlet_area_m2,
@@ -11147,6 +12020,7 @@ fn solve_cfd_domain_with_derivative_policy(
     );
     let signed_outlet_airflow_cfm = boundary_airflow_cfm(
         &nodes,
+        &mesh.elements,
         &velocity_m_s,
         domain.max_corner.z,
         domain.outlet_area_m2,
@@ -12698,6 +13572,21 @@ struct BladeActuatorSampleDerivative {
     area_weight: [f64; DESIGN_VARIABLE_COUNT],
 }
 
+/// Tangential force direction for relative tangential speed `s`:
+/// the discontinuous `signum(s)` of the baseline actuator model.
+fn tangential_direction(relative_tangential_m_s: f64, _tip_speed_m_s: f64) -> f64 {
+    relative_tangential_m_s.signum()
+}
+
+/// Derivative of [`tangential_direction`] with respect to its speed
+/// argument (zero on either signum branch).
+fn tangential_direction_derivative(
+    _relative_tangential_m_s: f64,
+    _tip_speed_m_s: f64,
+) -> f64 {
+    0.0
+}
+
 impl BladeActuatorForcing {
     fn from_geometry(
         config: &PcFanConfig,
@@ -12788,9 +13677,11 @@ impl BladeActuatorForcing {
             + axial_velocity_m_s * axial_velocity_m_s;
         let dynamic_pressure_pa = 0.5 * self.air_density_kg_m3 * relative_speed_sq;
         let axial_force_n_m3 = 0.18 * dynamic_pressure_pa * axial_loading / self.axial_influence_m;
-        let tangential_force_n_m3 =
-            0.12 * dynamic_pressure_pa * tangential_loading * relative_tangential_m_s.signum()
-                / self.axial_influence_m;
+        let tangential_force_n_m3 = 0.12
+            * dynamic_pressure_pa
+            * tangential_loading
+            * tangential_direction(relative_tangential_m_s, tip_speed_m_s)
+            / self.axial_influence_m;
 
         vec![
             tangential_force_n_m3 * tx,
@@ -12840,16 +13731,24 @@ impl BladeActuatorForcing {
         } else {
             [0.0; 3]
         };
-        let tangential_sign = tangential.signum();
+        let dynamic_pressure_pa =
+            0.5 * self.air_density_kg_m3 * (tangential * tangential + axial * axial);
+        let direction = tangential_direction(tangential, tip_speed_m_s);
+        let direction_derivative = tangential_direction_derivative(tangential, tip_speed_m_s);
         let mut jacobian = [[0.0; 3]; 3];
         for input in 0..3 {
             let dynamic_pressure_derivative = self.air_density_kg_m3
                 * (tangential * tangential_derivative[input] + axial * axial_derivative[input]);
             let axial_derivative_force =
                 0.18 * axial_loading * dynamic_pressure_derivative / self.axial_influence_m;
-            let tangential_derivative_force =
-                0.12 * tangential_loading * tangential_sign * dynamic_pressure_derivative
-                    / self.axial_influence_m;
+            // The direction factor is piecewise constant under the
+            // signum law, so its derivative contributes only under the
+            // smoothed law (through `direction_derivative`).
+            let tangential_derivative_force = 0.12
+                * tangential_loading
+                * (dynamic_pressure_derivative * direction
+                    + dynamic_pressure_pa * direction_derivative * tangential_derivative[input])
+                / self.axial_influence_m;
             jacobian[0][input] = tangential_derivative_force * tangent[0];
             jacobian[1][input] = tangential_derivative_force * tangent[1];
             jacobian[2][input] = axial_derivative_force;
@@ -13691,7 +14590,87 @@ fn velocity_vectors(velocity: &[f64], node_count: usize) -> Vec<[f64; 3]> {
         .collect()
 }
 
+/// Triangular facets of tetrahedral elements lying in the plane `z`,
+/// each returned once. A facet shared by two elements is interior and
+/// cannot lie in a domain boundary plane, so no sharing test is needed
+/// beyond deduplication.
+fn boundary_plane_facets(
+    nodes: &[Point3],
+    elements: &[sonium_fem::mesh::Element],
+    z: f64,
+    tolerance: f64,
+) -> Vec<[usize; 3]> {
+    let mut seen = std::collections::HashSet::new();
+    let mut facets = Vec::new();
+    for element in elements {
+        if element.element_type != sonium_fem::mesh::ElementType::Tetrahedron
+            || element.nodes.len() != 4
+        {
+            continue;
+        }
+        let n = &element.nodes;
+        for face in [
+            [n[0], n[1], n[2]],
+            [n[0], n[1], n[3]],
+            [n[0], n[2], n[3]],
+            [n[1], n[2], n[3]],
+        ] {
+            if face
+                .iter()
+                .all(|&node| (nodes[node].z - z).abs() <= tolerance)
+            {
+                let mut key = face;
+                key.sort_unstable();
+                if seen.insert(key) {
+                    facets.push(face);
+                }
+            }
+        }
+    }
+    facets
+}
+
+fn triangle_area_m2(a: Point3, b: Point3, c: Point3) -> f64 {
+    let ab = [b.x - a.x, b.y - a.y, b.z - a.z];
+    let ac = [c.x - a.x, c.y - a.y, c.z - a.z];
+    let cross = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    ];
+    0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt()
+}
+
 fn boundary_airflow_cfm(
+    nodes: &[Point3],
+    elements: &[sonium_fem::mesh::Element],
+    velocity_m_s: &[[f64; 3]],
+    z: f64,
+    area_m2: f64,
+    tolerance: f64,
+) -> f64 {
+    // Exact integration of the piecewise-linear axial velocity over the
+    // boundary facets: on each triangle the integral is the facet area
+    // times the mean nodal value. The separable nodal trapezoid this
+    // replaces does not integrate the triangular facet layout of the
+    // barycentric mesh (it manufactured double-digit inlet/outlet
+    // disagreement on fields whose exact facet fluxes balance).
+    let facets = boundary_plane_facets(nodes, elements, z, tolerance);
+    if !facets.is_empty() {
+        let mut flux_m3_s = 0.0;
+        for [a, b, c] in facets {
+            flux_m3_s += triangle_area_m2(nodes[a], nodes[b], nodes[c])
+                * (velocity_m_s[a][2] + velocity_m_s[b][2] + velocity_m_s[c][2])
+                / 3.0;
+        }
+        return flux_m3_s * M3S_TO_CFM;
+    }
+    boundary_airflow_cfm_trapezoid(nodes, velocity_m_s, z, area_m2, tolerance)
+}
+
+/// Nodal-trapezoid boundary flux, retained only as the fallback for
+/// meshes without tetrahedral boundary facets at the plane.
+fn boundary_airflow_cfm_trapezoid(
     nodes: &[Point3],
     velocity_m_s: &[[f64; 3]],
     z: f64,
@@ -13739,10 +14718,26 @@ fn boundary_airflow_cfm(
 /// exact same coordinate weights and degenerate-grid fallback.
 fn boundary_airflow_state_weights(
     nodes: &[Point3],
+    elements: &[sonium_fem::mesh::Element],
     z: f64,
     area_m2: f64,
     tolerance: f64,
 ) -> Vec<f64> {
+    // Exact facet weights matching [`boundary_airflow_cfm`]: each
+    // boundary node carries one third of the area of every boundary
+    // facet it belongs to.
+    let facets = boundary_plane_facets(nodes, elements, z, tolerance);
+    if !facets.is_empty() {
+        let mut weights = vec![0.0; nodes.len()];
+        for [a, b, c] in facets {
+            let weight =
+                triangle_area_m2(nodes[a], nodes[b], nodes[c]) / 3.0 * M3S_TO_CFM;
+            weights[a] += weight;
+            weights[b] += weight;
+            weights[c] += weight;
+        }
+        return weights;
+    }
     let mut weights = vec![0.0; nodes.len()];
     let samples = nodes
         .iter()
@@ -14806,5 +15801,70 @@ mod tests {
             ),
             Err(PcFanResolvedAdjointError::UnsupportedFlowModel(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod steady_fixture_convergence_tests {
+    use super::*;
+
+    // Regression: the 2x2x2 production fixture must reach the actual
+    // discrete steady solution (tight residual, forward pressure rise,
+    // fixture-level mass conservation), not an early-exit state on the
+    // globalization trajectory. The damped-Newton globalization
+    // (step halving exhausted before Levenberg escalation, no
+    // preemptive correction-norm bound) is what makes the cold
+    // full-speed solve land on that solution at both ends of the
+    // parity RPM sweep.
+    #[test]
+    fn steady_fixture_converges_to_discrete_solution_at_parity_rpms() {
+        for rpm in [600.0, 1200.0] {
+            let mut config = PcFanConfig::default_120mm();
+            config.mesh = PcFanMeshResolution {
+                radial_segments: 2,
+                chord_segments: 2,
+                circumferential_segments: 8,
+                harmonic_count: 2,
+            };
+            config.cfd.flow_model = PcFanFlowModel::IncompressibleCfd;
+            config.cfd.backend = PcFanCfdBackend::Cpu;
+            config.cfd.cells_x = 2;
+            config.cfd.cells_y = 2;
+            config.cfd.cells_z = 2;
+            config.cfd.use_direct_solver = true;
+            config.cfd.max_picard_iterations = 40;
+            config.cfd.nonlinear_tolerance = 2.0e-2;
+            config.cfd.max_relative_mass_imbalance = 0.10;
+            config.cfd.linear_solver_max_iterations = 300;
+            config.cfd.linear_solver_tolerance = 1.0e-4;
+            config.operating_point.rpm = rpm;
+            let design = config.default_design_variables();
+            let solution = solve_pc_fan_cfd_mean_flow(&config, &design);
+            assert!(
+                solution.converged,
+                "rpm {rpm}: steady fixture did not converge (residual {:.3e})",
+                solution.residual
+            );
+            assert!(
+                solution.residual < 1.0e-6,
+                "rpm {rpm}: converged residual {:.3e} is not the tight discrete solution",
+                solution.residual
+            );
+            assert!(
+                solution.conservation.relative_mass_imbalance < 0.10,
+                "rpm {rpm}: mass imbalance {:.3e} exceeds the fixture gate",
+                solution.conservation.relative_mass_imbalance
+            );
+            assert!(
+                solution.pressure_drop_pa < 0.0,
+                "rpm {rpm}: pressure drop {:.3e} Pa is not a forward fan rise",
+                solution.pressure_drop_pa
+            );
+            assert!(
+                solution.airflow_cfm > 10.0,
+                "rpm {rpm}: airflow {:.3e} CFM is not a developed fan state",
+                solution.airflow_cfm
+            );
+        }
     }
 }

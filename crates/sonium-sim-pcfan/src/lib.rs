@@ -41,6 +41,7 @@ pub use annular_fwh::{
 };
 #[doc(inline)]
 pub use cfd::evaluate_pc_fan_cfd_newton_state_linearization;
+#[doc(hidden)]
 pub use cfd::{
     PC_FAN_TRANSPORTED_BDF_NEWTON_PROVENANCE, PcFanCfdBodyFittedRemeshLevel,
     PcFanCfdTransientBdfState, PcFanCfdTransientConvergence, PcFanCfdTransientConvergenceConfig,

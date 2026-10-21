@@ -52,8 +52,11 @@ fn steady_config(backend: PcFanCfdBackend) -> PcFanConfig {
     config.cfd.cells_x = 2;
     config.cfd.cells_y = 2;
     config.cfd.cells_z = 2;
-    config.cfd.max_picard_iterations = 4;
+    config.cfd.max_picard_iterations = 40;
     config.cfd.nonlinear_tolerance = 2.0e-2;
+    // Same eight-element fixture as the forward contract: the converged
+    // discrete solution carries ~8% nodal-flux imbalance from discretisation.
+    config.cfd.max_relative_mass_imbalance = 0.10;
     // PF2 compares nonlinear observables, so the backend linear solves must
     // be substantially tighter than the parity budget.  The former 1e-4
     // inner tolerance let CPU ILU and CUDA polynomial-Jacobi stop at visibly

@@ -26,6 +26,11 @@ fn run() -> Result<String, String> {
         // conflates backend parity with nonlinear stopping-path differences.
         config.cfd.max_picard_iterations = 1;
         config.cfd.nonlinear_tolerance = 2.0;
+        // Both backends must solve the identical linearized step to near
+        // machine precision: at the default 1e-4 inner tolerance the CPU
+        // ILUT-Schur and CUDA polynomial-Jacobi iterates stop at visibly
+        // different states and swamp the 5e-3 parity budget.
+        config.cfd.linear_solver_tolerance = 1.0e-12;
         config.cfd.max_relative_mass_imbalance = 10.0;
         config.cfd.max_relative_momentum_imbalance = 10.0;
         config.cfd.max_relative_pressure_closure = 10.0;

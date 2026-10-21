@@ -17,6 +17,7 @@ use sonium_fem::backend_selection::FemPreconditionerKind;
 use sonium_sim_room::SimulationOutput;
 use sonium_sim_room::fem_runner::{self, FemMeshConfig, RecyclerKind, complex_wavenumber};
 use sonium_sim_room::scenarios::{self, FrequencyConfig};
+use sonium_xem::FrequencySpacing;
 use sonium_xem::{Point3D, RoomGeometry, RoomSimulation};
 
 #[derive(Parser, Debug)]
@@ -237,6 +238,7 @@ fn run() -> Result<()> {
         min_freq: args.min_freq,
         max_freq: args.max_freq,
         num_points: args.num_freqs,
+        spacing: FrequencySpacing::default(),
     };
     let scenario = scenarios::scenario_by_name_with_config(&args.scenario, &freq_config)
         .ok_or_else(|| anyhow::anyhow!("scenario not found: {}", args.scenario))?;

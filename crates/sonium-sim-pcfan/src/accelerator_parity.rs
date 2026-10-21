@@ -16,6 +16,18 @@ use std::fmt;
 
 const METRIC_COUNT: usize = 9;
 
+/// Index of the first dimensionless conservation ledger in `metric_values`
+/// (mass, momentum, pressure closure, energy). Earlier entries are physical
+/// observables (airflow, pressure drop, velocity, Reynolds number).
+const FIRST_CONSERVATION_METRIC_INDEX: usize = 4;
+
+/// Conservation ledgers at or below this magnitude are solver round-off:
+/// their ideal value is zero, and backends with different preconditioners
+/// cancel boundary fluxes to different last bits. Observed cross-backend
+/// noise is ~1e-13; the production mass-balance gate is 1e-2, so this floor
+/// sits far below any physically meaningful imbalance.
+const CONSERVATION_NOISE_FLOOR: f64 = 1.0e-9;
+
 /// One RPM-aligned resolved-flow backend observation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PcFanAcceleratorParityObservation {
@@ -470,6 +482,16 @@ pub fn evaluate_pc_fan_accelerator_dataset_parity(
             .enumerate()
         {
             let scale = reference_value.abs().max(candidate_value.abs());
+            // The conservation ledgers are relative residuals whose ideal
+            // value is zero. Below the noise floor both backends are
+            // reporting solver round-off (different preconditioners cancel
+            // the boundary fluxes to different last bits), so the ratio of
+            // the two residuals carries no parity signal. Metrics with any
+            // physical magnitude keep the strict relative comparison.
+            if metric_index >= FIRST_CONSERVATION_METRIC_INDEX && scale <= CONSERVATION_NOISE_FLOOR
+            {
+                continue;
+            }
             if scale <= f64::EPSILON {
                 if (reference_value - candidate_value).abs() > f64::EPSILON {
                     return Err(PcFanAcceleratorParityError::EmptyMetricScale {
@@ -663,11 +685,23 @@ fn relative_difference(reference: f64, candidate: f64) -> f64 {
     }
 }
 
+/// Relative difference for a dimensionless conservation ledger whose ideal
+/// value is zero. Ledgers at or below `CONSERVATION_NOISE_FLOOR` on both
+/// backends are solver round-off and agree by definition; larger ledgers
+/// keep the strict relative comparison.
+fn ratio_relative_difference(reference: f64, candidate: f64) -> f64 {
+    if reference.abs().max(candidate.abs()) <= CONSERVATION_NOISE_FLOOR {
+        0.0
+    } else {
+        relative_difference(reference, candidate)
+    }
+}
+
 fn conservation_relative_difference(
     reference: PcFanCfdConservation,
     candidate: PcFanCfdConservation,
 ) -> f64 {
-    [
+    let dimensional = [
         (
             reference.inlet_mass_flow_kg_s,
             candidate.inlet_mass_flow_kg_s,
@@ -675,10 +709,6 @@ fn conservation_relative_difference(
         (
             reference.outlet_mass_flow_kg_s,
             candidate.outlet_mass_flow_kg_s,
-        ),
-        (
-            reference.relative_mass_imbalance,
-            candidate.relative_mass_imbalance,
         ),
         (
             reference.inlet_axial_momentum_flux_n,
@@ -695,21 +725,30 @@ fn conservation_relative_difference(
             candidate.axial_momentum_residual_n,
         ),
         (
-            reference.relative_momentum_imbalance,
-            candidate.relative_momentum_imbalance,
-        ),
-        (
             reference.pressure_force_from_loading_n,
             candidate.pressure_force_from_loading_n,
-        ),
-        (
-            reference.relative_pressure_closure,
-            candidate.relative_pressure_closure,
         ),
         (reference.pressure_power_w, candidate.pressure_power_w),
         (
             reference.shaft_power_to_fluid_w,
             candidate.shaft_power_to_fluid_w,
+        ),
+    ]
+    .into_iter()
+    .map(|(reference, candidate)| relative_difference(reference, candidate))
+    .fold(0.0, f64::max);
+    let ledgers = [
+        (
+            reference.relative_mass_imbalance,
+            candidate.relative_mass_imbalance,
+        ),
+        (
+            reference.relative_momentum_imbalance,
+            candidate.relative_momentum_imbalance,
+        ),
+        (
+            reference.relative_pressure_closure,
+            candidate.relative_pressure_closure,
         ),
         (
             reference.relative_energy_imbalance,
@@ -717,8 +756,9 @@ fn conservation_relative_difference(
         ),
     ]
     .into_iter()
-    .map(|(reference, candidate)| relative_difference(reference, candidate))
-    .fold(0.0, f64::max)
+    .map(|(reference, candidate)| ratio_relative_difference(reference, candidate))
+    .fold(0.0, f64::max);
+    dimensional.max(ledgers)
 }
 
 fn validate_config(
@@ -921,6 +961,47 @@ mod tests {
         assert!(report.passed);
         assert_eq!(report.sample_count, 3);
         assert!(report.max_relative_errors.iter().all(|error| *error > 0.0));
+    }
+
+    #[test]
+    fn parity_ignores_roundoff_conservation_ledgers_but_not_real_ones() {
+        // Both backends report mass imbalance at solver round-off
+        // (2.3e-13 vs 5.8e-15): a 97% relative difference that carries no
+        // physical signal and must not fail parity.
+        let (mut reference, mut candidate) = datasets(1.0);
+        for observation in &mut reference.observations {
+            observation.relative_mass_imbalance = 2.28e-13;
+        }
+        for observation in &mut candidate.observations {
+            observation.relative_mass_imbalance = 5.8e-15;
+        }
+        let report = evaluate_pc_fan_accelerator_dataset_parity(
+            &PcFanAcceleratorParityConfig::default(),
+            &reference,
+            &candidate,
+        )
+        .unwrap();
+        assert!(report.passed, "round-off ledgers must pass: {report:?}");
+        assert_eq!(report.max_relative_errors[4], 0.0);
+
+        // A conservation ledger with physical magnitude (1e-4 vs 2e-4)
+        // keeps the strict relative comparison and must fail a 0.2%
+        // budget.
+        let (mut reference, mut candidate) = datasets(1.0);
+        for observation in &mut reference.observations {
+            observation.relative_mass_imbalance = 1.0e-4;
+        }
+        for observation in &mut candidate.observations {
+            observation.relative_mass_imbalance = 2.0e-4;
+        }
+        let report = evaluate_pc_fan_accelerator_dataset_parity(
+            &PcFanAcceleratorParityConfig::default(),
+            &reference,
+            &candidate,
+        )
+        .unwrap();
+        assert!(!report.passed, "real ledger mismatch must fail: {report:?}");
+        assert!(report.max_relative_errors[4] > 0.4);
     }
 
     #[test]
