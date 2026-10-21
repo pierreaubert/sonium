@@ -226,6 +226,8 @@ pub enum BlrError {
         "numerically singular matrix: root front {0} still has postponed pivots after delayed pivoting"
     )]
     SingularFront(usize),
+    #[error("CSR sparsity pattern does not match the reusable symbolic analysis")]
+    PatternMismatch,
 }
 
 impl BlrError {
@@ -241,6 +243,7 @@ impl BlrError {
             | Self::NonFiniteMatrix { .. }
             | Self::InvalidConfiguration { .. }
             | Self::DimensionMismatch { .. }
+            | Self::PatternMismatch
             | Self::NonFiniteRhs { .. } => SolverStatus::NumericalError,
         }
     }
@@ -284,6 +287,132 @@ impl SolverFailure for BlrError {
     }
 }
 
+/// Reusable symbolic analysis for multifrontal factorization.
+///
+/// Holds the nested-dissection assembly tree (elimination ordering,
+/// fronts, and level schedule) plus the CSR pattern it was built
+/// from. Factorizing a sequence of matrices that share one sparsity
+/// pattern — the standard fixed-pattern situation in Newton and
+/// time-stepping loops — pays the ordering and tree construction
+/// once and then reuses it through
+/// [`MultifrontalBlrFactorization::factorize_with_symbolic`].
+#[derive(Debug, Clone)]
+pub struct MultifrontalSymbolic {
+    n: usize,
+    tree: AssemblyTree,
+    row_ptrs: Vec<usize>,
+    col_indices: Vec<usize>,
+    min_block_size: usize,
+    max_levels: Option<usize>,
+    amalgamation_threshold: usize,
+}
+
+impl MultifrontalSymbolic {
+    /// Analyze a matrix's sparsity pattern for repeated factorization.
+    ///
+    /// Only the pattern and the tree-shaping configuration fields
+    /// (`min_block_size`, `max_levels`, `amalgamation_threshold`) are
+    /// consumed here; the numeric configuration is supplied again at
+    /// factorization time.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BlrError::NotSquare`] for a non-square matrix,
+    /// [`BlrError::InvalidCsrStructure`] for malformed CSR, and
+    /// [`BlrError::InvalidConfiguration`] for a non-finite or
+    /// negative numeric configuration field.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use sonium_solvers_direct::{BlrConfig, MultifrontalBlrFactorization, MultifrontalSymbolic};
+    /// use sonium_solvers_sparse::CsrMatrix;
+    ///
+    /// let matrix = CsrMatrix::from_raw_parts(
+    ///     2,
+    ///     2,
+    ///     vec![0, 2, 4],
+    ///     vec![0, 1, 0, 1],
+    ///     vec![2.0_f64, 0.5, 0.5, 3.0],
+    /// );
+    /// let config = BlrConfig { epsilon: 0.0, ..BlrConfig::default() };
+    /// let symbolic = MultifrontalSymbolic::analyze(&matrix, &config).unwrap();
+    /// let factorization =
+    ///     MultifrontalBlrFactorization::factorize_with_symbolic(&matrix, &symbolic, &config)
+    ///         .unwrap();
+    /// let solution = factorization.try_solve(&[1.0, 2.0]).unwrap();
+    /// assert!((solution[0] - 0.34783).abs() < 1.0e-4);
+    /// ```
+    pub fn analyze<T: ComplexField>(
+        matrix: &CsrMatrix<T>,
+        cfg: &BlrConfig,
+    ) -> Result<Self, BlrError> {
+        let n = matrix.num_rows;
+        if n != matrix.num_cols {
+            return Err(BlrError::NotSquare {
+                rows: matrix.num_rows,
+                cols: matrix.num_cols,
+            });
+        }
+        matrix
+            .validate_structure()
+            .map_err(|error| BlrError::InvalidCsrStructure(error.to_string()))?;
+        validate_blr_config(cfg)?;
+        let tree = if n == 0 {
+            AssemblyTree {
+                perm: Vec::new(),
+                perm_inv: Vec::new(),
+                fronts: Vec::new(),
+                levels: Vec::new(),
+            }
+        } else {
+            let raw_tree = build_assembly_tree(matrix, cfg.min_block_size.max(1), cfg.max_levels);
+            if cfg.amalgamation_threshold > 0 {
+                amalgamate_tree(&raw_tree, cfg.amalgamation_threshold)
+            } else {
+                raw_tree
+            }
+        };
+        Ok(Self {
+            n,
+            tree,
+            row_ptrs: matrix.row_ptrs.clone(),
+            col_indices: matrix.col_indices.clone(),
+            min_block_size: cfg.min_block_size,
+            max_levels: cfg.max_levels,
+            amalgamation_threshold: cfg.amalgamation_threshold,
+        })
+    }
+
+    /// Matrix dimension the analysis was built for.
+    pub fn dimension(&self) -> usize {
+        self.n
+    }
+
+    /// Number of fronts in the assembly tree.
+    pub fn front_count(&self) -> usize {
+        self.tree.fronts.len()
+    }
+
+    /// Elimination ordering: `permutation()[k]` is the global DOF
+    /// eliminated at step `k`.
+    pub fn permutation(&self) -> &[usize] {
+        &self.tree.perm
+    }
+}
+
+fn validate_blr_config(cfg: &BlrConfig) -> Result<(), BlrError> {
+    if !cfg.epsilon.is_finite() || cfg.epsilon < 0.0 {
+        return Err(BlrError::InvalidConfiguration { field: "epsilon" });
+    }
+    if !cfg.pivot_tol_multiplier.is_finite() || cfg.pivot_tol_multiplier < 0.0 {
+        return Err(BlrError::InvalidConfiguration {
+            field: "pivot_tol_multiplier",
+        });
+    }
+    Ok(())
+}
+
 /// Multifrontal sparse-LU factorisation with BLR compression.
 pub struct MultifrontalBlrFactorization<T: ComplexField> {
     n: usize,
@@ -304,46 +433,63 @@ impl<T: ComplexField + FromPrimitive> MultifrontalBlrFactorization<T> {
 
     /// Factorise with a custom configuration.
     pub fn factorize_with_config(matrix: &CsrMatrix<T>, cfg: &BlrConfig) -> Result<Self, BlrError> {
+        let symbolic = MultifrontalSymbolic::analyze(matrix, cfg)?;
+        Self::factorize_with_symbolic(matrix, &symbolic, cfg)
+    }
+
+    /// Factorize with a reusable symbolic analysis.
+    ///
+    /// The matrix must have the same dimension and CSR sparsity
+    /// pattern as the matrix the symbolic analysis was built from;
+    /// only its numeric values may differ. The tree-shaping
+    /// configuration fields recorded in the symbolic analysis
+    /// (`min_block_size`, `max_levels`, `amalgamation_threshold`)
+    /// must match the supplied configuration; the remaining fields
+    /// steer the numeric phase and may differ from the analysis call.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BlrError::PatternMismatch`] when the pattern
+    /// differs, [`BlrError::DimensionMismatch`] when the dimension
+    /// differs, [`BlrError::NonFiniteMatrix`] for non-finite values,
+    /// and [`BlrError::InvalidConfiguration`] for invalid or
+    /// tree-inconsistent configuration fields.
+    pub fn factorize_with_symbolic(
+        matrix: &CsrMatrix<T>,
+        symbolic: &MultifrontalSymbolic,
+        cfg: &BlrConfig,
+    ) -> Result<Self, BlrError> {
         let n = matrix.num_rows;
-        if n != matrix.num_cols {
-            return Err(BlrError::NotSquare {
-                rows: matrix.num_rows,
-                cols: matrix.num_cols,
+        if n != symbolic.n || matrix.num_cols != symbolic.n {
+            return Err(BlrError::DimensionMismatch {
+                expected: symbolic.n,
+                actual: n,
             });
+        }
+        if matrix.row_ptrs != symbolic.row_ptrs || matrix.col_indices != symbolic.col_indices {
+            return Err(BlrError::PatternMismatch);
         }
         if let Some(index) = first_non_finite(&matrix.values) {
             return Err(BlrError::NonFiniteMatrix { index });
         }
-        matrix
-            .validate_structure()
-            .map_err(|error| BlrError::InvalidCsrStructure(error.to_string()))?;
-        if !cfg.epsilon.is_finite() || cfg.epsilon < 0.0 {
-            return Err(BlrError::InvalidConfiguration { field: "epsilon" });
-        }
-        if !cfg.pivot_tol_multiplier.is_finite() || cfg.pivot_tol_multiplier < 0.0 {
+        validate_blr_config(cfg)?;
+        if cfg.min_block_size != symbolic.min_block_size
+            || cfg.max_levels != symbolic.max_levels
+            || cfg.amalgamation_threshold != symbolic.amalgamation_threshold
+        {
             return Err(BlrError::InvalidConfiguration {
-                field: "pivot_tol_multiplier",
+                field: "symbolic tree configuration",
             });
         }
         if n == 0 {
             return Ok(Self {
                 n: 0,
-                tree: AssemblyTree {
-                    perm: Vec::new(),
-                    perm_inv: Vec::new(),
-                    fronts: Vec::new(),
-                    levels: Vec::new(),
-                },
+                tree: symbolic.tree.clone(),
                 fronts: Vec::new(),
             });
         }
 
-        let raw_tree = build_assembly_tree(matrix, cfg.min_block_size.max(1), cfg.max_levels);
-        let tree = if cfg.amalgamation_threshold > 0 {
-            amalgamate_tree(&raw_tree, cfg.amalgamation_threshold)
-        } else {
-            raw_tree
-        };
+        let tree = symbolic.tree.clone();
         let a_perm = permute_matrix(matrix, &tree.perm_inv);
         let epsilon = T::Real::from_f64(cfg.epsilon)
             .filter(|value| value.is_finite())
@@ -497,6 +643,83 @@ mod tests {
         } else {
             r_norm / b_norm
         }
+    }
+
+    #[test]
+    fn symbolic_reuse_factorizes_same_pattern_with_new_values() {
+        let config = BlrConfig {
+            epsilon: 0.0,
+            ..BlrConfig::default()
+        };
+        let first = make_2d_laplacian_f64(12);
+        let symbolic = MultifrontalSymbolic::analyze(&first, &config).expect("analyze");
+        assert_eq!(symbolic.dimension(), first.num_rows);
+        assert!(symbolic.front_count() > 0);
+        assert_eq!(symbolic.permutation().len(), first.num_rows);
+
+        // Same pattern, different numeric values.
+        let mut second = first.clone();
+        for value in second.values.iter_mut() {
+            *value *= 1.7;
+        }
+        second.values[0] += 0.5;
+        let rhs: Vec<f64> = (0..second.num_rows).map(|i| (i as f64).sin()).collect();
+        let factorization =
+            MultifrontalBlrFactorization::factorize_with_symbolic(&second, &symbolic, &config)
+                .expect("factorize with reused symbolic");
+        let solution = factorization.try_solve(&rhs).expect("solve");
+        assert!(rel_residual_f64(&second, &solution, &rhs) < 1.0e-10);
+
+        // Reuse must match a from-scratch factorization of the same matrix.
+        let reference =
+            MultifrontalBlrFactorization::factorize_with_config(&second, &config).expect("fresh");
+        let reference_solution = reference.try_solve(&rhs).expect("reference solve");
+        for (actual, expected) in solution.iter().zip(&reference_solution) {
+            assert!((actual - expected).abs() < 1.0e-9);
+        }
+    }
+
+    #[test]
+    fn symbolic_reuse_rejects_mismatched_pattern_and_tree_config() {
+        let config = BlrConfig {
+            epsilon: 0.0,
+            ..BlrConfig::default()
+        };
+        let matrix = make_2d_laplacian_f64(8);
+        let symbolic = MultifrontalSymbolic::analyze(&matrix, &config).expect("analyze");
+
+        // Drop one stored entry: same dimension, different pattern.
+        let mut sparser = matrix.clone();
+        sparser.col_indices.remove(3);
+        sparser.values.remove(3);
+        for ptr in sparser.row_ptrs.iter_mut().skip(2) {
+            *ptr -= 1;
+        }
+        let Err(error) = MultifrontalBlrFactorization::factorize_with_symbolic(
+            &sparser,
+            &symbolic,
+            &config,
+        ) else {
+            panic!("pattern mismatch must be rejected");
+        };
+        assert!(matches!(error, BlrError::PatternMismatch));
+
+        // Tree-shaping fields recorded at analysis time must be honored.
+        let other_config = BlrConfig {
+            min_block_size: config.min_block_size + 1,
+            ..config.clone()
+        };
+        let Err(error) =
+            MultifrontalBlrFactorization::factorize_with_symbolic(&matrix, &symbolic, &other_config)
+        else {
+            panic!("tree-inconsistent config must be rejected");
+        };
+        assert!(matches!(
+            error,
+            BlrError::InvalidConfiguration {
+                field: "symbolic tree configuration"
+            }
+        ));
     }
 
     #[test]

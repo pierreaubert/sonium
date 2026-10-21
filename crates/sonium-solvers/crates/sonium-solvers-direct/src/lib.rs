@@ -27,6 +27,7 @@ pub mod gpu;
 pub(crate) mod lu;
 pub mod multifrontal_blr;
 pub mod multifrontal_ldlt;
+pub mod saddle_schur;
 pub mod sparse_cholesky;
 pub mod sparse_cholesky_supernodal;
 pub mod sparse_lu;
@@ -63,10 +64,14 @@ pub use lu::{
 };
 pub use multifrontal_blr::{
     BlrConfig, BlrError, IrConfig, IrError, IrResult, IterativeRefinement, LowRankPrecision,
-    MixedPrecisionRefinement, MultifrontalBlrFactorization, PanelKind, PivotStrategy, UpdateOrder,
+    MixedPrecisionRefinement, MultifrontalBlrFactorization, MultifrontalSymbolic, PanelKind,
+    PivotStrategy, UpdateOrder,
 };
 pub use multifrontal_ldlt::{
     LdltBlrConfig, LdltConfig, MatrixInertia, MultifrontalLdltFactorization,
+};
+pub use saddle_schur::{
+    SaddleBlocks, SaddlePointSchurSolver, SaddleSchurError, saddle_blocks_from_monolithic,
 };
 pub use sparse_cholesky::{
     CholeskyOrdering, SPARSE_CHOLESKY_CHECKPOINT_FORMAT_VERSION, SparseCholeskyError,
