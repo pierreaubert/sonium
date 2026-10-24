@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-22",
+  "scope": "Checked default ILU(0) factors with resident CUDA dependency-level triangular application and persistent GMRES facade integration.",
+  "source_sha256": {
+    "crates/sonium-solvers/src/solve.rs": "86bbf51775795c790c0d7ae27a7aebce2a9d182444f4019b3f664fde66a26111",
+    "crates/sonium-solvers/src/solve/cuda_session.rs": "c95f9ae9e9aebad852c030ac46c28e4c2f353bff73c4fc211f28846009efb1fa",
+    "crates/sonium-solvers/src/solve/cuda_session/preconditioner.rs": "30544b8c41cea5f50bb8d89478ba83fc2c09716d0f841165e2743a0461fb04c6",
+    "crates/sonium-solvers/src/solve/cuda_session/update.rs": "8fef96586394d78d9bc233dae1d09e536bfffc3402626659ba4dc88248e3fb8a",
+    "crates/sonium-solvers/src/solve/cuda_session/prepared.rs": "2aacc73df11db14b488cde7dbff5c689345fba936a0eb6c76591ceb580568630",
+    "crates/sonium-solvers/src/solve/cuda_session_tests.rs": "d5a0b1ef5c0717a4c7c519612a9a26172596a04d632104d78734d050ac976861",
+    "crates/sonium-solvers/src/solve/cuda_session_refresh_tests.rs": "b3a8ab4afde8b2fcb27f60895cd248ec67fd1b489f2c0ca37d83d6b6e1804ed3",
+    "crates/sonium-compute/src/preconditioner/chebyshev.rs": "3a47b8f8032034920d6b1f3a8e520e3f80fbe009f56a4f66daeac42a50a04330",
+    "crates/sonium-compute/src/preconditioner/matrix.rs": "ed07c433c26e1831186744a01554dc1db9b9cceca5079effa50d4fe0e3c6a627",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/chebyshev.rs": "1b89fb8ecc211b66d276f61ea096abad7b6755e45014d275e81654dfd3618007",
+    "crates/sonium-compute/src/cuda/cublas.rs": "53e30ccbbb9fcd6b15927cf67a596610dc818b7da3f129165b4694078cfa337f",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/cuda_ilu.rs": "227e4de67573595567ee711daf446d308789a37357ace799626657dd197fa1c2",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/ilu.rs": "d021f2abc4c0fe5f00d8e6bd5d2ccc71123019b6256240c5de0c5710438a00ce",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/lib.rs": "67eb5301b5bc368cb380feda12c16a982271f103c363e502d59aacce0d44d051"
+  },
+  "binary_sha256": {
+    "target/debug/deps/sonium_solvers-98cd8e88718c92bf": "e8c48c51a3c5bb3b3c05a0a0323e0b280910f48e870d819e2b7bf2018355ec16",
+    "target/debug/deps/sonium_solvers_preconditioners-f012f588996b91d9": "4522ec7cf80c4a569116059a0fbc55af52824216ec5e8cfe364b69149bb84bad"
+  },
+  "result": "\nrunning 7 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_chebyshev_rejects_nonreal_coefficients_before_upload ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 7.67s\n\n",
+  "factor_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest cuda_ilu::tests::native_ilu_matches_cpu_factors_all_scalars_and_small_pivots ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 250 filtered out; finished in 0.97s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "facade_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 7 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_chebyshev_rejects_nonreal_coefficients_before_upload ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 83.22s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "contract": {
+    "scalars": [
+      "f32",
+      "f64",
+      "Complex32",
+      "Complex64"
+    ],
+    "setup": "checked CPU default ILU(0), no reordering; upload lower and normalized unit-diagonal upper factors and dependency levels",
+    "apply": "native existing row-sweep primitive at omega=1 in topological level order, plus resident inverse-diagonal action; not an approximate iterative triangular solve",
+    "refresh": "host refactorization; factor values/inverse update in place when patterns agree, otherwise replace preconditioner",
+    "admission": "native row kernel availability and scalar support required before preconditioner allocation",
+    "failure": "interrupted uploads invalidate factors until complete refresh; facade also invalidates publication/warm state",
+    "memory": "two triangular CSR factors, inverse-diagonal CSR, per-level row lists and three scratch vectors; raw allocation quota limitations remain"
+  },
+  "validation": {
+    "cpu_compute_tests": 655,
+    "cpu_preconditioner_tests": 241,
+    "cpu_facade_tests": 117,
+    "native_facade_tests": 7,
+    "native_factor_test": 1,
+    "memcheck_errors": 0,
+    "factor_parity": "CPU ILU on nonsymmetric matrices, disconnected components/isolated row, four scalars, scales 1 and 1e-20, three RHS each",
+    "residency": "factor application zero allocations/H2D/D2H; compatible facade update zero device allocations and D2H; warm facade solve zero allocations",
+    "recovery": "native launch leaves preconditioner output unchanged; interrupted factor refresh blocks apply until repair; facade transfer/diagonal failure recovery",
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_test_clippy": "passed with existing warnings"
+  },
+  "limitations": [
+    "No speedup claim. Long dependency chains require many row-sweep launches; vendor or dedicated triangular kernels remain a performance candidate.",
+    "Factorization and numeric refactorization remain host work.",
+    "Default no-reordering ILU(0) only; transpose/Hermitian/block workflows and reordered variants remain open.",
+    "Normalized upper coefficients must remain finite; checked construction rejects overflow.",
+    "The facade memcheck was built before a test-only change to the standalone factor fixture; facade and runtime implementation were unchanged, and final native facade tests passed again.",
+    "Full CUDA workflow coverage remains incomplete.",
+    "Separate older BEM scattering sanitizer remains pending."
+  ]
+}

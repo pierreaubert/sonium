@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-22",
+  "scope": "Native fixed-pattern effective-matrix combination in retained thermal theta updates",
+  "implementation": [
+    "PersistentDeviceCsr::try_combine_scaled_values composes device copy, scale and axpy without host staging",
+    "Existing unscaled combination retains its old call sequence without an extra scale",
+    "Thermal setup aligns and uploads two immutable numeric bases to the effective CSR pattern",
+    "Scheme changes form effective device values as M/dt + theta*K before refreshing AMG"
+  ],
+  "memory_tradeoff": "Two additional pooled f64 arrays, 16*effective_nnz bytes; host matrices remain for AMG preparation",
+  "checks": {
+    "compute_cpu_passed": 655,
+    "fem_cpu_passed": 1963,
+    "fem_cpu_ignored": 1,
+    "native_thermal_passed": 5,
+    "variable_scheme_steps": 10,
+    "maximum_cpu_step_discrepancy": 9.154641489317328e-10,
+    "memcheck_tests": 2,
+    "memcheck_errors": 0,
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_compute_fem_clippy": "passed with existing warnings"
+  },
+  "failure_contract": [
+    "D2D failure leaves committed history unchanged and blocks stepping until repair",
+    "AMG H2D failure after effective device combination leaves committed history unchanged and blocks stepping until repair",
+    "Both complete-update retries recover and subsequent scalar thermal step matches exact result"
+  ],
+  "test_correction": "Custom-kernel Launch injection is not consumed by cuBLAS scale/axpy; this inapplicable assertion was removed, not counted as passed",
+  "limits": [
+    "AMG setup and host hierarchy combination remain CPU work",
+    "AMG refresh still uploads hierarchy data and may rebuild storage",
+    "Zero transfers apply to the effective-matrix combination, not the whole update",
+    "No measured wall-clock speedup",
+    "Fixed mass/stiffness/constraints and effective sparsity only"
+  ],
+  "source_sha256": {
+    "crates/sonium-compute/src/operator.rs": "7dc72dd04eb8171a3b175d138727a7dcbca91b47d8938ba49ddb77b5d999c391",
+    "crates/sonium-fem/src/physics/thermal/heat_conduction/device_time.rs": "9e013627ef27d0fd3317d619dddab445a0f659959175fa5be58f1ebfa6a9136a",
+    "crates/sonium-fem/src/physics/thermal/heat_conduction/device_time/tests.rs": "11424953854d1327ab59047282c33575df61eb5b2be29a60cf3c7d21e22f3e5a"
+  },
+  "logs": [
+    "/tmp/thermal-combine-native-final.log",
+    "/tmp/thermal-combine-memcheck.log",
+    "/tmp/thermal-combine-compute.log",
+    "/tmp/thermal-combine-fem-cpu.log",
+    "/tmp/thermal-combine-check.log",
+    "/tmp/thermal-combine-clippy.log",
+    "/tmp/thermal-combine-cuda-clippy.log"
+  ]
+}

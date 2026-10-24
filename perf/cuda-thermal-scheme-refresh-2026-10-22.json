@@ -1,0 +1,136 @@
+{
+  "date": "2026-10-22",
+  "scope": "Retained linear thermal theta scheme changes at fixed effective CSR sparsity",
+  "results": [
+    {
+      "dimension": 2,
+      "step": 0,
+      "dt": 0.001,
+      "theta": 1.0,
+      "preconditioner_rebuilt": false,
+      "cpu_max_abs_error": 2.3154245187839706e-10,
+      "true_residual": 6.298159194882086e-11
+    },
+    {
+      "dimension": 2,
+      "step": 1,
+      "dt": 0.0005,
+      "theta": 0.5,
+      "preconditioner_rebuilt": true,
+      "cpu_max_abs_error": 3.415950855512051e-10,
+      "true_residual": 5.051027956380061e-11
+    },
+    {
+      "dimension": 2,
+      "step": 2,
+      "dt": 0.002,
+      "theta": 0.75,
+      "preconditioner_rebuilt": true,
+      "cpu_max_abs_error": 3.1970204261710933e-10,
+      "true_residual": 3.2652505608620395e-11
+    },
+    {
+      "dimension": 2,
+      "step": 3,
+      "dt": 1e-05,
+      "theta": 0.0,
+      "preconditioner_rebuilt": true,
+      "cpu_max_abs_error": 2.8204405477794126e-10,
+      "true_residual": 2.9437468052067894e-11
+    },
+    {
+      "dimension": 2,
+      "step": 4,
+      "dt": 0.001,
+      "theta": 1.0,
+      "preconditioner_rebuilt": true,
+      "cpu_max_abs_error": 3.464656894713869e-10,
+      "true_residual": 3.416256193789026e-11
+    },
+    {
+      "dimension": 3,
+      "step": 0,
+      "dt": 0.001,
+      "theta": 1.0,
+      "preconditioner_rebuilt": false,
+      "cpu_max_abs_error": 5.050518336879861e-11,
+      "true_residual": 1.3808102227166064e-11
+    },
+    {
+      "dimension": 3,
+      "step": 1,
+      "dt": 0.0005,
+      "theta": 0.5,
+      "preconditioner_rebuilt": false,
+      "cpu_max_abs_error": 2.2343982220007774e-10,
+      "true_residual": 2.4306396388739066e-11
+    },
+    {
+      "dimension": 3,
+      "step": 2,
+      "dt": 0.002,
+      "theta": 0.75,
+      "preconditioner_rebuilt": false,
+      "cpu_max_abs_error": 1.0028261554495543e-10,
+      "true_residual": 3.47815944981113e-11
+    },
+    {
+      "dimension": 3,
+      "step": 3,
+      "dt": 1e-05,
+      "theta": 0.0,
+      "preconditioner_rebuilt": true,
+      "cpu_max_abs_error": 4.332049718946962e-10,
+      "true_residual": 9.219517783086467e-11
+    },
+    {
+      "dimension": 3,
+      "step": 4,
+      "dt": 0.001,
+      "theta": 1.0,
+      "preconditioner_rebuilt": true,
+      "cpu_max_abs_error": 9.154639268871279e-10,
+      "true_residual": 6.626907646708258e-11
+    }
+  ],
+  "checks": {
+    "native_thermal_tests": 5,
+    "cpu_fem_passed": 1963,
+    "cpu_fem_ignored": 1,
+    "memcheck_refresh_tests": 2,
+    "memcheck_errors": 0,
+    "repeated_identical_updates_with_zero_device_allocations": 10,
+    "post_first_steps_with_zero_device_allocations": 8,
+    "steps_with_zero_h2d_bytes": 10,
+    "root_cargo_check": "passed",
+    "root_cargo_clippy": "passed with existing warnings",
+    "cuda_fem_clippy": "passed with existing warnings"
+  },
+  "failure_contract": [
+    "Invalid schemes rejected before device work",
+    "Failed upload blocks steps until a complete update succeeds",
+    "Committed temperature and step count survive failed update",
+    "Recovery followed by changed-scheme step matches exact scalar reference"
+  ],
+  "limitations": [
+    "Mass and stiffness remain fixed; changed constraints require new session",
+    "Host mass/stiffness copies retained for effective-matrix combination",
+    "Effective combination and AMG hierarchy construction remain host work with uploads on updates",
+    "Changed AMG hierarchy may allocate; no universal allocation-free update claim",
+    "Caller supplies SPD assumption and source boundary lifting",
+    "Explicit theta stability remains caller responsibility",
+    "No speedup measurement or whole-CUDA-coverage claim"
+  ],
+  "source_sha256": {
+    "crates/sonium-fem/src/physics/thermal/heat_conduction/device_time.rs": "f5908cc8e1f7ac9ef790308898fd67de9491583d99bb64bec91b9e17342dd571",
+    "crates/sonium-fem/src/physics/thermal/heat_conduction/device_time/tests.rs": "d9457ace058606c493adf11ab2350903b0d8120648a06e0c262f14e6475eb279"
+  },
+  "logs": [
+    "/tmp/thermal-refresh-native.log",
+    "/tmp/thermal-refresh-memcheck.log",
+    "/tmp/thermal-refresh-cpu.log",
+    "/tmp/thermal-refresh-root-check.log",
+    "/tmp/thermal-refresh-root-clippy.log",
+    "/tmp/thermal-refresh-cuda-clippy.log"
+  ]
+}

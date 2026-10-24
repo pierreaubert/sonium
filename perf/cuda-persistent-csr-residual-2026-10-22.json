@@ -1,0 +1,328 @@
+{
+  "date": "2026-10-22",
+  "head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree_required": true,
+  "source_sha256": {
+    "crates/sonium-compute/src/operator.rs": "174a488c5f68d78787c111c5ca2e5b7c68421d3a4c6160f4a282b57f4c363e14",
+    "crates/sonium-compute/tests/persistent_residual.rs": "6596d63ac73ed1206e8b5419e52710dc2518f331cc73d44bdb3a33369ef9fe27",
+    "crates/sonium-compute/src/cuda/kernels/local_kernels.cu": "34afc4c139f950d5b4ef57ade51fbc936e96e88114f26d330e62696e729ccbf9"
+  },
+  "scope": "Checked PersistentDeviceCsr residual uses existing native residual update after retained SpMV; other operator wrappers are not covered by this change.",
+  "native_warm_residual": {
+    "kernel_launches": 1,
+    "library_operations": 1,
+    "allocations": 0,
+    "h2d_bytes": 0,
+    "d2h_bytes": 0
+  },
+  "native_test_log": "\nrunning 1 test\ntest native_persistent_residual_all_scalars_and_checked_recovery ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.35s\n\n",
+  "memcheck_log": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest native_persistent_residual_all_scalars_and_checked_recovery ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.49s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "cpu_tests": {
+    "compute": 651,
+    "iterative": 321,
+    "persistent_residual": 1
+  },
+  "fem_comparison": {
+    "solves": 16,
+    "iterations_unchanged": true,
+    "transfers_unchanged": true,
+    "independent_relative_residual_bound": 2e-09,
+    "results": [
+      {
+        "family": "tet",
+        "degree": 1,
+        "subdivisions": 2,
+        "dofs": 27,
+        "operator": "cusparse",
+        "iterations": [
+          19,
+          19,
+          19,
+          19,
+          19
+        ],
+        "true_relative_residual": 6.65275260461103e-15,
+        "warm_allocations": 0,
+        "h2d_bytes": 1520,
+        "d2h_bytes": 30400
+      },
+      {
+        "family": "tet",
+        "degree": 1,
+        "subdivisions": 2,
+        "dofs": 27,
+        "operator": "specialized",
+        "iterations": [
+          19,
+          19,
+          19,
+          19,
+          19
+        ],
+        "true_relative_residual": 7.086225779982755e-15,
+        "warm_allocations": 0,
+        "h2d_bytes": 1520,
+        "d2h_bytes": 30400
+      },
+      {
+        "family": "tet",
+        "degree": 2,
+        "subdivisions": 2,
+        "dofs": 125,
+        "operator": "cusparse",
+        "iterations": [
+          34,
+          34,
+          34,
+          34,
+          34
+        ],
+        "true_relative_residual": 2.3983370728364865e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 2720,
+        "d2h_bytes": 95200
+      },
+      {
+        "family": "tet",
+        "degree": 2,
+        "subdivisions": 2,
+        "dofs": 125,
+        "operator": "specialized",
+        "iterations": [
+          34,
+          34,
+          34,
+          34,
+          34
+        ],
+        "true_relative_residual": 2.3986322020741917e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 2720,
+        "d2h_bytes": 95200
+      },
+      {
+        "family": "hex",
+        "degree": 2,
+        "subdivisions": 2,
+        "dofs": 125,
+        "operator": "cusparse",
+        "iterations": [
+          49,
+          49,
+          49,
+          49,
+          49
+        ],
+        "true_relative_residual": 8.773727759007252e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 3920,
+        "d2h_bytes": 196000
+      },
+      {
+        "family": "hex",
+        "degree": 2,
+        "subdivisions": 2,
+        "dofs": 125,
+        "operator": "specialized",
+        "iterations": [
+          49,
+          49,
+          49,
+          49,
+          49
+        ],
+        "true_relative_residual": 8.773728026359826e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 3920,
+        "d2h_bytes": 196000
+      },
+      {
+        "family": "hex",
+        "degree": 3,
+        "subdivisions": 2,
+        "dofs": 343,
+        "operator": "cusparse",
+        "iterations": [
+          217,
+          217,
+          217,
+          217,
+          217
+        ],
+        "true_relative_residual": 9.186501800380258e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 17360,
+        "d2h_bytes": 990880
+      },
+      {
+        "family": "hex",
+        "degree": 3,
+        "subdivisions": 2,
+        "dofs": 343,
+        "operator": "specialized",
+        "iterations": [
+          217,
+          217,
+          217,
+          217,
+          217
+        ],
+        "true_relative_residual": 9.186501525753809e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 17360,
+        "d2h_bytes": 990880
+      },
+      {
+        "family": "tet",
+        "degree": 1,
+        "subdivisions": 4,
+        "dofs": 125,
+        "operator": "cusparse",
+        "iterations": [
+          36,
+          36,
+          36,
+          36,
+          36
+        ],
+        "true_relative_residual": 4.221378649387153e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 2880,
+        "d2h_bytes": 106560
+      },
+      {
+        "family": "tet",
+        "degree": 1,
+        "subdivisions": 4,
+        "dofs": 125,
+        "operator": "specialized",
+        "iterations": [
+          36,
+          36,
+          36,
+          36,
+          36
+        ],
+        "true_relative_residual": 4.2213789431187567e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 2880,
+        "d2h_bytes": 106560
+      },
+      {
+        "family": "tet",
+        "degree": 2,
+        "subdivisions": 4,
+        "dofs": 729,
+        "operator": "cusparse",
+        "iterations": [
+          56,
+          56,
+          56,
+          56,
+          56
+        ],
+        "true_relative_residual": 7.450105971524244e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 4480,
+        "d2h_bytes": 255360
+      },
+      {
+        "family": "tet",
+        "degree": 2,
+        "subdivisions": 4,
+        "dofs": 729,
+        "operator": "specialized",
+        "iterations": [
+          56,
+          56,
+          56,
+          56,
+          56
+        ],
+        "true_relative_residual": 7.450106055750258e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 4480,
+        "d2h_bytes": 255360
+      },
+      {
+        "family": "hex",
+        "degree": 2,
+        "subdivisions": 4,
+        "dofs": 729,
+        "operator": "cusparse",
+        "iterations": [
+          135,
+          135,
+          135,
+          135,
+          135
+        ],
+        "true_relative_residual": 8.598256884149096e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 10800,
+        "d2h_bytes": 604800
+      },
+      {
+        "family": "hex",
+        "degree": 2,
+        "subdivisions": 4,
+        "dofs": 729,
+        "operator": "specialized",
+        "iterations": [
+          135,
+          135,
+          135,
+          135,
+          135
+        ],
+        "true_relative_residual": 8.598256860970564e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 10800,
+        "d2h_bytes": 604800
+      },
+      {
+        "family": "hex",
+        "degree": 3,
+        "subdivisions": 4,
+        "dofs": 2197,
+        "operator": "cusparse",
+        "iterations": [
+          212,
+          212,
+          212,
+          212,
+          212
+        ],
+        "true_relative_residual": 9.814277761017577e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 16960,
+        "d2h_bytes": 962880
+      },
+      {
+        "family": "hex",
+        "degree": 3,
+        "subdivisions": 4,
+        "dofs": 2197,
+        "operator": "specialized",
+        "iterations": [
+          212,
+          212,
+          212,
+          212,
+          212
+        ],
+        "true_relative_residual": 9.814277830978588e-10,
+        "warm_allocations": 0,
+        "h2d_bytes": 16960,
+        "d2h_bytes": 962880
+      }
+    ]
+  },
+  "performance_claim": false,
+  "timing_note": "Concurrent large BEM sanitizer invalidates timing comparisons; elapsed times intentionally omitted.",
+  "checks": {
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_compute_test_clippy": "passed with existing warnings"
+  }
+}

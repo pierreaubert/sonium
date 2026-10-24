@@ -1,0 +1,206 @@
+{
+  "scope": "Post-SpMV complex64 Jacobi update only; not total solve time",
+  "measurement": "Optimized debug test profile; host wall time including stream synchronization; 10 warmup + 100 samples per trial, seven alternating-order trials; setup/restoration outside interval",
+  "rows": [
+    {
+      "n": 1024,
+      "trial": 0,
+      "fused": false,
+      "mean_us": 49.6101
+    },
+    {
+      "n": 1024,
+      "trial": 0,
+      "fused": true,
+      "mean_us": 15.2974
+    },
+    {
+      "n": 1024,
+      "trial": 1,
+      "fused": true,
+      "mean_us": 15.2589
+    },
+    {
+      "n": 1024,
+      "trial": 1,
+      "fused": false,
+      "mean_us": 49.5109
+    },
+    {
+      "n": 1024,
+      "trial": 2,
+      "fused": false,
+      "mean_us": 49.3869
+    },
+    {
+      "n": 1024,
+      "trial": 2,
+      "fused": true,
+      "mean_us": 15.37
+    },
+    {
+      "n": 1024,
+      "trial": 3,
+      "fused": true,
+      "mean_us": 15.3153
+    },
+    {
+      "n": 1024,
+      "trial": 3,
+      "fused": false,
+      "mean_us": 49.4606
+    },
+    {
+      "n": 1024,
+      "trial": 4,
+      "fused": false,
+      "mean_us": 49.5179
+    },
+    {
+      "n": 1024,
+      "trial": 4,
+      "fused": true,
+      "mean_us": 15.3292
+    },
+    {
+      "n": 1024,
+      "trial": 5,
+      "fused": true,
+      "mean_us": 15.3146
+    },
+    {
+      "n": 1024,
+      "trial": 5,
+      "fused": false,
+      "mean_us": 49.4677
+    },
+    {
+      "n": 1024,
+      "trial": 6,
+      "fused": false,
+      "mean_us": 49.4175
+    },
+    {
+      "n": 1024,
+      "trial": 6,
+      "fused": true,
+      "mean_us": 15.1957
+    },
+    {
+      "n": 65536,
+      "trial": 0,
+      "fused": false,
+      "mean_us": 55.5613
+    },
+    {
+      "n": 65536,
+      "trial": 0,
+      "fused": true,
+      "mean_us": 15.7205
+    },
+    {
+      "n": 65536,
+      "trial": 1,
+      "fused": true,
+      "mean_us": 15.7461
+    },
+    {
+      "n": 65536,
+      "trial": 1,
+      "fused": false,
+      "mean_us": 55.6742
+    },
+    {
+      "n": 65536,
+      "trial": 2,
+      "fused": false,
+      "mean_us": 55.5286
+    },
+    {
+      "n": 65536,
+      "trial": 2,
+      "fused": true,
+      "mean_us": 15.6821
+    },
+    {
+      "n": 65536,
+      "trial": 3,
+      "fused": true,
+      "mean_us": 15.7107
+    },
+    {
+      "n": 65536,
+      "trial": 3,
+      "fused": false,
+      "mean_us": 55.6634
+    },
+    {
+      "n": 65536,
+      "trial": 4,
+      "fused": false,
+      "mean_us": 55.7479
+    },
+    {
+      "n": 65536,
+      "trial": 4,
+      "fused": true,
+      "mean_us": 15.7781
+    },
+    {
+      "n": 65536,
+      "trial": 5,
+      "fused": true,
+      "mean_us": 15.7608
+    },
+    {
+      "n": 65536,
+      "trial": 5,
+      "fused": false,
+      "mean_us": 55.5604
+    },
+    {
+      "n": 65536,
+      "trial": 6,
+      "fused": false,
+      "mean_us": 55.5165
+    },
+    {
+      "n": 65536,
+      "trial": 6,
+      "fused": true,
+      "mean_us": 15.723
+    }
+  ],
+  "source_sha256": {
+    "crates/sonium-compute/src/backend/mod.rs": "68bc71a70c43f2251d9554b15dcc0c431aeea905cc70c940c5c20cd97103c9d1",
+    "crates/sonium-compute/src/cuda/cublas.rs": "e5feebf7e23ab8aa36c638741090e94b4496defa4f40d45693c51d1999a37357",
+    "crates/sonium-compute/src/cuda/kernels/local_kernels.cu": "951c237c83d63dbec51eb89a52d27fb7115d7c69bd67b112a1db9900f411fc19",
+    "crates/sonium-compute/tests/jacobi_update.rs": "704b4608c2089ed01bfc6481bf737a55e2bebe5f6528d6d2963800be2b21a1a5",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/mod.rs": "ab3f7ab527fbed640815289778a4391fd7662d16b6cf8bd900252559b052c143"
+  },
+  "logs": [
+    "/tmp/jacobi-timing.log",
+    "/tmp/jacobi-memcheck.log",
+    "/tmp/jacobi-native-amg.log",
+    "/tmp/jacobi-compute-cpu.log",
+    "/tmp/jacobi-amg-cpu.log",
+    "/tmp/jacobi-native-fem.log",
+    "/tmp/jacobi-cpu-contract.log",
+    "/tmp/jacobi-final-check.log",
+    "/tmp/jacobi-final-clippy.log",
+    "/tmp/jacobi-final-test-clippy.log"
+  ],
+  "medians": [
+    {
+      "n": 1024,
+      "baseline_us": 49.4677,
+      "fused_us": 15.3146
+    },
+    {
+      "n": 65536,
+      "baseline_us": 55.5613,
+      "fused_us": 15.723
+    }
+  ],
+  "note": "Production source formatting changed after native test compilation; semantics unchanged. Final check and Clippy use formatted source."
+}

@@ -1,0 +1,1693 @@
+{
+  "date": "2026-10-21",
+  "head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree_required": true,
+  "source_sha256": {
+    "crates/sonium-fem/examples/cuda_fem_compare.rs": "0ac51f9a24f848a2d3676e8650ca15eca502ccb57f4cf153792eada5fbc9b15a",
+    "crates/sonium-fem/examples/support/cuda_profile.rs": "adf5608ba6f2e9d04ebe7774d245fd7a8c56218e0b4c05577a7787994e7e8bac"
+  },
+  "purpose": "Correctness and accounting validation of opt-in synchronized solve phase attribution",
+  "performance_claim": false,
+  "timings_valid_for_bottleneck_selection": false,
+  "reason": "A separate long-running BEM compute-sanitizer process was active on the same GPU. Synchronization also perturbs execution.",
+  "command": "SONIUM_FEM_BENCH_PROFILE=sync SONIUM_FEM_BENCH_PRECONDITIONER=lor RAYON_NUM_THREADS=4 target/release/examples/cuda_fem_compare 2 4",
+  "build": "release",
+  "hardware": {
+    "gpu": "RTX PRO 6000 Blackwell Workstation Edition",
+    "driver": "610.57.04"
+  },
+  "validated_solves": [
+    {
+      "family": "tet",
+      "degree": 1,
+      "dofs": 27,
+      "operator": "cusparse",
+      "iterations": 19,
+      "operator_calls": 20,
+      "residual_calls": 1,
+      "preconditioner_calls": 19,
+      "relative_residual": 6.65275260461103e-15,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "tet",
+      "degree": 1,
+      "dofs": 27,
+      "operator": "specialized",
+      "iterations": 19,
+      "operator_calls": 20,
+      "residual_calls": 1,
+      "preconditioner_calls": 19,
+      "relative_residual": 7.086225779982755e-15,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "tet",
+      "degree": 2,
+      "dofs": 125,
+      "operator": "cusparse",
+      "iterations": 34,
+      "operator_calls": 35,
+      "residual_calls": 1,
+      "preconditioner_calls": 34,
+      "relative_residual": 2.3983370728364865e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "tet",
+      "degree": 2,
+      "dofs": 125,
+      "operator": "specialized",
+      "iterations": 34,
+      "operator_calls": 35,
+      "residual_calls": 1,
+      "preconditioner_calls": 34,
+      "relative_residual": 2.3986322020741917e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "hex",
+      "degree": 2,
+      "dofs": 125,
+      "operator": "cusparse",
+      "iterations": 49,
+      "operator_calls": 50,
+      "residual_calls": 1,
+      "preconditioner_calls": 49,
+      "relative_residual": 8.773727759007252e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "hex",
+      "degree": 2,
+      "dofs": 125,
+      "operator": "specialized",
+      "iterations": 49,
+      "operator_calls": 50,
+      "residual_calls": 1,
+      "preconditioner_calls": 49,
+      "relative_residual": 8.773728026359826e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "hex",
+      "degree": 3,
+      "dofs": 343,
+      "operator": "cusparse",
+      "iterations": 217,
+      "operator_calls": 221,
+      "residual_calls": 7,
+      "preconditioner_calls": 217,
+      "relative_residual": 9.186501642274022e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "hex",
+      "degree": 3,
+      "dofs": 343,
+      "operator": "specialized",
+      "iterations": 217,
+      "operator_calls": 221,
+      "residual_calls": 7,
+      "preconditioner_calls": 217,
+      "relative_residual": 9.186501525753809e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "tet",
+      "degree": 1,
+      "dofs": 125,
+      "operator": "cusparse",
+      "iterations": 36,
+      "operator_calls": 37,
+      "residual_calls": 1,
+      "preconditioner_calls": 36,
+      "relative_residual": 4.221378649387153e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "tet",
+      "degree": 1,
+      "dofs": 125,
+      "operator": "specialized",
+      "iterations": 36,
+      "operator_calls": 37,
+      "residual_calls": 1,
+      "preconditioner_calls": 36,
+      "relative_residual": 4.2213789431187567e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "tet",
+      "degree": 2,
+      "dofs": 729,
+      "operator": "cusparse",
+      "iterations": 56,
+      "operator_calls": 57,
+      "residual_calls": 1,
+      "preconditioner_calls": 56,
+      "relative_residual": 7.450105971524244e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "tet",
+      "degree": 2,
+      "dofs": 729,
+      "operator": "specialized",
+      "iterations": 56,
+      "operator_calls": 57,
+      "residual_calls": 1,
+      "preconditioner_calls": 56,
+      "relative_residual": 7.450106055750258e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "hex",
+      "degree": 2,
+      "dofs": 729,
+      "operator": "cusparse",
+      "iterations": 135,
+      "operator_calls": 138,
+      "residual_calls": 5,
+      "preconditioner_calls": 135,
+      "relative_residual": 8.598256884149096e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "hex",
+      "degree": 2,
+      "dofs": 729,
+      "operator": "specialized",
+      "iterations": 135,
+      "operator_calls": 138,
+      "residual_calls": 5,
+      "preconditioner_calls": 135,
+      "relative_residual": 8.598256860970564e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "hex",
+      "degree": 3,
+      "dofs": 2197,
+      "operator": "cusparse",
+      "iterations": 212,
+      "operator_calls": 216,
+      "residual_calls": 7,
+      "preconditioner_calls": 212,
+      "relative_residual": 9.814277688836521e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    },
+    {
+      "family": "hex",
+      "degree": 3,
+      "dofs": 2197,
+      "operator": "specialized",
+      "iterations": 212,
+      "operator_calls": 216,
+      "residual_calls": 7,
+      "preconditioner_calls": 212,
+      "relative_residual": 9.814277830978588e-10,
+      "warm_allocations": 0,
+      "transfer_parity_with_uninstrumented_solve": true
+    }
+  ],
+  "raw_diagnostic_rows": [
+    {
+      "action_repetitions": 100,
+      "action_samples": 7,
+      "boundary": "natural_neumann",
+      "context_setup_ms": 328.317136,
+      "k": 5.0,
+      "preconditioner_mass_shift": [
+        25.0,
+        25.0
+      ],
+      "scalar": "complex64",
+      "solve_initial_guess": "zero",
+      "solve_samples": 5,
+      "tolerance": 1e-09
+    },
+    {
+      "amg_smoother": "Jacobi",
+      "hex_low_order_refined": true,
+      "max_iterations": 600,
+      "restart": 60,
+      "synchronized_profile": true
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 1.427465006820475e-16,
+          "timing": {
+            "max_ms": 0.02618096,
+            "median_ms": 0.026115230000000003,
+            "min_ms": 0.02595854,
+            "samples_ms": [
+              0.02618096,
+              0.026115230000000003,
+              0.02604861,
+              0.026153499999999996,
+              0.02617705,
+              0.02607355,
+              0.02595854
+            ]
+          }
+        },
+        {
+          "kernel_launches": 700,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 2.740720008662111e-16,
+          "timing": {
+            "max_ms": 0.17691184,
+            "median_ms": 0.17682427,
+            "min_ms": 0.17681366,
+            "samples_ms": [
+              0.17681556,
+              0.17682427,
+              0.17682037,
+              0.17682647999999998,
+              0.17681366,
+              0.17691184,
+              0.17689632
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        27,
+        7
+      ],
+      "amg_level_nnz": [
+        223,
+        43
+      ],
+      "amg_operator_complexity": 1.1928251121076232,
+      "csr_setup_ms": 9.203085,
+      "degree": 1,
+      "dofs": 27,
+      "elements": 48,
+      "family": "tet",
+      "host_assembly_ms": 0.8332510000000001,
+      "nnz": 223,
+      "preconditioner_apply_ms": 0.218444,
+      "preconditioner_setup_ms": 13.97238,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 30400,
+          "h2d_bytes": 1520,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "operator": "cusparse",
+          "solution_error": 1.8499086920980315e-14,
+          "synchronized_profile": {
+            "d2h_bytes": 6080,
+            "h2d_bytes": 304,
+            "iterations": 19,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 20,
+              "synchronized_wall_ms": 0.691944
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 4.122368,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 19,
+              "synchronized_wall_ms": 3.874557
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.037411
+            },
+            "total_ms": 8.72628,
+            "true_relative_residual": 6.65275260461103e-15,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 8.465436,
+            "median_ms": 8.447713,
+            "min_ms": 8.363894,
+            "samples_ms": [
+              8.39891,
+              8.465436,
+              8.363894,
+              8.457691,
+              8.447713
+            ]
+          },
+          "true_relative_residual": 6.65275260461103e-15,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 30400,
+          "h2d_bytes": 1520,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "operator": "specialized",
+          "solution_error": 1.975885905618465e-14,
+          "synchronized_profile": {
+            "d2h_bytes": 6080,
+            "h2d_bytes": 304,
+            "iterations": 19,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 20,
+              "synchronized_wall_ms": 3.683277
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 4.297971,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 19,
+              "synchronized_wall_ms": 3.858618
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.183899
+            },
+            "total_ms": 12.023765000000001,
+            "true_relative_residual": 7.086225779982755e-15,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 11.648613000000001,
+            "median_ms": 11.623425,
+            "min_ms": 11.557361,
+            "samples_ms": [
+              11.614408999999998,
+              11.557361,
+              11.639396,
+              11.623425,
+              11.648613000000001
+            ]
+          },
+          "true_relative_residual": 7.086225779982755e-15,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 17.181747,
+      "subdivisions": 2
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 2.1968459112412414e-16,
+          "timing": {
+            "max_ms": 0.02811913,
+            "median_ms": 0.02798518,
+            "min_ms": 0.02785663,
+            "samples_ms": [
+              0.027950509999999998,
+              0.02811913,
+              0.027939190000000003,
+              0.02798518,
+              0.02800812,
+              0.02785663,
+              0.0280479
+            ]
+          }
+        },
+        {
+          "kernel_launches": 700,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 2.8296189782119884e-16,
+          "timing": {
+            "max_ms": 0.33103977,
+            "median_ms": 0.33101673,
+            "min_ms": 0.33099699000000005,
+            "samples_ms": [
+              0.33101192,
+              0.33103977,
+              0.33101673,
+              0.33102133,
+              0.3310035,
+              0.33099699000000005,
+              0.33103916
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        125,
+        55,
+        13
+      ],
+      "amg_level_nnz": [
+        2441,
+        1651,
+        133
+      ],
+      "amg_operator_complexity": 1.7308480131093813,
+      "csr_setup_ms": 0.057268,
+      "degree": 2,
+      "dofs": 125,
+      "elements": 48,
+      "family": "tet",
+      "host_assembly_ms": 2.466398,
+      "nnz": 2441,
+      "preconditioner_apply_ms": 0.340035,
+      "preconditioner_setup_ms": 3.613083,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 95200,
+          "h2d_bytes": 2720,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "operator": "cusparse",
+          "solution_error": 1.1388177071957774e-09,
+          "synchronized_profile": {
+            "d2h_bytes": 19040,
+            "h2d_bytes": 544,
+            "iterations": 34,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 35,
+              "synchronized_wall_ms": 1.184816
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 7.598145000000001,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 34,
+              "synchronized_wall_ms": 11.428222
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.037832
+            },
+            "total_ms": 20.249015,
+            "true_relative_residual": 2.3983370728364865e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 19.532906999999998,
+            "median_ms": 19.468755,
+            "min_ms": 19.434369999999998,
+            "samples_ms": [
+              19.532906999999998,
+              19.468755,
+              19.466551,
+              19.503792,
+              19.434369999999998
+            ]
+          },
+          "true_relative_residual": 2.3983370728364865e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 95200,
+          "h2d_bytes": 2720,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "operator": "specialized",
+          "solution_error": 1.138810505737978e-09,
+          "synchronized_profile": {
+            "d2h_bytes": 19040,
+            "h2d_bytes": 544,
+            "iterations": 34,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 35,
+              "synchronized_wall_ms": 11.863159
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 7.5672239999999995,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 34,
+              "synchronized_wall_ms": 11.471958
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.338061
+            },
+            "total_ms": 31.240402,
+            "true_relative_residual": 2.3986322020741917e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 30.532569,
+            "median_ms": 30.462757,
+            "min_ms": 30.430576000000002,
+            "samples_ms": [
+              30.439824,
+              30.462757,
+              30.430576000000002,
+              30.532569,
+              30.498205
+            ]
+          },
+          "true_relative_residual": 2.3986322020741917e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 17.472769,
+      "subdivisions": 2
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 1.6088368993384636e-16,
+          "timing": {
+            "max_ms": 0.02800472,
+            "median_ms": 0.02792456,
+            "min_ms": 0.027868749999999998,
+            "samples_ms": [
+              0.027958829999999997,
+              0.02800472,
+              0.02796353,
+              0.02788338,
+              0.02792456,
+              0.027924159999999996,
+              0.027868749999999998
+            ]
+          }
+        },
+        {
+          "kernel_launches": 1400,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 3.844424625665778e-16,
+          "timing": {
+            "max_ms": 0.054198800000000005,
+            "median_ms": 0.054177460000000004,
+            "min_ms": 0.054096,
+            "samples_ms": [
+              0.05410131,
+              0.05418447,
+              0.054198800000000005,
+              0.05409911,
+              0.054184970000000006,
+              0.054177460000000004,
+              0.054096
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        125,
+        12
+      ],
+      "amg_level_nnz": [
+        2197,
+        104
+      ],
+      "amg_operator_complexity": 1.047337278106509,
+      "csr_setup_ms": 0.07109499999999999,
+      "degree": 2,
+      "dofs": 125,
+      "elements": 8,
+      "family": "hex",
+      "host_assembly_ms": 2.1034100000000002,
+      "nnz": 4913,
+      "preconditioner_apply_ms": 0.206451,
+      "preconditioner_setup_ms": 2.1140600000000003,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 3,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 196000,
+          "h2d_bytes": 3920,
+          "iterations": [
+            49,
+            49,
+            49,
+            49,
+            49
+          ],
+          "operator": "cusparse",
+          "solution_error": 5.833694906738707e-09,
+          "synchronized_profile": {
+            "d2h_bytes": 39200,
+            "h2d_bytes": 784,
+            "iterations": 49,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 50,
+              "synchronized_wall_ms": 1.685837
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 11.370607000000001,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 49,
+              "synchronized_wall_ms": 10.305475
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.037892
+            },
+            "total_ms": 23.399811,
+            "true_relative_residual": 8.773727759007252e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 22.42865,
+            "median_ms": 22.364558,
+            "min_ms": 22.324331,
+            "samples_ms": [
+              22.324331,
+              22.424261,
+              22.364558,
+              22.333729,
+              22.42865
+            ]
+          },
+          "true_relative_residual": 8.773727759007252e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 196000,
+          "h2d_bytes": 3920,
+          "iterations": [
+            49,
+            49,
+            49,
+            49,
+            49
+          ],
+          "operator": "specialized",
+          "solution_error": 5.833694688019396e-09,
+          "synchronized_profile": {
+            "d2h_bytes": 39200,
+            "h2d_bytes": 784,
+            "iterations": 49,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 50,
+              "synchronized_wall_ms": 3.167824
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 11.325835999999997,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 49,
+              "synchronized_wall_ms": 10.210426
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.070353
+            },
+            "total_ms": 24.774438999999997,
+            "true_relative_residual": 8.773728026359826e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 23.927923,
+            "median_ms": 23.859563,
+            "min_ms": 23.757170000000002,
+            "samples_ms": [
+              23.927923,
+              23.859563,
+              23.769192,
+              23.872618000000003,
+              23.757170000000002
+            ]
+          },
+          "true_relative_residual": 8.773728026359826e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 18.668548,
+      "subdivisions": 2
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 3.5191619133753975e-16,
+          "timing": {
+            "max_ms": 0.026318420000000002,
+            "median_ms": 0.02622774,
+            "min_ms": 0.02621192,
+            "samples_ms": [
+              0.02623115,
+              0.02622774,
+              0.026318420000000002,
+              0.026220129999999998,
+              0.02621192,
+              0.02622824,
+              0.02621422
+            ]
+          }
+        },
+        {
+          "kernel_launches": 1400,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 1.831468493954006e-15,
+          "timing": {
+            "max_ms": 0.05932972,
+            "median_ms": 0.05930948999999999,
+            "min_ms": 0.05929867,
+            "samples_ms": [
+              0.05929867,
+              0.0593109,
+              0.05930678,
+              0.05930948999999999,
+              0.059314900000000004,
+              0.05932972,
+              0.05929937
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        343,
+        94,
+        36,
+        11
+      ],
+      "amg_level_nnz": [
+        6859,
+        3117,
+        570,
+        65
+      ],
+      "amg_operator_complexity": 1.5470185158186325,
+      "csr_setup_ms": 0.18535200000000002,
+      "degree": 3,
+      "dofs": 343,
+      "elements": 8,
+      "family": "hex",
+      "host_assembly_ms": 8.787557,
+      "nnz": 29791,
+      "preconditioner_apply_ms": 0.46360999999999997,
+      "preconditioner_setup_ms": 6.953939999999999,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 990880,
+          "h2d_bytes": 17360,
+          "iterations": [
+            217,
+            217,
+            217,
+            217,
+            217
+          ],
+          "operator": "cusparse",
+          "solution_error": 2.859529148741482e-08,
+          "synchronized_profile": {
+            "d2h_bytes": 198176,
+            "h2d_bytes": 3472,
+            "iterations": 217,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 221,
+              "synchronized_wall_ms": 29.956401
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 82.48998299999997,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 217,
+              "synchronized_wall_ms": 98.497401
+            },
+            "residual": {
+              "calls": 7,
+              "synchronized_wall_ms": 2.407157
+            },
+            "total_ms": 213.35094199999997,
+            "true_relative_residual": 9.186501642274022e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 163.239969,
+            "median_ms": 162.827416,
+            "min_ms": 162.75409699999997,
+            "samples_ms": [
+              162.83582199999998,
+              162.827416,
+              162.75409699999997,
+              162.805395,
+              163.239969
+            ]
+          },
+          "true_relative_residual": 9.186501800380258e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 990880,
+          "h2d_bytes": 17360,
+          "iterations": [
+            217,
+            217,
+            217,
+            217,
+            217
+          ],
+          "operator": "specialized",
+          "solution_error": 2.859528973815845e-08,
+          "synchronized_profile": {
+            "d2h_bytes": 198176,
+            "h2d_bytes": 3472,
+            "iterations": 217,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 221,
+              "synchronized_wall_ms": 38.909679
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 96.23775,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 217,
+              "synchronized_wall_ms": 98.707678
+            },
+            "residual": {
+              "calls": 7,
+              "synchronized_wall_ms": 0.472748
+            },
+            "total_ms": 234.327855,
+            "true_relative_residual": 9.186501525753809e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 233.28121,
+            "median_ms": 228.767671,
+            "min_ms": 227.833509,
+            "samples_ms": [
+              227.833509,
+              232.398568,
+              228.767671,
+              233.28121,
+              228.1143
+            ]
+          },
+          "true_relative_residual": 9.186501525753809e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 18.682514,
+      "subdivisions": 2
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 1.9094189034378926e-16,
+          "timing": {
+            "max_ms": 0.05485403,
+            "median_ms": 0.02978749,
+            "min_ms": 0.026541640000000002,
+            "samples_ms": [
+              0.02978749,
+              0.04802168,
+              0.026541640000000002,
+              0.029787390000000004,
+              0.05485403,
+              0.02658011,
+              0.029808539999999998
+            ]
+          }
+        },
+        {
+          "kernel_launches": 700,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 2.1783749606897993e-16,
+          "timing": {
+            "max_ms": 0.253133,
+            "median_ms": 0.2358372,
+            "min_ms": 0.21251427,
+            "samples_ms": [
+              0.21251427,
+              0.253133,
+              0.23732191,
+              0.21764961,
+              0.2358372,
+              0.24206249999999999,
+              0.21980339000000002
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        125,
+        72,
+        37,
+        17,
+        6
+      ],
+      "amg_level_nnz": [
+        1333,
+        1162,
+        619,
+        193,
+        27
+      ],
+      "amg_operator_complexity": 2.50112528132033,
+      "csr_setup_ms": 0.051208000000000004,
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "family": "tet",
+      "host_assembly_ms": 3.20604,
+      "nnz": 1333,
+      "preconditioner_apply_ms": 0.5484300000000001,
+      "preconditioner_setup_ms": 5.259005,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 106560,
+          "h2d_bytes": 2880,
+          "iterations": [
+            36,
+            36,
+            36,
+            36,
+            36
+          ],
+          "operator": "cusparse",
+          "solution_error": 3.2893845579279185e-09,
+          "synchronized_profile": {
+            "d2h_bytes": 21312,
+            "h2d_bytes": 576,
+            "iterations": 36,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 37,
+              "synchronized_wall_ms": 3.713995
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 11.180644999999998,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 36,
+              "synchronized_wall_ms": 19.694713
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.038133
+            },
+            "total_ms": 34.627486,
+            "true_relative_residual": 4.221378649387153e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 39.446626,
+            "median_ms": 36.942266000000004,
+            "min_ms": 35.803757,
+            "samples_ms": [
+              36.425086,
+              39.446626,
+              35.803757,
+              38.686423999999995,
+              36.942266000000004
+            ]
+          },
+          "true_relative_residual": 4.221378649387153e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 106560,
+          "h2d_bytes": 2880,
+          "iterations": [
+            36,
+            36,
+            36,
+            36,
+            36
+          ],
+          "operator": "specialized",
+          "solution_error": 3.2893835165405748e-09,
+          "synchronized_profile": {
+            "d2h_bytes": 21312,
+            "h2d_bytes": 576,
+            "iterations": 36,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 37,
+              "synchronized_wall_ms": 11.370747
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 13.422229000000005,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 36,
+              "synchronized_wall_ms": 19.732794
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.192094
+            },
+            "total_ms": 44.717864000000006,
+            "true_relative_residual": 4.2213789431187567e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 47.314338,
+            "median_ms": 44.204861,
+            "min_ms": 42.851815,
+            "samples_ms": [
+              44.204861,
+              44.160426,
+              42.851815,
+              45.933088,
+              47.314338
+            ]
+          },
+          "true_relative_residual": 4.2213789431187567e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 13.136365000000001,
+      "subdivisions": 4
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 2.273549178818527e-16,
+          "timing": {
+            "max_ms": 0.05299702,
+            "median_ms": 0.02751509,
+            "min_ms": 0.027502870000000002,
+            "samples_ms": [
+              0.02751509,
+              0.027502870000000002,
+              0.02750406,
+              0.05299702,
+              0.02750727,
+              0.03148551,
+              0.04993741
+            ]
+          }
+        },
+        {
+          "kernel_launches": 700,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 2.7928961588310865e-16,
+          "timing": {
+            "max_ms": 0.7054072,
+            "median_ms": 0.6687170100000001,
+            "min_ms": 0.6491041200000001,
+            "samples_ms": [
+              0.66302933,
+              0.6673468100000001,
+              0.67443275,
+              0.7054072,
+              0.67322747,
+              0.6491041200000001,
+              0.6687170100000001
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        729,
+        337,
+        135,
+        42,
+        7
+      ],
+      "amg_level_nnz": [
+        17025,
+        15818,
+        5484,
+        983,
+        47
+      ],
+      "amg_operator_complexity": 2.311718061674009,
+      "csr_setup_ms": 0.259322,
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "family": "tet",
+      "host_assembly_ms": 14.418497,
+      "nnz": 17025,
+      "preconditioner_apply_ms": 0.5822750000000001,
+      "preconditioner_setup_ms": 24.064581,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 255360,
+          "h2d_bytes": 4480,
+          "iterations": [
+            56,
+            56,
+            56,
+            56,
+            56
+          ],
+          "operator": "cusparse",
+          "solution_error": 1.1453902114513287e-08,
+          "synchronized_profile": {
+            "d2h_bytes": 51072,
+            "h2d_bytes": 896,
+            "iterations": 56,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 57,
+              "synchronized_wall_ms": 5.93949
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 34.227962999999995,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 56,
+              "synchronized_wall_ms": 35.487456
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.042391
+            },
+            "total_ms": 75.6973,
+            "true_relative_residual": 7.450105971524244e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 76.608949,
+            "median_ms": 73.746159,
+            "min_ms": 70.321213,
+            "samples_ms": [
+              70.321213,
+              73.746159,
+              72.368346,
+              76.608949,
+              75.63378900000001
+            ]
+          },
+          "true_relative_residual": 7.450105971524244e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 255360,
+          "h2d_bytes": 4480,
+          "iterations": [
+            56,
+            56,
+            56,
+            56,
+            56
+          ],
+          "operator": "specialized",
+          "solution_error": 1.1453901934250763e-08,
+          "synchronized_profile": {
+            "d2h_bytes": 51072,
+            "h2d_bytes": 896,
+            "iterations": 56,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 57,
+              "synchronized_wall_ms": 37.537127
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 45.12123300000002,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 56,
+              "synchronized_wall_ms": 33.135066
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.53226
+            },
+            "total_ms": 116.325686,
+            "true_relative_residual": 7.450106055750258e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 113.21455499999999,
+            "median_ms": 110.500508,
+            "min_ms": 105.788521,
+            "samples_ms": [
+              110.500508,
+              105.788521,
+              112.57694699999999,
+              113.21455499999999,
+              108.658474
+            ]
+          },
+          "true_relative_residual": 7.450106055750258e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 14.498148,
+      "subdivisions": 4
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 1.7840155827238253e-16,
+          "timing": {
+            "max_ms": 0.0490302,
+            "median_ms": 0.03151327,
+            "min_ms": 0.02749375,
+            "samples_ms": [
+              0.027540540000000002,
+              0.03154733,
+              0.04604503,
+              0.02749375,
+              0.03151327,
+              0.0490302,
+              0.027495150000000003
+            ]
+          }
+        },
+        {
+          "kernel_launches": 1400,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 2.520397071016613e-16,
+          "timing": {
+            "max_ms": 0.08536571,
+            "median_ms": 0.07673363,
+            "min_ms": 0.06106912,
+            "samples_ms": [
+              0.08536571,
+              0.06106912,
+              0.0611575,
+              0.06113134,
+              0.07673363,
+              0.08254976,
+              0.08137003000000001
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        729,
+        181,
+        59,
+        22,
+        10
+      ],
+      "amg_level_nnz": [
+        15625,
+        6959,
+        1175,
+        170,
+        37
+      ],
+      "amg_operator_complexity": 1.533824,
+      "csr_setup_ms": 0.328202,
+      "degree": 2,
+      "dofs": 729,
+      "elements": 64,
+      "family": "hex",
+      "host_assembly_ms": 15.78059,
+      "nnz": 35937,
+      "preconditioner_apply_ms": 0.577385,
+      "preconditioner_setup_ms": 14.649915,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 3,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 604800,
+          "h2d_bytes": 10800,
+          "iterations": [
+            135,
+            135,
+            135,
+            135,
+            135
+          ],
+          "operator": "cusparse",
+          "solution_error": 4.718846392192194e-08,
+          "synchronized_profile": {
+            "d2h_bytes": 120960,
+            "h2d_bytes": 2160,
+            "iterations": 135,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 138,
+              "synchronized_wall_ms": 22.502507
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 82.78481000000002,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 135,
+              "synchronized_wall_ms": 80.04073
+            },
+            "residual": {
+              "calls": 5,
+              "synchronized_wall_ms": 0.21095
+            },
+            "total_ms": 185.53899700000002,
+            "true_relative_residual": 8.598256884149096e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 179.133709,
+            "median_ms": 176.99768699999998,
+            "min_ms": 175.687081,
+            "samples_ms": [
+              179.133709,
+              179.04431000000002,
+              176.616804,
+              175.687081,
+              176.99768699999998
+            ]
+          },
+          "true_relative_residual": 8.598256884149096e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 604800,
+          "h2d_bytes": 10800,
+          "iterations": [
+            135,
+            135,
+            135,
+            135,
+            135
+          ],
+          "operator": "specialized",
+          "solution_error": 4.718846385601297e-08,
+          "synchronized_profile": {
+            "d2h_bytes": 120960,
+            "h2d_bytes": 2160,
+            "iterations": 135,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 138,
+              "synchronized_wall_ms": 25.449039
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 81.40688800000001,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 135,
+              "synchronized_wall_ms": 81.113458
+            },
+            "residual": {
+              "calls": 5,
+              "synchronized_wall_ms": 0.673988
+            },
+            "total_ms": 188.643373,
+            "true_relative_residual": 8.598256860970564e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 185.930138,
+            "median_ms": 183.563068,
+            "min_ms": 178.230635,
+            "samples_ms": [
+              178.230635,
+              183.791612,
+              182.84598799999998,
+              185.930138,
+              183.563068
+            ]
+          },
+          "true_relative_residual": 8.598256860970564e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 18.536537,
+      "subdivisions": 4
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 3.6470021345808286e-16,
+          "timing": {
+            "max_ms": 0.0671761,
+            "median_ms": 0.04337747,
+            "min_ms": 0.03897793,
+            "samples_ms": [
+              0.04337747,
+              0.06051187,
+              0.03897793,
+              0.0671761,
+              0.04272843999999999,
+              0.06285922000000001,
+              0.03902452
+            ]
+          }
+        },
+        {
+          "kernel_launches": 1400,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 6.587444458735068e-16,
+          "timing": {
+            "max_ms": 0.09940082,
+            "median_ms": 0.09269411,
+            "min_ms": 0.06948388,
+            "samples_ms": [
+              0.08691905,
+              0.09934050999999999,
+              0.09940082,
+              0.09335095,
+              0.09269411,
+              0.06948388,
+              0.0847287
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        2197,
+        1479,
+        844,
+        443,
+        205,
+        62,
+        27,
+        12
+      ],
+      "amg_level_nnz": [
+        50653,
+        67057,
+        51869,
+        24508,
+        7655,
+        999,
+        200,
+        37
+      ],
+      "amg_operator_complexity": 4.007225633230016,
+      "csr_setup_ms": 1.204294,
+      "degree": 3,
+      "dofs": 2197,
+      "elements": 64,
+      "family": "hex",
+      "host_assembly_ms": 84.75719099999999,
+      "nnz": 226981,
+      "preconditioner_apply_ms": 0.996811,
+      "preconditioner_setup_ms": 81.31853,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 962880,
+          "h2d_bytes": 16960,
+          "iterations": [
+            212,
+            212,
+            212,
+            212,
+            212
+          ],
+          "operator": "cusparse",
+          "solution_error": 5.325531209877169e-08,
+          "synchronized_profile": {
+            "d2h_bytes": 192576,
+            "h2d_bytes": 3392,
+            "iterations": 212,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 216,
+              "synchronized_wall_ms": 45.155001
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 173.07230600000003,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 212,
+              "synchronized_wall_ms": 223.88992
+            },
+            "residual": {
+              "calls": 7,
+              "synchronized_wall_ms": 0.378537
+            },
+            "total_ms": 442.495764,
+            "true_relative_residual": 9.814277688836521e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 437.837952,
+            "median_ms": 433.221448,
+            "min_ms": 430.821275,
+            "samples_ms": [
+              433.454141,
+              431.19158899999996,
+              433.221448,
+              430.821275,
+              437.837952
+            ]
+          },
+          "true_relative_residual": 9.814277854773818e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 962880,
+          "h2d_bytes": 16960,
+          "iterations": [
+            212,
+            212,
+            212,
+            212,
+            212
+          ],
+          "operator": "specialized",
+          "solution_error": 5.325531334237888e-08,
+          "synchronized_profile": {
+            "d2h_bytes": 192576,
+            "h2d_bytes": 3392,
+            "iterations": 212,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 216,
+              "synchronized_wall_ms": 54.847033
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 182.13850299999996,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 212,
+              "synchronized_wall_ms": 216.609652
+            },
+            "residual": {
+              "calls": 7,
+              "synchronized_wall_ms": 0.534914
+            },
+            "total_ms": 454.13010199999997,
+            "true_relative_residual": 9.814277830978588e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 444.713556,
+            "median_ms": 442.616762,
+            "min_ms": 440.944098,
+            "samples_ms": [
+              442.616762,
+              444.54931600000003,
+              440.944098,
+              444.713556,
+              441.836408
+            ]
+          },
+          "true_relative_residual": 9.814277830978588e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 19.860508,
+      "subdivisions": 4
+    }
+  ],
+  "checks": {
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_example_check": "passed",
+    "cuda_example_clippy": "passed with existing library warnings",
+    "rustfmt": "passed",
+    "diff_check": "passed"
+  },
+  "remaining": [
+    "Repeat on an otherwise idle GPU before interpreting phase times.",
+    "Per-level AMG attribution remains needed before selecting smoother/coarse/transfer kernel work."
+  ]
+}

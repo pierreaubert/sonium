@@ -1,0 +1,75 @@
+{
+  "date": "2026-10-21",
+  "base_revision": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "source_state": "uncommitted working tree; hashes reflect final files. Native verification preceded documentation/formatting-only edits to solve.rs; executable behavior is unchanged.",
+  "sha256": {
+    "crates/sonium-solvers/src/solve.rs": "240a4ffe6c015657d70ae193cd2e31daa0051ad7e1842224eaa4730d765a94ef",
+    "crates/sonium-solvers/src/solve/cuda_pcg_tests.rs": "401705e5d741ca5cf253f146866c50ac9d98eddcb82c20f020159c2eb2af25fa",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/mod.rs": "62f30a0f4c9e88beeb02db5293c6d80a2c241ffc8c947f7ed2c1a12347093ea6",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/backend_pcg_tests.rs": "d0de189a23ee10853042ab6e25c6289702f006ac91cb0d527365eb6a8c0e60c4",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg_checkpoint.rs": "62daa4cb2d619564f3930b2a495e4c652b74938db0f923d0cfe4a9f55b47d09d"
+  },
+  "native_logs": {
+    "pcg-amg-native-facade-final.log": "\nrunning 5 tests\ntest checkpoint_manifest::tests::cuda_dma_restore_survives_backend_recreation ... ok\ntest solve::cuda_pcg_tests::cuda_cg_amg_rejects_complex_symmetric_nonhermitian_input ... ok\ntest solve::cuda_pcg_tests::native_cuda_cg_amg_facade_and_persistent_sessions ... ok\ntest solve::finite_input_tests::cuda_jacobi_facade_certifies_original_system ... ok\ntest solve::finite_input_tests::cuda_spd_strategies_reject_indefinite_input_before_device_setup ... ok\n\ntest result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 117 filtered out; finished in 4.12s\n\n",
+    "pcg-amg-native-cycle.log": "\nrunning 1 test\ntest amg::backend_pcg_tests::native_backend_pcg_cycle_is_hpd_and_resident ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 239 filtered out; finished in 1.16s\n\n",
+    "pcg-amg-cpu-cycle3.log": "   Compiling sonium-solvers-preconditioners v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers/crates/sonium-solvers-preconditioners)\n    Finished `test` profile [optimized + debuginfo] target(s) in 16.39s\n     Running unittests src/lib.rs (target/debug/deps/sonium_solvers_preconditioners-a37199699b9bc538)\n\nrunning 1 test\ntest amg::backend_pcg_tests::backend_pcg_cycle_is_hpd_and_checkpoint_stable ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 236 filtered out; finished in 2.01s\n\n"
+  },
+  "cpu_suites": {
+    "preconditioners": {
+      "log": "/tmp/pcg-amg-preconditioners.log",
+      "passed": 336,
+      "failed": 0,
+      "ignored": 1,
+      "reports": 25
+    },
+    "solvers": {
+      "log": "/tmp/pcg-amg-solvers.log",
+      "passed": 322,
+      "failed": 0,
+      "ignored": 2,
+      "reports": 46
+    }
+  },
+  "check_and_clippy_tails": {
+    "pcg-amg-last-check.log": [
+      "    Checking sonium-sim-propellers v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-sim-propellers)",
+      "    Checking sonium-sim-speaker-modeling v0.7.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-sim-speaker-modeling)",
+      "    Checking sonium-sim-speaker v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-sim-speaker)",
+      "    Checking sonium-qa v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-qa)",
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 13.13s"
+    ],
+    "pcg-amg-last-clippy.log": [
+      "",
+      "warning: `sonium-sim-structural-mechanics` (lib) generated 1 warning",
+      "    Checking sonium-sim-speaker v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-sim-speaker)",
+      "    Checking sonium-qa v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-qa)",
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 19.43s"
+    ],
+    "pcg-amg-final-cuda-clippy.log": [
+      "    |",
+      "",
+      "warning: `sonium-solvers` (test \"compatibility_failure_matrix\") generated 1 warning",
+      "warning: `sonium-solvers` (test \"adaptive_failure_matrix\") generated 2 warnings (run `cargo clippy --fix --test \"adaptive_failure_matrix\" -p sonium-solvers -- ` to apply 2 suggestions)",
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 50.38s"
+    ],
+    "pcg-amg-preconditioner-cuda-clippy.log": [
+      "1030 +     for (row, <item>) in diagonal.iter().enumerate().take(schur.num_rows) {",
+      "     |",
+      "",
+      "warning: `sonium-solvers-preconditioners` (lib test) generated 13 warnings (run `cargo clippy --fix --lib -p sonium-solvers-preconditioners --tests -- ` to apply 1 suggestion)",
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 25.06s"
+    ]
+  },
+  "reproduce": [
+    "SONIUM_REQUIRE_CUDA=1 cargo test -p sonium-solvers --features cuda --lib cuda -- --test-threads=1 --nocapture",
+    "SONIUM_REQUIRE_CUDA=1 cargo test -p sonium-solvers-preconditioners --features cuda --lib native_backend_pcg -- --test-threads=1 --nocapture"
+  ],
+  "findings": [
+    "New CG+AMG route uses an explicit stationary backend L1-Jacobi V-cycle with conjugate-transpose restriction and zero Galerkin dropping.",
+    "The complete applied preconditioner passes Hermiticity and positive-pivot factorization checks for real and complex multilevel cases, including after checkpoint reconstruction.",
+    "Host checkpoint version 2 preserves Galerkin dropping; version 1 remains readable with the historical 0.001 default.",
+    "Public CUDA upload now coalesces additive CSR duplicates; final regression passes against the original input system.",
+    "All four scalar types pass facade dispatch and retained PCG changed-RHS warm-start checks; second solves allocate no additional device storage.",
+    "No end-to-end performance or mesh-independent convergence claim. The public convenience facade still owns a new context/session per call."
+  ]
+}

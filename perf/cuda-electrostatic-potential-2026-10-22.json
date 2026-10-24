@@ -1,0 +1,70 @@
+{
+  "status": "validated_bounded_electrostatic_execution",
+  "scope": {
+    "scalar": "f64",
+    "space": "H1",
+    "elements": [
+      "affine Tri3 P1/P2",
+      "affine tetrahedron P1/P2"
+    ],
+    "solver": "retained PCG with symmetric AMG",
+    "field": "resident centroid E=-grad(V)",
+    "native_physical_solves": 36
+  },
+  "source_sha256": {
+    "crates/sonium-fem/src/backend.rs": "b68d72cbf572cbb34c91fc8e620730d4a2b0127c9d70279c5735753137884448",
+    "crates/sonium-fem/src/solver/device.rs": "06c2bf027de8d8e27e12f631360c694ada6d61077130a5707e5f0a75aafdfbbb",
+    "crates/sonium-fem/src/solver/device/tests/electrostatic.rs": "e6d7a354348aa75be00a4b22574183aab8ef763a72298b19b0dbc87d03c5b700",
+    "crates/sonium-fem/src/physics/electromagnetics/electrostatic.rs": "623e02b313ff28678e748fe10066ee10e0c4c0547200b9f2b3c94ef0060128a4",
+    "crates/sonium-fem/src/physics/electromagnetics/electrostatic_cuda.rs": "6ea9f9ada05b7a0b9662b17775a07471a75041f40c903177b2afb884c07b49c4",
+    "crates/sonium-fem/tests/fem_cuda_admission.rs": "f8e3ff604586850db0f6f7100c0eb4fb5998d2adb632f4e5a079dad13d8d2d87"
+  },
+  "validation": {
+    "native": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 45.11s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2015 filtered out; finished in 0.91s"
+    ],
+    "generic-native": [
+      "test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 2000 filtered out; finished in 17.29s"
+    ],
+    "memcheck": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2015 filtered out; finished in 18.12s",
+      "========= ERROR SUMMARY: 0 errors"
+    ],
+    "check": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 6.83s"
+    ],
+    "clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 9.86s"
+    ],
+    "cuda-clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 29.56s"
+    ],
+    "admission": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 16.29s",
+      "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    ],
+    "cpu": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 41.97s",
+      "test result: ok. 1964 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 23.98s"
+    ]
+  },
+  "gates": {
+    "potential_absolute_error": 1e-07,
+    "field_analytic_absolute_error": 1e-06,
+    "field_cpu_parity_absolute_error": 1e-11,
+    "independent_relative_residual": 1.1e-09,
+    "capacitance_relative_error": 1e-07,
+    "warm_solve_allocations": 0,
+    "warm_field_allocations": 0,
+    "field_h2d_bytes": 0,
+    "field_d2h_max_bytes": 16
+  },
+  "limitations": [
+    "Host form assembly, constraints and initial hierarchy setup remain explicit.",
+    "Physical validation uses charge-free homogeneous positive-permittivity capacitors; heterogeneous material updates need additional evidence.",
+    "Energy/capacitance use the CPU postprocessor after explicit potential download.",
+    "Nonlinear dielectric, floating-conductor and electromechanical coupling are not covered.",
+    "No performance benchmark or general GPU speedup claim."
+  ]
+}

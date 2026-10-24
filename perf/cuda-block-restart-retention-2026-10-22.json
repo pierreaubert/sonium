@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-22",
+  "scope": "Shared restarted block GMRES and opt-in retained active-width cache",
+  "working_tree": true,
+  "changes": [
+    "Retain n*nrhs restart buffer across calls; pooled for with_pool, legacy policy preserved for new",
+    "Never use retained restart values as an implicit initial guess",
+    "Do not allocate a restart after the final permitted cycle",
+    "Cache and restore active-width action and Krylov buffers in ensure_block, not ensure_full",
+    "Correct quota fixture to include scalar recovery scratch"
+  ],
+  "validation": {
+    "cpu_focused_tests": 4,
+    "compute_unit_tests": 651,
+    "iterative_tests": "Complete cargo test -p sonium-solvers-iterative passed, including 325 unit tests and integration tests",
+    "native_focused_tests": 5,
+    "native_retained_solve_cases": 144,
+    "native_warm_repeats": 72,
+    "scalars": [
+      "f32",
+      "f64",
+      "Complex32",
+      "Complex64"
+    ],
+    "methods": [
+      "BlockGmres",
+      "BlockFgmres"
+    ],
+    "width_sequence": [
+      2,
+      3,
+      2
+    ],
+    "rhs_variants_per_width": 3,
+    "passes_per_variant": 2,
+    "warm_device_allocation_operations": 0,
+    "memcheck_errors": 0,
+    "memcheck_scope": "native_pooled_block_restarts_reuse_allocations, all 144 retained CUDA cases",
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_clippy": "passed with existing warnings"
+  },
+  "limits": [
+    "Small diagonal systems exercise solver lifecycle, not BEM or FEM production performance",
+    "First use of widths or larger Krylov limits may allocate",
+    "Full RHS width changes still replace full-block scratch and restart storage",
+    "Only restart and scalar fallback Krylov storage are pooled; existing raw block allocations remain outside the pool quota",
+    "Opt-in active-width cache increases retained memory; no automatic room producer migration",
+    "No end-to-end BEM block session is connected yet",
+    "After execution, the residual test loop was changed to equivalent iterator enumeration to satisfy Clippy; production source unchanged"
+  ],
+  "source_sha256": {
+    "crates/sonium-compute/src/block_krylov.rs": "82a64179d49691293dc88b1bc23e1512aa0757ccf9fc6e57f78e743355cf48f2",
+    "crates/sonium-compute/src/block_krylov/shapes.rs": "26ece1efa8b9d81bda6107ebcb579f9e84312ff017f73bbb89260faa53aaf54d",
+    "crates/sonium-solvers/crates/sonium-solvers-iterative/src/backend.rs": "dcd7f3f184695c9e288a65e7e370c4bf7a4e56480002857aa281db1bee32c005",
+    "crates/sonium-solvers/crates/sonium-solvers-iterative/src/backend/block_restart_tests.rs": "8e7ed193676ae8dd984e8bf79e859c1a0c65020c7bdcd46b921c9cb9256d0af7",
+    "crates/sonium-solvers/crates/sonium-solvers-iterative/src/backend/block_restart_tests/guards.rs": "1f044638f776ef9cdb4fb53a8ab281c952b4fda4a563db93d731508be72e7d54"
+  },
+  "logs": {
+    "/tmp/block-restart-cache-fixed2.log": "a09333932ec72b180f0ffd288e9ca3bc3cc9c2a0c7eac296bcedc85e346c423d",
+    "/tmp/block-restart-native.log": "66c24514140bc2e0f922e03cefde5d5be9d77817ac314c292ce0ec98794e546d",
+    "/tmp/block-restart-memcheck.log": "7b5cad884c4143d4c4a773c59bb8d164ed5f9239a492c821e18258c6ce0fbe50",
+    "/tmp/block-restart-compute-tests.log": "7665e9c7dbc33b1e684529e3d4abf3f0e6a548a4e237e89d92240fd0ce19f8db",
+    "/tmp/block-restart-iterative-tests.log": "67f665cac27214e9133ba207b2ac13cb5e7c543636c5ed80391edeef537fcb9b",
+    "/tmp/block-restart-check.log": "273e5ac67be775a47e335b4f33ff2e8c18adba7b07743070fde762454841b7ff",
+    "/tmp/block-restart-clippy.log": "1d81ec8441cb9a6fa08e292afd4cf15cb1bc6bc9dee826adba7608b1cc6d2f12",
+    "/tmp/block-restart-cuda-clippy-final.log": "f97d096ca256ceb389c883fa074acde870f87c823c97348259757a39a1e1a333"
+  }
+}

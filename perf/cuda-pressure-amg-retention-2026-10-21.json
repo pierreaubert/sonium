@@ -1,0 +1,57 @@
+{
+  "date": "2026-10-21",
+  "scope": "retain external pressure AMG across velocity-only numeric updates",
+  "source_sha256": {
+    "crates/sonium-compute/src/preconditioner/saddle_point.rs": "d07d21cf19ac725840452cff2abf8fe62e12764a8b871a39acf2dd20f9a5d4ee",
+    "crates/sonium-compute/tests/saddle_owned.rs": "7e8afc641e1d4b103e20bab4c204aca05e0180c2ea4c346afd2a334759bb63e1",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda.rs": "a51e2bbd9c6fea1f29c7ca5818d4490f63ab10c992232864066453193dd7005b",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/tests.rs": "14ba24ba86874ef3023f16d3487f5f56a70d0f507743acaacac026529301dfec"
+  },
+  "contract": [
+    "External pressure action retained only with identical pressure shape, pattern and values",
+    "Changed pressure data rebuilds BDF preconditioning",
+    "Unchanged pressure skips pressure uploads and spectral estimation",
+    "Invalid numeric state forces complete restoration, including retry of the previous pressure matrix"
+  ],
+  "compute_native": {
+    "passed": 6,
+    "failed": 0,
+    "memcheck_errors": 0,
+    "seconds": 0.94
+  },
+  "bdf_native": {
+    "passed": 2,
+    "failed": 0,
+    "memcheck_errors": 0,
+    "seconds": 45.58,
+    "velocity_only_fixture": "Production BDF matrix with velocity off-diagonals scaled by 1.001; velocity diagonal and supplied BtDiagB pressure approximation unchanged; RHS manufactured from the prior solution",
+    "velocity_only_new_device_allocations": 0,
+    "setup_builds_before": 4,
+    "setup_builds_after_velocity_update": 4,
+    "setup_builds_after_pressure_change": 5,
+    "manufactured_solution_relative_error": 4.4989740442411085e-11,
+    "physical_timestep_parity_relative_tolerance": 2e-06
+  },
+  "cpu_saddle_unit_tests": 9,
+  "checks": [
+    "cargo check",
+    "cargo clippy",
+    "cargo clippy -p sonium-compute -p sonium-fem --features cuda --tests"
+  ],
+  "logs": [
+    "/tmp/amg-retain-compute-native.log",
+    "/tmp/amg-retain-bdf-native.log",
+    "/tmp/amg-retain-cpu.log",
+    "/tmp/amg-retain-check.log",
+    "/tmp/amg-retain-clippy.log",
+    "/tmp/amg-retain-cuda-clippy.log",
+    "/tmp/amg-retain-final-clippy.log"
+  ],
+  "limits": [
+    "General AMG numeric hierarchy refresh remains open",
+    "The production timestep sequence changes BtDiagB pressure values and still rebuilds AMG",
+    "Host assembly, numeric uploads and history state remain",
+    "No elapsed-time speedup claim",
+    "Retained host pressure values add O(pressure nnz) host memory"
+  ]
+}

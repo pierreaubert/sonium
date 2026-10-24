@@ -1,0 +1,102 @@
+{
+  "date": "2026-10-22",
+  "scope": "Retained CUDA complex-double AMG coarse-factor refresh and tetrahedral pressure integration",
+  "snapshot": "Current working tree, not reproducible from HEAD alone",
+  "changes": [
+    "Host-input complex-double LU refactor reuses factors, pivots and vendor workspace",
+    "AMG refresh preserves direct-coarse checkpoint flag and commits only after synchronization",
+    "Tetrahedral pressure sessions expose compatible auxiliary refresh with explicit false/rebuild handling"
+  ],
+  "algebra_comparisons": [
+    {
+      "levels": 1,
+      "scale": 1.125,
+      "allocations": 0,
+      "h2d_bytes": 39904,
+      "d2h_bytes": 4
+    },
+    {
+      "levels": 1,
+      "scale": 0.75,
+      "allocations": 0,
+      "h2d_bytes": 39904,
+      "d2h_bytes": 4
+    },
+    {
+      "levels": 4,
+      "scale": 1.125,
+      "allocations": 0,
+      "h2d_bytes": 10928,
+      "d2h_bytes": 4
+    },
+    {
+      "levels": 4,
+      "scale": 0.75,
+      "allocations": 0,
+      "h2d_bytes": 10928,
+      "d2h_bytes": 4
+    }
+  ],
+  "tetrahedral_comparisons": [
+    {
+      "element_dofs": 4,
+      "mode": "Csr",
+      "allocations": 0,
+      "h2d_bytes": 31808,
+      "d2h_bytes": 4
+    },
+    {
+      "element_dofs": 10,
+      "mode": "Csr",
+      "allocations": 0,
+      "h2d_bytes": 340432,
+      "d2h_bytes": 4
+    },
+    {
+      "element_dofs": 4,
+      "mode": "Element",
+      "allocations": 0,
+      "h2d_bytes": 31808,
+      "d2h_bytes": 4
+    },
+    {
+      "element_dofs": 10,
+      "mode": "Element",
+      "allocations": 0,
+      "h2d_bytes": 340432,
+      "d2h_bytes": 4
+    }
+  ],
+  "validation": {
+    "reference": "Fresh AMG and restored checkpoints, plus known diagonal LU solution",
+    "failure_cases": [
+      "nonfinite input",
+      "invalid size",
+      "singular uploaded matrix",
+      "injected coarse update failure",
+      "full refresh recovery"
+    ],
+    "cpu_compute_passed": 651,
+    "cpu_preconditioners_passed": 240,
+    "cpu_fem_passed": 1945,
+    "cpu_fem_ignored": 1,
+    "cuda_coarse_tests_memcheck": {
+      "passed": 3,
+      "errors": 0
+    },
+    "cuda_tet_test_memcheck": {
+      "passed": 1,
+      "errors": 0
+    },
+    "existing_refresh_regression_tests": 3,
+    "cargo_check": "passed",
+    "cargo_clippy": "passed with existing warnings"
+  },
+  "limitations": [
+    "Host hierarchy construction remains",
+    "Coarse host dense matrix is uploaded; 4-byte vendor status is downloaded",
+    "Complex-single coarse refresh remains unsupported",
+    "Production refresh tested on P1/P2 CSR and element tetrahedral sessions; other producers remain open",
+    "No timing claim because separate large BEM sanitizer is still active"
+  ]
+}

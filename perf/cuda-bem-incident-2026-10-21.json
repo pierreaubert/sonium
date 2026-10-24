@@ -1,0 +1,171 @@
+{
+  "date": "2026-10-21",
+  "scope": "Native BEM incident RHS evaluation wired through public retained solve",
+  "working_tree": true,
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/bem_incident.rs": "790de10f23f4f16b83bd429ffa2aced89b5f34dc2bb829be90844bceba89fc85",
+    "crates/sonium-compute/src/cuda/cublas.rs": "9be18e7992b596b13b954045b23ddf7d42ac9bb2be8baac350a03255bb0a9656",
+    "crates/sonium-compute/src/cuda/kernels/bem_kernels.cu": "aacd013d7fd673c3aa719190c233735ff88e02f5756bcd7738807aab4683157e",
+    "crates/sonium-bem/src/core/bem_solver_cuda.rs": "7c0ff122b61182188fe76c0c116921adf7dc7966cc040d8ac35b7d73cfbb3cd6",
+    "crates/sonium-bem/src/core/bem_solver_cuda_tests.rs": "567c8887beacacf4540af068d891a2691dd6208dd61b46116077ccecaea34217"
+  },
+  "kernel_validation": {
+    "points": 131,
+    "source_variants": [
+      "PlaneWave",
+      "PointSource",
+      "MultiplePlaneWaves",
+      "MultiplePointSources",
+      "empty sources"
+    ],
+    "harmonic_signs": [
+      -1,
+      1
+    ],
+    "tau_signs": [
+      -1,
+      1
+    ],
+    "tolerance": 1e-12,
+    "edge_cases": [
+      "point-source coincidence and 1e-11 radius use CPU cutoff",
+      "invalid source kind",
+      "non-finite coordinates",
+      "source count exceeds capacity"
+    ],
+    "explicit_input_h2d_bytes_during_kernel": 0,
+    "compact_d2h_bytes_max": 12
+  },
+  "public_runs": [
+    {
+      "boundary": "Rigid",
+      "burton_miller": false,
+      "pass_index": 0,
+      "relative_residual": 3.6368923453269437e-16,
+      "surface_relative_error": 7.586748985251267e-16,
+      "allocations": 9,
+      "h2d_bytes": 38448,
+      "tracked_d2h_bytes": 32
+    },
+    {
+      "boundary": "Rigid",
+      "burton_miller": false,
+      "pass_index": 1,
+      "relative_residual": 3.4379426951416643e-16,
+      "surface_relative_error": 6.681035340788496e-16,
+      "allocations": 0,
+      "h2d_bytes": 12848,
+      "tracked_d2h_bytes": 32
+    },
+    {
+      "boundary": "Rigid",
+      "burton_miller": false,
+      "pass_index": 2,
+      "relative_residual": 3.8035787432178726e-16,
+      "surface_relative_error": 7.548947551909078e-16,
+      "allocations": 0,
+      "h2d_bytes": 12848,
+      "tracked_d2h_bytes": 24
+    },
+    {
+      "boundary": "Rigid",
+      "burton_miller": true,
+      "pass_index": 0,
+      "relative_residual": 5.051136374483009e-16,
+      "surface_relative_error": 8.042434297317682e-16,
+      "allocations": 8,
+      "h2d_bytes": 38448,
+      "tracked_d2h_bytes": 32
+    },
+    {
+      "boundary": "Rigid",
+      "burton_miller": true,
+      "pass_index": 1,
+      "relative_residual": 5.434756907145034e-16,
+      "surface_relative_error": 8.755521004759409e-16,
+      "allocations": 0,
+      "h2d_bytes": 12848,
+      "tracked_d2h_bytes": 32
+    },
+    {
+      "boundary": "Rigid",
+      "burton_miller": true,
+      "pass_index": 2,
+      "relative_residual": 5.545337432099851e-16,
+      "surface_relative_error": 8.648052871018533e-16,
+      "allocations": 0,
+      "h2d_bytes": 12848,
+      "tracked_d2h_bytes": 24
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": false,
+      "pass_index": 0,
+      "relative_residual": 3.870603092044605e-16,
+      "surface_relative_error": 6.417329065519211e-16,
+      "allocations": 8,
+      "h2d_bytes": 38448,
+      "tracked_d2h_bytes": 32
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": false,
+      "pass_index": 1,
+      "relative_residual": 4.2267467100184307e-16,
+      "surface_relative_error": 7.031711317736046e-16,
+      "allocations": 0,
+      "h2d_bytes": 12848,
+      "tracked_d2h_bytes": 32
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": false,
+      "pass_index": 2,
+      "relative_residual": 4.696745791191932e-16,
+      "surface_relative_error": 7.740652236026429e-16,
+      "allocations": 0,
+      "h2d_bytes": 12848,
+      "tracked_d2h_bytes": 24
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": true,
+      "pass_index": 0,
+      "relative_residual": 5.943058774632383e-16,
+      "surface_relative_error": 8.04941649854701e-16,
+      "allocations": 8,
+      "h2d_bytes": 38448,
+      "tracked_d2h_bytes": 32
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": true,
+      "pass_index": 1,
+      "relative_residual": 7.492277546548532e-16,
+      "surface_relative_error": 9.126421994026451e-16,
+      "allocations": 0,
+      "h2d_bytes": 12848,
+      "tracked_d2h_bytes": 32
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": true,
+      "pass_index": 2,
+      "relative_residual": 6.898334743736414e-16,
+      "surface_relative_error": 9.302033836527928e-16,
+      "allocations": 0,
+      "h2d_bytes": 12848,
+      "tracked_d2h_bytes": 24
+    }
+  ],
+  "incident_h2d_before_bytes": 1280,
+  "incident_h2d_after_bytes": 48,
+  "memcheck_output": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest core::bem_solver::cuda::tests::native_incident_rhs_all_sources_conventions_and_invalid_inputs ... ok\ntest core::bem_solver::cuda::tests::native_public_cuda_session_matches_cpu_fields_and_reuses_factors ... public CUDA BEM boundary=Rigid BM=false pass=0 residual=0.00000000000000036368923453269437 surface_error=0.0000000000000007586748985251267 allocations=9 h2d=38448 d2h=32\npublic CUDA BEM boundary=Rigid BM=false pass=1 residual=0.00000000000000034379426951416643 surface_error=0.0000000000000006681035340788496 allocations=0 h2d=12848 d2h=32\npublic CUDA BEM boundary=Rigid BM=false pass=2 residual=0.00000000000000038035787432178726 surface_error=0.0000000000000007548947551909078 allocations=0 h2d=12848 d2h=24\npublic CUDA BEM boundary=Rigid BM=true pass=0 residual=0.0000000000000005051136374483009 surface_error=0.0000000000000008042434297317682 allocations=8 h2d=38448 d2h=32\npublic CUDA BEM boundary=Rigid BM=true pass=1 residual=0.0000000000000005434756907145034 surface_error=0.0000000000000008755521004759409 allocations=0 h2d=12848 d2h=32\npublic CUDA BEM boundary=Rigid BM=true pass=2 residual=0.0000000000000005545337432099851 surface_error=0.0000000000000008648052871018533 allocations=0 h2d=12848 d2h=24\npublic CUDA BEM boundary=Impedance BM=false pass=0 residual=0.0000000000000003870603092044605 surface_error=0.0000000000000006417329065519211 allocations=8 h2d=38448 d2h=32\npublic CUDA BEM boundary=Impedance BM=false pass=1 residual=0.00000000000000042267467100184307 surface_error=0.0000000000000007031711317736046 allocations=0 h2d=12848 d2h=32\npublic CUDA BEM boundary=Impedance BM=false pass=2 residual=0.0000000000000004696745791191932 surface_error=0.0000000000000007740652236026429 allocations=0 h2d=12848 d2h=24\npublic CUDA BEM boundary=Impedance BM=true pass=0 residual=0.0000000000000005943058774632383 surface_error=0.000000000000000804941649854701 allocations=8 h2d=38448 d2h=32\npublic CUDA BEM boundary=Impedance BM=true pass=1 residual=0.0000000000000007492277546548532 surface_error=0.0000000000000009126421994026451 allocations=0 h2d=12848 d2h=32\npublic CUDA BEM boundary=Impedance BM=true pass=2 residual=0.0000000000000006898334743736414 surface_error=0.0000000000000009302033836527928 allocations=0 h2d=12848 d2h=24\nok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 551 filtered out; finished in 4.85s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "limits": [
+    "Host coefficient/material preparation remains per solve",
+    "Source descriptor upload is proportional to retained source capacity; growing source count can allocate",
+    "Output fields still use existing CPU APIs after explicit download",
+    "Tracked D2H bytes exclude additional cuBLAS host-result norm scalars",
+    "No elapsed-time speedup claim or full CUDA coverage claim"
+  ]
+}

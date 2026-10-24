@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-22",
+  "scope": "Heterogeneous electrostatic energy operator and fixed-pattern resident material updates",
+  "implementation": {
+    "constructor": "CudaElectrostaticObservables::try_from_stiffness accepts absolute-permittivity-weighted unconstrained stiffness",
+    "update": "try_update_values validates and copies device values into retained CSR; all failures invalidate evaluation until replacement",
+    "solve": "Existing generic CUDA FEM PCG with initial stationary symmetric AMG retained across moderate positive material contrast changes"
+  },
+  "physical_validation": {
+    "layered_cases": 12,
+    "elements": [
+      "triangle P1",
+      "triangle P2",
+      "tetrahedron P1",
+      "tetrahedron P2"
+    ],
+    "relative_permittivities_left_right": [
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        4
+      ],
+      [
+        1,
+        0.5
+      ]
+    ],
+    "voltage": [
+      1,
+      -2,
+      0.75
+    ],
+    "geometry": "unit capacitor; conforming material interface x=0.5; unit depth for 2D",
+    "reference": "piecewise-linear voltage and C=epsilon_0/(0.5+0.5/contrast)",
+    "gates": {
+      "potential_absolute_error": 1e-07,
+      "capacitance_energy_charge_relative_error": 1e-07,
+      "independent_residual": 1.1e-09,
+      "cpu_energy_relative_error": 1e-10,
+      "warm_device_allocations": 0,
+      "resident_update_and_observable_h2d_bytes": 0,
+      "resident_update_and_observable_d2h_bytes_max": 80
+    }
+  },
+  "failure_validation": [
+    "wrong update length blocks evaluation",
+    "nonfinite update blocks evaluation",
+    "device-copy failure blocks evaluation until backend recovery and complete replacement",
+    "synchronization failure is terminal and requires backend recreation"
+  ],
+  "checks": {
+    "native": "2 passed /tmp/electrostatic-layered-native-final.log",
+    "memcheck": "2 passed, zero errors /tmp/electrostatic-layered-memcheck.log",
+    "cpu_fem": "1964 passed, 1 ignored /tmp/electrostatic-layered-cpu.log",
+    "root_check": "passed /tmp/electrostatic-layered-root-check.log",
+    "root_clippy": "passed with existing warnings /tmp/electrostatic-layered-root-clippy.log",
+    "cuda_fem_clippy": "passed with existing warnings /tmp/electrostatic-layered-cuda-clippy.log"
+  },
+  "limitations": [
+    "Host material assembly and upload remain explicit recurring boundaries.",
+    "No measured speedup; no broad material-contrast convergence claim for lagged AMG.",
+    "Caller preserves energy-operator ordering, normalization, positive material coefficients and consistency with solved potential.",
+    "No conductor-resolved charges, nonlinear dielectric history or coupled electromechanics."
+  ],
+  "source_sha256": {
+    "crates/sonium-fem/src/physics/electromagnetics/electrostatic_cuda.rs": "053adaf97ce6aaef816397de8cabeb23155d6e5f4d77a58940fe9cbf583b6fb2",
+    "crates/sonium-fem/src/solver/device/tests/electrostatic.rs": "b50796f3d4828d22e6a5e27e309af72e0e2d17fe0de85f850f2ee0c8596264b7"
+  }
+}

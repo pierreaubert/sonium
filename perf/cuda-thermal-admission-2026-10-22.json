@@ -1,0 +1,360 @@
+{
+  "date": "2026-10-22",
+  "scope": "Steady assembled f64 H1 heat-conduction admission and persistent CUDA PCG/AMG solves",
+  "public_api": [
+    "FemPhysics::HeatConduction",
+    "FemWorkload::native_cuda_heat_conduction",
+    "fem_cuda_thermal_capability_rows",
+    "CudaFemSolveSession::try_assemble"
+  ],
+  "coverage": {
+    "elements": [
+      "Tri3",
+      "Tetrahedron"
+    ],
+    "orders": [
+      "P1",
+      "P2"
+    ],
+    "actions": [
+      "Forward",
+      "Transpose",
+      "Hermitian"
+    ],
+    "capability_rows": 12
+  },
+  "physical_fixture": "Positive conductivity k=2.1, insulated side faces, prescribed x=0/1 temperatures. P1: T=1+x, Q=0. P2: T=1+x(1-x), Q=4.2. Production conduction/source forms and nonhomogeneous Dirichlet elimination on CPU. CUDA PCG with symmetric AMG.",
+  "physical_results": [
+    {
+      "temperature_max_error": 2.682110089580192e-10,
+      "relative_residual": 2.80069050030886e-10
+    },
+    {
+      "temperature_max_error": 2.682110089580192e-10,
+      "relative_residual": 2.80069050030886e-10
+    },
+    {
+      "temperature_max_error": 2.682110089580192e-10,
+      "relative_residual": 2.80069050030886e-10
+    },
+    {
+      "temperature_max_error": 1.657165515922543e-10,
+      "relative_residual": 1.8460173505501585e-10
+    },
+    {
+      "temperature_max_error": 1.657165515922543e-10,
+      "relative_residual": 1.8460173505501585e-10
+    },
+    {
+      "temperature_max_error": 1.657165515922543e-10,
+      "relative_residual": 1.8460173505501585e-10
+    },
+    {
+      "temperature_max_error": 9.195155747931949e-11,
+      "relative_residual": 3.480220596522445e-11
+    },
+    {
+      "temperature_max_error": 9.195155747931949e-11,
+      "relative_residual": 3.480220478284675e-11
+    },
+    {
+      "temperature_max_error": 9.195155747931949e-11,
+      "relative_residual": 3.480220478284675e-11
+    },
+    {
+      "temperature_max_error": 2.7382374145901167e-09,
+      "relative_residual": 4.6492491386392906e-10
+    },
+    {
+      "temperature_max_error": 2.7382374145901167e-09,
+      "relative_residual": 4.6492491330697083e-10
+    },
+    {
+      "temperature_max_error": 2.7382374145901167e-09,
+      "relative_residual": 4.6492491330697083e-10
+    }
+  ],
+  "numeric_rhs_update_results": [
+    {
+      "action": "Forward",
+      "pass": 0,
+      "iterations": 9,
+      "device_allocations": 0,
+      "relative_residual": 2.1049654874055456e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 1,
+      "iterations": 9,
+      "device_allocations": 0,
+      "relative_residual": 1.7145630409107432e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 2,
+      "iterations": 9,
+      "device_allocations": 0,
+      "relative_residual": 2.0967635444686964e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 0,
+      "iterations": 9,
+      "device_allocations": 0,
+      "relative_residual": 2.1049654874055456e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 1,
+      "iterations": 9,
+      "device_allocations": 0,
+      "relative_residual": 1.7145630409107432e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 2,
+      "iterations": 9,
+      "device_allocations": 0,
+      "relative_residual": 2.0967635444686964e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 0,
+      "iterations": 9,
+      "device_allocations": 0,
+      "relative_residual": 2.1049654874055456e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 1,
+      "iterations": 9,
+      "device_allocations": 0,
+      "relative_residual": 1.7145630409107432e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 2,
+      "iterations": 9,
+      "device_allocations": 0,
+      "relative_residual": 2.0967635444686964e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 0,
+      "iterations": 13,
+      "device_allocations": 0,
+      "relative_residual": 7.323408412104372e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 1,
+      "iterations": 13,
+      "device_allocations": 0,
+      "relative_residual": 4.340767321448225e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 2,
+      "iterations": 13,
+      "device_allocations": 0,
+      "relative_residual": 7.592412842368822e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 0,
+      "iterations": 13,
+      "device_allocations": 0,
+      "relative_residual": 7.323408412104372e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 1,
+      "iterations": 13,
+      "device_allocations": 0,
+      "relative_residual": 4.340767321448225e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 2,
+      "iterations": 13,
+      "device_allocations": 0,
+      "relative_residual": 7.592412842368822e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 0,
+      "iterations": 13,
+      "device_allocations": 0,
+      "relative_residual": 7.323408412104372e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 1,
+      "iterations": 13,
+      "device_allocations": 0,
+      "relative_residual": 4.340767321448225e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 2,
+      "iterations": 13,
+      "device_allocations": 0,
+      "relative_residual": 7.592412842368822e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 0,
+      "iterations": 7,
+      "device_allocations": 0,
+      "relative_residual": 6.143919807123748e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 1,
+      "iterations": 7,
+      "device_allocations": 0,
+      "relative_residual": 5.875564311748502e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 2,
+      "iterations": 7,
+      "device_allocations": 0,
+      "relative_residual": 5.142290179309842e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 0,
+      "iterations": 7,
+      "device_allocations": 0,
+      "relative_residual": 6.143920495295891e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 1,
+      "iterations": 7,
+      "device_allocations": 0,
+      "relative_residual": 5.875563948473347e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 2,
+      "iterations": 7,
+      "device_allocations": 0,
+      "relative_residual": 5.142290412559269e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 0,
+      "iterations": 7,
+      "device_allocations": 0,
+      "relative_residual": 6.143920495295891e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 1,
+      "iterations": 7,
+      "device_allocations": 0,
+      "relative_residual": 5.875563948473347e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 2,
+      "iterations": 7,
+      "device_allocations": 0,
+      "relative_residual": 5.142290412559269e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 0,
+      "iterations": 20,
+      "device_allocations": 0,
+      "relative_residual": 3.5496826042433716e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 1,
+      "iterations": 19,
+      "device_allocations": 0,
+      "relative_residual": 8.264411519511773e-10
+    },
+    {
+      "action": "Forward",
+      "pass": 2,
+      "iterations": 19,
+      "device_allocations": 0,
+      "relative_residual": 9.724761878875732e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 0,
+      "iterations": 20,
+      "device_allocations": 0,
+      "relative_residual": 3.5496827839750125e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 1,
+      "iterations": 19,
+      "device_allocations": 0,
+      "relative_residual": 8.264411323618052e-10
+    },
+    {
+      "action": "Transpose",
+      "pass": 2,
+      "iterations": 19,
+      "device_allocations": 0,
+      "relative_residual": 9.724762293876364e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 0,
+      "iterations": 20,
+      "device_allocations": 0,
+      "relative_residual": 3.5496827839750125e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 1,
+      "iterations": 19,
+      "device_allocations": 0,
+      "relative_residual": 8.264411323618052e-10
+    },
+    {
+      "action": "Hermitian",
+      "pass": 2,
+      "iterations": 19,
+      "device_allocations": 0,
+      "relative_residual": 9.724762293876364e-10
+    }
+  ],
+  "validation": {
+    "native_tests": "two focused tests passed; earlier thermal filter 22 passed",
+    "cpu_fem": "1963 passed, zero failed, one ignored",
+    "root_cargo_check": "passed",
+    "root_cargo_clippy": "passed with existing warnings",
+    "cuda_fem_clippy": "passed with existing warnings",
+    "memcheck": "both focused thermal tests passed; zero errors"
+  },
+  "limitations": [
+    "Host assembly, constraints and AMG setup remain explicit",
+    "No transient, nonlinear-radiation, advection, pure-Neumann nullspace or other scalar/element admission",
+    "PCG requires positive-definite constrained systems and a stationary symmetric positive-definite preconditioner",
+    "Real transpose/Hermitian physical cases are symmetry-equivalent; no nonsymmetric thermal claim",
+    "No whole-sweep allocation or speedup claim; solver and update boundaries measured separately",
+    "Capability table is separate from acoustic rows and is not the complete CPU-workflow inventory"
+  ],
+  "source_sha256": {
+    "crates/sonium-fem/src/backend.rs": "bdfb7aeb190898448750dbe8744fb75b19eea8118c47accbe5f5031f4718bb9e",
+    "crates/sonium-fem/src/lib.rs": "7c2a3185a7236d6f4ff37e839cac38daf325d7972c52085e669dc83925529c08",
+    "crates/sonium-fem/src/solver/device/tests/thermal.rs": "3a7e5af433cab5fe58bf72c54e2316a8d00355e7ed3f0f56542ea2e9ae0bb029"
+  },
+  "logs": [
+    "/tmp/thermal-admission-native-final.log",
+    "/tmp/thermal-memcheck.log",
+    "/tmp/thermal-fem-cpu.log",
+    "/tmp/thermal-root-check.log",
+    "/tmp/thermal-root-clippy.log",
+    "/tmp/thermal-cuda-clippy.log"
+  ]
+}

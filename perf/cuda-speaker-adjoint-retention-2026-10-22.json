@@ -1,0 +1,154 @@
+{
+  "date": "2026-10-22",
+  "scope": "Retained speaker adjoint, coupled-network and reference-correction GMRES scratch",
+  "source": "crates/sonium-sim-speaker/src/simulation.rs",
+  "source_sha256": "2cecd0128fb864689c98d8cbb1cfb2de67c4d0142636b7dd28349e3c8f3b1aaf",
+  "production": [
+    "Adjoint sweep retains a pool and Complex64 GMRES workspace across operator updates",
+    "Typed network keeps a separate driver-count workspace across frequencies and numeric CSR/Jacobi updates",
+    "Reference correction reuses the field-sized final-solve workspace"
+  ],
+  "native_network_regression": {
+    "calls": 5,
+    "frequencies_hz": [
+      1000,
+      1000,
+      1200,
+      1200,
+      1000
+    ],
+    "warm_calls_with_zero_device_allocations": 4,
+    "cpu_velocity_relative_error_gate": 1e-05,
+    "matrix_updates": 4,
+    "jacobi_updates": 4,
+    "memcheck_errors": 0
+  },
+  "native_qa": [
+    {
+      "case_id": "speaker.cuda-bounded-whole-workload.v1",
+      "status": "passed",
+      "metrics": {
+        "active_dofs": 768.0,
+        "adjoint_cuda_d2h_bytes": 75598792.0,
+        "adjoint_cuda_h2d_bytes": 312073176.0,
+        "adjoint_max_cpu_reference_error": 0.0018365266752671553,
+        "adjoint_max_inner_product_error": 3.8632171953431403e-16,
+        "adjoint_max_relative_residual": 9.955515720708336e-06,
+        "adjoint_rhs_buffer_reused": 1.0,
+        "adjoint_solution_buffer_reused": 1.0,
+        "assembly_geometry_reused": 0.0,
+        "assembly_quadrature_schedule_updates": 1.0,
+        "assembly_workspace_builds": 2.0,
+        "cea_preference_score": 3.37743928131176,
+        "cuda_d2d_bytes": 2027520.0,
+        "cuda_d2h_bytes": 75536656.0,
+        "cuda_h2d_bytes": 620882704.0,
+        "fail_closed_product_configurations": 4.0,
+        "gpu_performance_eligible": 0.0,
+        "matrix_value_updates": 1.0,
+        "max_derivative_assembly_error": 0.0,
+        "max_physical_error": 4.091348965955249e-06,
+        "max_relative_residual": 5.484924640592562e-07,
+        "mesh_resident_across_frequencies": 1.0,
+        "operator_structure_resident": 1.0,
+        "preconditioner_updates": 1.0,
+        "reduced_order_preview_frequencies": 2.0,
+        "reduced_order_preview_points": 72.0,
+        "rhs_buffer_reused": 1.0,
+        "solution_buffer_reused": 1.0,
+        "unsupported_capability_cells": 3.0
+      },
+      "thresholds": {
+        "adjoint_max_cpu_reference_error": 0.005,
+        "adjoint_max_inner_product_error": 1e-10,
+        "adjoint_max_relative_residual": 0.0001,
+        "cuda_d2h_bytes": 1.0,
+        "cuda_h2d_bytes": 1.0,
+        "fail_closed_product_configurations": 4.0,
+        "max_derivative_assembly_error": 0.005,
+        "max_physical_error": 0.001,
+        "max_relative_residual": 0.0001
+      }
+    },
+    {
+      "case_id": "speaker.cuda-bounded-typed-production.v1",
+      "status": "passed",
+      "metrics": {
+        "active_dofs": 752.0,
+        "cea_preference_score": 3.37743928131176,
+        "coupled_block_iterations": 60.0,
+        "coupled_block_rhs_count": 2.0,
+        "coupled_block_rhs_resident": 1.0,
+        "coupled_block_solution_resident": 1.0,
+        "coupled_matrix_value_updates": 1.0,
+        "coupled_operator_structure_resident": 1.0,
+        "coupled_preconditioner_updates": 1.0,
+        "coupled_rhs_buffer_reused": 1.0,
+        "coupled_solution_buffer_reused": 1.0,
+        "cuda_d2h_bytes": 72553456.0,
+        "cuda_h2d_bytes": 594281696.0,
+        "matrix_value_updates": 1.0,
+        "max_coupled_derivative_error": 1.028087544585751e-08,
+        "max_coupled_observable_error": 4.245683144684828e-05,
+        "max_coupled_power_error": 5.398823336762026e-07,
+        "max_derivative_assembly_error": 0.0,
+        "max_physical_error": 4.244036165874209e-05,
+        "max_radiation_reciprocity_defect": 0.0077528650028026325,
+        "max_relative_residual": 8.629915427081355e-07,
+        "mesh_resident_across_frequencies": 1.0,
+        "min_radiated_power_w": 0.006071258372568994,
+        "min_radiation_hermitian_pivot": 0.19400076216817697,
+        "operator_structure_resident": 1.0,
+        "preconditioner_updates": 1.0
+      },
+      "thresholds": {
+        "cuda_d2h_bytes": 1.0,
+        "cuda_h2d_bytes": 1.0,
+        "max_coupled_derivative_error": 0.002,
+        "max_coupled_observable_error": 0.002,
+        "max_coupled_power_error": 0.002,
+        "max_derivative_assembly_error": 0.005,
+        "max_physical_error": 0.001,
+        "max_radiation_reciprocity_defect": 0.1,
+        "max_relative_residual": 0.0001
+      }
+    },
+    {
+      "case_id": "speaker.cuda-failure-contract.v1",
+      "status": "passed",
+      "metrics": {
+        "failure_modes_exercised": 9.0,
+        "native_backend_failure_lanes": 4.0
+      },
+      "thresholds": {
+        "failure_modes_exercised": 9.0,
+        "native_backend_failure_lanes": 4.0
+      }
+    }
+  ],
+  "checks": {
+    "cuda_library_check": "passed",
+    "cpu_backend_network_contract": "passed",
+    "root_check_and_clippy": "passed with existing warnings",
+    "cuda_speaker_clippy": "passed with existing warnings"
+  },
+  "limitations": [
+    "No whole-application zero-allocation or speedup claim",
+    "Legacy assembly and sparse allocations are outside scratch-pool quota",
+    "Dense-only application admission remains",
+    "Host reference and output transfers remain",
+    "No Metal hardware validation",
+    "Previous full CPU suite: 233 passed, six ignored, one reproducible CPU batched-FD gradient failure; not changed or reclassified by this work"
+  ],
+  "logs": [
+    "/tmp/speaker-adjoint-retention-test.log",
+    "/tmp/speaker-adjoint-cpu-contract.log",
+    "/tmp/speaker-adjoint-memcheck.log",
+    "/tmp/speaker-adjoint-native.log",
+    "/tmp/speaker-adjoint-typed.log",
+    "/tmp/speaker-adjoint-failure.log",
+    "/tmp/speaker-adjoint-root-check.log",
+    "/tmp/speaker-adjoint-root-clippy.log",
+    "/tmp/speaker-adjoint-clippy.log"
+  ]
+}

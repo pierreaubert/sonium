@@ -1,0 +1,104 @@
+{
+  "date": "2026-10-21",
+  "scope": "Forward affine Tri3 lowest-order complex-double Maxwell with constant coefficients and homogeneous exterior PEC",
+  "git_head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree": "uncommitted; hashes identify changed implementation files",
+  "gpu": {
+    "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+    "driver": "610.57.04",
+    "memory_mib": 97887
+  },
+  "operator": {
+    "curl_coefficient": 1.0,
+    "mass_coefficient": [
+      -1.0,
+      0.25
+    ],
+    "auxiliary_mass": 1.0
+  },
+  "preconditioner": "Additive edge Jacobi + gradient scalar AMG + vector nodal AMG, host setup, retained native CUDA applications and coarse LU",
+  "controls": {
+    "method": "FGMRES",
+    "tolerance": 1e-10,
+    "restart": 60,
+    "max_iterations": 2000
+  },
+  "physical_reference": "E=(sin(pi*y),0)+0.2*grad(sin(pi*x)*sin(pi*y)); J=i*(curl curl E+mass*E); independently quadrature-assembled current load",
+  "cases": [
+    {
+      "subdivisions": 4,
+      "edge_dofs": 56,
+      "auxiliary_iterations": 28,
+      "jacobi_iterations": 38,
+      "relative_residual": 7.206e-11,
+      "relative_field_l2": 0.2770885
+    },
+    {
+      "subdivisions": 8,
+      "edge_dofs": 208,
+      "auxiliary_iterations": 86,
+      "jacobi_iterations": 323,
+      "relative_residual": 9.907e-11,
+      "relative_field_l2": 0.1410018
+    },
+    {
+      "subdivisions": 12,
+      "edge_dofs": 456,
+      "auxiliary_iterations": 102,
+      "jacobi_iterations": 998,
+      "relative_residual": 7.562e-11,
+      "relative_field_l2": 0.09431904
+    }
+  ],
+  "asserted_gates": {
+    "cpu_lu_relative_solution_error_max": 2e-07,
+    "independent_relative_residual_max": 2e-10,
+    "rhs_amplitudes": [
+      1.0,
+      -0.5,
+      1.5
+    ],
+    "warm_solve_device_allocations": 0,
+    "warm_preconditioner_device_allocations": 0,
+    "warm_preconditioner_h2d_bytes": 0,
+    "warm_preconditioner_d2h_bytes": 0,
+    "exact_sequence_tolerance": 2e-12,
+    "launch_failure_output_preservation_and_explicit_recovery": true
+  },
+  "validation": {
+    "native_tests": 2,
+    "cuda_memcheck_errors": 0,
+    "boundary_regression_tests": 23,
+    "native_stdout": "\nrunning 2 tests\ntest physics::electromagnetics::maxwell::device::tests::auxiliary_maps_preserve_exact_sequence_and_pec ... ok\ntest physics::electromagnetics::maxwell::device::tests::native_maxwell_auxiliary_retains_physical_solves ... MAXWELL_CUDA mesh=4 edges=56 iterations=28 jacobi_iterations=38 residual=7.206e-11 field_l2=2.770885e-1\nMAXWELL_CUDA mesh=8 edges=208 iterations=86 jacobi_iterations=323 residual=9.907e-11 field_l2=1.410018e-1\nMAXWELL_CUDA mesh=12 edges=456 iterations=102 jacobi_iterations=998 residual=7.562e-11 field_l2=9.431904e-2\nok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1962 filtered out; finished in 3.34s\n\n",
+    "memcheck_stdout": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest physics::electromagnetics::maxwell::device::tests::auxiliary_maps_preserve_exact_sequence_and_pec ... ok\ntest physics::electromagnetics::maxwell::device::tests::native_maxwell_auxiliary_retains_physical_solves ... MAXWELL_CUDA mesh=4 edges=56 iterations=28 jacobi_iterations=38 residual=7.206e-11 field_l2=2.770885e-1\nMAXWELL_CUDA mesh=8 edges=208 iterations=86 jacobi_iterations=323 residual=9.907e-11 field_l2=1.410018e-1\nMAXWELL_CUDA mesh=12 edges=456 iterations=102 jacobi_iterations=998 residual=7.562e-11 field_l2=9.431904e-2\nok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1962 filtered out; finished in 34.68s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "cargo_check": {
+      "status": "passed",
+      "summary": "Finished `dev` profile [optimized + debuginfo] target(s) in 6.74s",
+      "existing_warnings": false
+    },
+    "cargo_clippy": {
+      "status": "passed",
+      "summary": "Finished `dev` profile [optimized + debuginfo] target(s) in 9.87s",
+      "existing_warnings": true
+    },
+    "cuda_tests_clippy": {
+      "status": "passed",
+      "summary": "Finished `dev` profile [optimized + debuginfo] target(s) in 17.71s",
+      "existing_warnings": true
+    }
+  },
+  "performance_claim": "Iteration reduction only; no timed complete-solve speedup claim. Initial Jacobi 800-iteration limit did not converge on finest case; both methods rerun with 2000.",
+  "limits": [
+    "CPU assembly/current callback/hierarchy setup",
+    "No producer adjoint or block RHS coverage",
+    "No 3D, PML, higher-order, general boundary or heterogeneous coefficient coverage",
+    "No mesh-independent convergence claim",
+    "No full-session pool quota claim",
+    "No numeric hierarchy refresh"
+  ],
+  "sha256": {
+    "crates/sonium-fem/src/physics/electromagnetics/maxwell/device.rs": "88c2f616bac9af653aae5f697878963328e12c36d37b3ee2797524abe5b93f56",
+    "crates/sonium-fem/src/physics/electromagnetics/maxwell/device/tests.rs": "79d40a01265ceeae1aff6204a05397ce27b518fb67e53ce26ed4882e78a1aa8d",
+    "crates/sonium-fem/src/boundary/generic.rs": "5db351307f89814f0a0d092516787a0e9df8d4a5bcb9a267941638d644f7f481"
+  }
+}

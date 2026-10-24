@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-22",
+  "scope": "Bounded public single-forward retained solver facade and numeric-refresh regression tests; not full workflow completion.",
+  "command": "SONIUM_REQUIRE_CUDA=1 RAYON_NUM_THREADS=4 target/debug/deps/sonium_solvers-98cd8e88718c92bf native_cuda_public_ --test-threads=1",
+  "result": "\nrunning 6 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 2.26s\n\n",
+  "source_sha256": {
+    "crates/sonium-solvers/src/solve.rs": "7bb72fad9b5170143f8abeaefdec448bd8ae5aab19683eb0f7441e282be0880f",
+    "crates/sonium-solvers/src/solve/cuda_session.rs": "8b64ee35956a2df2a631c72ee0d5de0f5f949772174fbc5b31c82baf0c47b24b",
+    "crates/sonium-solvers/src/solve/cuda_session/preconditioner.rs": "139138c9d422444308547c08929014a41ed44a7ef98e4cdb7e242b74ee34a5b2",
+    "crates/sonium-solvers/src/solve/cuda_session/update.rs": "41b395f0ca98706c88b82cd6a9af6bc49604ee43d483fab54d5ccf2e8a1c2fc7",
+    "crates/sonium-solvers/src/solve/cuda_session/prepared.rs": "2aacc73df11db14b488cde7dbff5c689345fba936a0eb6c76591ceb580568630",
+    "crates/sonium-solvers/src/solve/cuda_session_tests.rs": "9bf72f46475e9e9d2fe42c7adfec7a4ff332ce5b6ba4dce3335cc3b79209eca9",
+    "crates/sonium-solvers/src/solve/cuda_session_refresh_tests.rs": "6d344ab008e0c209b3997b99fbc50c819b2aa6367eeff788a33dca0466659698"
+  },
+  "binary_sha256": "a9d972ede6a50a2e653785c941baed847a1f782da1b282169517cf24106152d9",
+  "validation": {
+    "registry_tests": 8,
+    "root_cargo_check": "passed",
+    "root_cargo_clippy": "passed with existing warnings",
+    "source_inventory_tests": 2
+  },
+  "limitations": [
+    "No performance measurement or new sanitizer run in this increment.",
+    "Separate older BEM scattering sanitizer remains live and pending.",
+    "Evidence covers bounded test systems, not arbitrary matrix conditioning or all producer variants.",
+    "GPU runtime, dependent implementation and machine changes can invalidate reproducibility even when reviewed source anchors match."
+  ]
+}

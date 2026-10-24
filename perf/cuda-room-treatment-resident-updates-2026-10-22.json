@@ -1,0 +1,103 @@
+{
+  "date": "2026-10-22",
+  "scope": "Resident affine matrix updates through frequency-local room-treatment MMA and retained forward/Hermitian solves",
+  "source_sha256": {
+    "crates/sonium-sim-room/Cargo.toml": "1680efb361ec49723b7b4c9d789c29b7bee1883105c1e052813f1aeb3bcbc45f",
+    "crates/sonium-sim-room/src/treatment_optimization.rs": "a4ef1daf502a4d2af9b3378cb9b2d3b9c13418b31da8f77951f6c31879e5c54e",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda.rs": "11f68f3b79049d0500a70889bfce277a0747d0f9f2999c071c06ba04336ee6a1",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda/tests.rs": "38755d2bcb5bde8be42559521c936837fc116e4639d93c53cc322d6cdfdd4bae",
+    "crates/sonium-fem/src/solver/device.rs": "50992559d5f56d5047e2176cdbc75ccd2d288ac2d66769719386004b978442f5",
+    "crates/sonium-fem/src/solver/device/configured.rs": "43cf2d6e9858615f5a41ef6e536394a5435c7164d1db0f45f0655288f847e93d"
+  },
+  "binary": {
+    "path": "target/debug/deps/sonium_sim_room-fe04168d8c708c2c",
+    "sha256": "fd68873097370cb4f4157de161fd1aa13655c81bd1a50df4d9468d47a39072bd"
+  },
+  "fixture": {
+    "mesh": "4x4 triangular grid, P1, actual stiffness/mass and two boundary mass forms",
+    "wavenumber": [
+      2.0,
+      0.2
+    ],
+    "strategies": [
+      "GmresIlu",
+      "GmresSchwarz with 3 subdomains and overlap 1"
+    ],
+    "actions": [
+      "Forward",
+      "Hermitian"
+    ],
+    "preconditioner_policy": "Explicit lagging at initial treatment; reprepare on unsuitable action, no fallback",
+    "oracle": "CPU direct solves of the same physical system and finite differences of its objective",
+    "reuse": "Three design evaluations plus four MMA iterations, separate retained forward and adjoint sessions",
+    "boundaries": "Setup uploads oriented base/treatment operators and constant forward RHS once; each evaluation uploads only adjoint RHS and downloads certified fields, plus compact solver controls",
+    "failure": "Injected D2D transfer failure returns error; repaired next evaluation matches CPU; invalid physics and unsupported Direct reject",
+    "resident_update": "A(t) = A_base + sum(t_i T_i) and corresponding Hermitian bases; no host sparse assembly or full matrix uploads per design"
+  },
+  "assertions": {
+    "warm_backend_allocations": 0,
+    "objective_absolute_error": 1e-08,
+    "gradient_scaled_error": 1e-07,
+    "finite_difference_scaled_error": 1e-06,
+    "mma_history_absolute_error": 1e-07,
+    "mma_final_design_absolute_error": 1e-06,
+    "forward_update_h2d_bytes": 0,
+    "forward_update_d2h_bytes": 8,
+    "adjoint_update_h2d_bytes": "size_of(Complex64) * n",
+    "adjoint_update_d2h_bytes": 8,
+    "warm_numeric_update_backend_allocations": 0
+  },
+  "results": {
+    "native": "1 passed",
+    "memcheck": "1 passed; 0 errors",
+    "cpu": "331 passed; 1 ignored",
+    "pipeline": "12 passed",
+    "check": "passed",
+    "clippy": "passed with existing warnings",
+    "cuda_clippy": "passed with existing warnings",
+    "inventory": "22 packages; 1356 source units; freshness passed",
+    "registry": "40 retained-dispatch rows; zero complete; validator and 10 audit tests passed"
+  },
+  "logs": {
+    "build": {
+      "path": "/tmp/room-treatment-resident-build.log",
+      "sha256": "956a158740bc8e7732e1cb3fa338ef8fa693151fbaa13b2350b01fd07ddf8ba0"
+    },
+    "native": {
+      "path": "/tmp/room-treatment-resident-native.log",
+      "sha256": "68d92501d2f9de51bde163895eb9af6379def8780a8bf16245bcc004b954c617"
+    },
+    "memcheck": {
+      "path": "/tmp/room-treatment-resident-memcheck.log",
+      "sha256": "66c193c4e02cbab1ff2ea5bd36251e893251a1e0e22cb55f4c7cca48d669e11c"
+    },
+    "cpu": {
+      "path": "/tmp/room-treatment-resident-cpu.log",
+      "sha256": "a48fec8c2ec64874c35465d818ae7fc7df473a8078f955e86c1a559e19a017d0"
+    },
+    "pipeline": {
+      "path": "/tmp/room-treatment-resident-pipeline.log",
+      "sha256": "1db4de76a317accb9e17fa99d5e172736be57fee6b41af5dddc7ea8b8ee29bb1"
+    },
+    "check": {
+      "path": "/tmp/room-treatment-resident-check.log",
+      "sha256": "c84ee144cf086166f813f73cb1d5963454a50c86dc3bc56224c35167d304039a"
+    },
+    "clippy": {
+      "path": "/tmp/room-treatment-resident-clippy.log",
+      "sha256": "d0ffba6a444333105d88063242c9686b707bf4bc8ee1f65538bc53047190e74a"
+    },
+    "cuda_clippy": {
+      "path": "/tmp/room-treatment-resident-cuda-clippy.log",
+      "sha256": "c25076200b9fead377f9ac37f3258990ca75343ccc291de0cce8f2320e657117"
+    }
+  },
+  "limitations": [
+    "No controlled performance measurement or speedup claim",
+    "No multi-frequency treatment or CLI integration",
+    "Listener objective, adjoint RHS, sensitivities and MMA remain on host; both certified fields still download",
+    "Device basis storage grows with number of treatments; pool allocation failures propagate",
+    "Lagged preconditioners; explicit re-preparation required if unsuitable",
+    "Bounded P1 2D physical validation, not all geometries/orders/materials"
+  ]
+}

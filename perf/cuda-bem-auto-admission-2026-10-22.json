@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-22",
+  "scope": "Close CUDA Auto dense/compressed admission gap at 1000-1279 constant Tri3 DOFs",
+  "policy": {
+    "dense_exclusive_limit": 1000,
+    "cuda_auto_below_limit": "TBEM",
+    "cuda_auto_at_or_above_limit": "Hmatrix",
+    "cpu_auto_crossover": 1280,
+    "explicit_methods": "unchanged",
+    "linear_solver": "unchanged; Direct plus compressed selection rejects"
+  },
+  "implementation": [
+    "AssemblyMethod::resolve_cuda exposes policy before preparation",
+    "CudaTbemDeviceSystem::DOF_LIMIT shared by dense assembly, direct/iterative setup and Auto dispatch"
+  ],
+  "checks": {
+    "native": "1 passed /tmp/bem-auto-gap-native.log",
+    "policy": "1 passed /tmp/bem-auto-gap-policy.log",
+    "cpu_bem": "541 passed, 3 ignored /tmp/bem-auto-gap-cpu.log",
+    "root_check": "passed /tmp/bem-auto-gap-root-check.log",
+    "root_clippy": "passed with existing warnings /tmp/bem-auto-gap-root-clippy.log",
+    "cuda_bem_check": "passed /tmp/bem-auto-gap-check.log",
+    "cuda_bem_clippy": "passed with existing warnings /tmp/bem-auto-gap-cuda-clippy.log",
+    "memcheck": {
+      "status": "unverified: recorded PID no longer exists; log has no completion or error summary",
+      "session_id": 1162,
+      "pid": 2895228,
+      "log": "/tmp/bem-auto-gap-memcheck.log"
+    }
+  },
+  "native_fixture": {
+    "geometry": "closed Fibonacci sphere, 502 vertices and 1000 constant Tri3 panels",
+    "boundary": "rigid, Burton-Miller",
+    "selected": "Hmatrix with low-rank blocks and spatial-block Jacobi",
+    "exact_relative_residual_max": 1e-06,
+    "cpu_surface_field_parity_tolerance": 1e-05,
+    "repeated_solve_allocations": 0,
+    "direct_rejection_allocations": 0
+  },
+  "limitations": [
+    "No change to dense-specific API admission or CPU Auto selection.",
+    "No substitution of requested linear solver; compressed Direct remains unsupported.",
+    "No speedup benchmark; threshold is a resource policy.",
+    "Auto-gap memory checking is unverified; older scattering/MLFMM sanitizer PID 1716879 confirmed live outside sandbox during fused-combination work."
+  ],
+  "source_sha256": {
+    "crates/sonium-bem/src/core/assembly/tbem_device.rs": "8b972a01d1801f6e54ab10ba21bad1e9dbafd1b8be4933600dc717fa41887114",
+    "crates/sonium-bem/src/core/assembly/tbem_gmres.rs": "87c1be87b47fd36d090019999bb2d081ad46e1165a227c471608f57b6d2e9060",
+    "crates/sonium-bem/src/core/bem_solver_cuda.rs": "1f4576688b023a980f70915499b4efe381ed182dcadb8b6d6dce544463f87fa0",
+    "crates/sonium-bem/src/core/bem_solver_cuda_scattering.rs": "63279d0bbb8eb968a2b601ff767a74ec040328ace0d6da2e574ef6d1a3282a69",
+    "crates/sonium-bem/src/core/bem_solver_cuda_scattering_tests.rs": "39a5d370cc7f1aea3b6ced759d440907d025f8c57147a6f1029596aa13dd4d2f"
+  }
+}

@@ -11,7 +11,7 @@ mesh generation, iterative/direct solvers, WASM deployment). It can also do shap
 
 Who is Sonium for or not? Sonium
 - is easy to install (no dependencies except CUDA driver) and fully open-source.
-- is fast enough (aka not the fastest but not too far 0.8x of SOTA, see PERF benchmarks).
+- reports performance by workload and platform in the [benchmark records](perf/README.md).
 - is accurate (extensive QA with automatic comparisong to many solvers and or analytical solutions, see QA).
 - is design to make it easy to add a new physics module.
 - works well with agents.

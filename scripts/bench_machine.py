@@ -6,6 +6,7 @@ import argparse
 import ctypes
 import ctypes.util
 import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -93,7 +94,7 @@ def plan(metadata, hardware, cargo, selected='auto', packages=(), benches=(), qu
                     skipped.append(dict(**label, reason='Metal requires macOS'))
                     continue
                 if backend == 'cuda':
-                    if 'cuda' not in package['features'] or not CUDA_GATE.search(source):
+                    if 'cuda' not in package['features'] or not ('cuda' in features or CUDA_GATE.search(source)):
                         continue
                     features.add('cuda')
                 if hardware['openblas'] and 'bench-openblas' in package['features']:
@@ -108,28 +109,74 @@ def plan(metadata, hardware, cargo, selected='auto', packages=(), benches=(), qu
                         command.append('--quick')
                     if filt:
                         command.append(filt)
-                runs.append(dict(**label, command=command))
+                elif target['name'] == 'spmv_host_scale':
+                    # Cargo appends --bench; this custom main reads argv[1] as a case filter.
+                    command += ['--', 'all']
+                runs.append(dict(**label, command=command, manifest_dir=str(Path(package.get('manifest_path', ROOT / 'Cargo.toml')).parent), source=str(target['src_path'])))
     return runs, skipped
 
 
+def fresh_criterion(run, started_ns):
+    """Snapshot only baseline estimates written by this exact benchmark invocation."""
+    target = Path(os.environ.get('CARGO_TARGET_DIR', ROOT / 'target'))
+    if not target.is_absolute():
+        target = ROOT / target
+    roots = {target / 'criterion', Path(run.get('manifest_dir', ROOT)) / 'target/criterion'}
+    if os.environ.get('CRITERION_HOME'):
+        roots.add(Path(os.environ['CRITERION_HOME']))
+    measurements = []
+    for root in roots:
+        if not root.exists():
+            continue
+        for estimate in sorted(root.rglob(f"{run['backend']}/estimates.json")):
+            if estimate.stat().st_mtime_ns < started_ns:
+                continue
+            benchmark = estimate.with_name('benchmark.json')
+            if not benchmark.exists():
+                continue
+            identity = json.loads(benchmark.read_text())
+            measurements.append(dict(
+                benchmark=identity,
+                estimates=json.loads(estimate.read_text()),
+                path=str(estimate),
+            ))
+    return measurements
+
+
+def revision():
+    """Record source provenance without changing the current checkout."""
+    result = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=ROOT, capture_output=True, text=True)
+    diff = subprocess.run(['git', 'diff', 'HEAD', '--binary'], cwd=ROOT, capture_output=True)
+    return dict(commit=result.stdout.strip(), tracked_diff_sha256=hashlib.sha256(diff.stdout).hexdigest())
+
+
 def execute(runs, directory, env, hardware, skipped):
-    summary = dict(hardware=hardware, skipped=skipped, runs=[])
+    summary = dict(hardware=hardware, skipped=skipped, runs=[], planned_runs=runs,
+                   provenance=revision(), started_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                   environment={key: env.get(key) for key in ('RAYON_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS', 'SONIUM_REQUIRE_CUDA')})
     path = directory / 'summary.json'
     path.write_text(json.dumps(summary, indent=2) + '\n')
     for index, run in enumerate(runs, 1):
         log = directory / f"{index:02d}-{run['backend']}-{run['package']}-{run['bench']}.log"
         command = shlex.join(run['command'])
         print(f'[{index}/{len(runs)}] {command}\n  log: {log}', flush=True)
+        started_ns = time.time_ns()
         start = time.monotonic()
         with log.open('w') as stream:
             stream.write(command + '\n\n')
             stream.flush()
             result = subprocess.run(run['command'], cwd=ROOT, env=env,
                                     stdout=stream, stderr=subprocess.STDOUT)
-        record = dict(run, returncode=result.returncode, elapsed_s=time.monotonic() - start, log=str(log))
+        measurements = fresh_criterion(run, started_ns) if result.returncode == 0 else []
+        snapshot = log.with_suffix('.criterion.json')
+        snapshot.write_text(json.dumps(measurements, indent=2) + '\n')
+        record = dict(run, returncode=result.returncode, elapsed_s=time.monotonic() - start, log=str(log),
+                      criterion_snapshot=str(snapshot), measurement_count=len(measurements))
         summary['runs'].append(record)
         path.write_text(json.dumps(summary, indent=2) + '\n')
         print('  PASS' if result.returncode == 0 else f'  FAIL ({result.returncode}); see {log}', flush=True)
+    summary['finished_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    path.write_text(json.dumps(summary, indent=2) + '\n')
     failures = [run for run in summary['runs'] if run['returncode']]
     print(f"Benchmark summary: {len(runs) - len(failures)} passed, {len(failures)} failed, {len(skipped)} skipped")
     print(f'Results: {path}')

@@ -1,0 +1,82 @@
+{
+  "date": "2026-10-22",
+  "scope": "Public retained constant discontinuous Tri3 CUDA MLFMM scattering session",
+  "entrypoints": [
+    "BemSolver::prepare_cuda_mlfmm",
+    "BemSolver::prepare_cuda_mlfmm_with_leaf_size",
+    "CudaMlfmmBemSession::solve_incident"
+  ],
+  "setup": "Host geometry, quadrature, hierarchy and local inverse; CUDA operator, inverse and Krylov state retained",
+  "coverage": {
+    "small_panels": 80,
+    "boundaries": [
+      "rigid",
+      "impedance"
+    ],
+    "burton_miller": [
+      false,
+      true
+    ],
+    "preconditioners": [
+      "Jacobi",
+      "LeafBlockJacobi"
+    ],
+    "incident_fields": [
+      "plane wave",
+      "point source",
+      "multiple point sources"
+    ],
+    "small_zero_start_solves": 32,
+    "small_previous_solution_solves": 16,
+    "far_panels": 320,
+    "far_leaf_target": 4,
+    "far_translation_entries": 156,
+    "far_zero_start_solves": 4
+  },
+  "far_repeats": [
+    {
+      "source": "plane",
+      "iterations": 18,
+      "mlfmm_relative_residual": 4.49045026736456e-10,
+      "h2d_bytes": 336,
+      "d2h_bytes": 2928,
+      "device_allocations": 0
+    },
+    {
+      "source": "multiple points",
+      "iterations": 18,
+      "mlfmm_relative_residual": 4.291530996131946e-10,
+      "h2d_bytes": 384,
+      "d2h_bytes": 2928,
+      "device_allocations": 0
+    }
+  ],
+  "correctness": "Independent dense TBEM surface and off-surface comparison; exact host residual gates 1e-7 small and 1e-6 far; far surface/field gate 1e-5. Exact certification disabled only for measured resident repeats.",
+  "validation": {
+    "native_tests": 3,
+    "cpu_bem_passed": 541,
+    "cpu_bem_ignored": 3,
+    "root_cargo_check": "passed",
+    "root_cargo_clippy": "passed with existing warnings",
+    "cuda_bem_clippy": "passed with existing warnings",
+    "memcheck": "small public rejection/recovery case: zero errors; far case not memory-checked"
+  },
+  "logs": [
+    "/tmp/mlfmm-public-native.log",
+    "/tmp/mlfmm-public-cpu.log",
+    "/tmp/mlfmm-public-memcheck.log",
+    "/tmp/mlfmm-public-root-check.log",
+    "/tmp/mlfmm-public-root-clippy.log",
+    "/tmp/mlfmm-public-cuda-clippy.log"
+  ],
+  "limitations": [
+    "Fixed geometry, frequency, material and formulation",
+    "Default leaf target 32: tested 80, 320 and 1280 sphere fixtures had no far translations; final far coverage uses explicit target 4",
+    "Application dispatch, native block FMM, directional/shared-DOF layouts and frequency updates remain open",
+    "Off-surface fields in this session use explicit download and CPU evaluation",
+    "Optional exact certification downloads RHS and solution",
+    "Growing source count can allocate descriptor storage",
+    "Sparse allocation quota coverage remains partial",
+    "No timing speedup claim"
+  ]
+}

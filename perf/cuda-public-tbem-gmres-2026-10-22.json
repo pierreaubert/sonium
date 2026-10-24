@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-22",
+  "scope": "Public retained dense BEM GMRES plus native Jacobi and common dispatch",
+  "working_tree_required": true,
+  "public_api": [
+    "BemSolver::prepare_cuda_gmres_jacobi",
+    "CudaBemGmresSession::solve_device / solution_device / download_solution",
+    "prepare_cuda_scattering with TBEM or small Auto, GMRES, explicit Jacobi"
+  ],
+  "validation": {
+    "native_new_tests_passed": 2,
+    "native_existing_small_dispatch_tests_passed": 2,
+    "memcheck_new_tests_passed": 2,
+    "memcheck_errors": 0,
+    "cpu_bem_passed": 541,
+    "cpu_bem_ignored": 3,
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_bem_clippy": "passed with existing warnings; none in modified public CUDA files"
+  },
+  "assertions": [
+    "TBEM and Auto retain requested GMRES and report DenseGmres",
+    "Plane/point source surface and three field-point parity versus CPU direct within 1e-7",
+    "Rigid/impedance with Burton-Miller on/off across three frequencies",
+    "Zero allocations for warm numeric updates and repeated incident solves",
+    "Identical-incident previous-solution reuse takes zero iterations",
+    "NaN sources and injected launch failure hide output and disable warm starts until zero-start repair",
+    "Spatial-block request is not silently downgraded on dense GMRES"
+  ],
+  "limits": [
+    "Constant discontinuous Tri3, rigid/impedance, fewer than 1000 DOFs",
+    "Fixed geometry and quadrature schedule",
+    "Common dispatcher remains incident-only; numeric updates use the specific session",
+    "Source descriptors and boundary coefficients uploaded; host field output requires download",
+    "Assembly allocation quota remains partial",
+    "No GCRO-DR, NumCalc adapter or speedup claim",
+    "Earlier compressed dispatcher sanitizer remains independently running"
+  ],
+  "source_sha256": {
+    "crates/sonium-bem/src/core/bem_solver_cuda_gmres.rs": "55340f603c37e247700dba3106c8714e0ef54195e2a6338148ba30ad98de6f55",
+    "crates/sonium-bem/src/core/bem_solver_cuda.rs": "ff849e26837120c3d9573d08b017850fc78770ac2bd8d31c8ac72570c6cec398",
+    "crates/sonium-bem/src/core/bem_solver_cuda_scattering.rs": "d33439d62b7a002db5632351eb823fb3420f39c2060af49aa4b7b0f02c782022",
+    "crates/sonium-bem/src/core/bem_solver_cuda_scattering_tests.rs": "7b1fa7ed62c10bd8a9031aefaa47fbabf85ab406524a92c791a0f7f71148d498",
+    "crates/sonium-bem/src/core/bem_solver.rs": "a5f1792e1dc68eb3871784df1fc094615fa001fb8593cf33391977dd594fc4d7"
+  },
+  "logs": [
+    "/tmp/public-tbem-gmres-native.log",
+    "/tmp/public-tbem-gmres-memcheck.log",
+    "/tmp/public-tbem-gmres-regression.log",
+    "/tmp/public-tbem-gmres-cpu.log",
+    "/tmp/public-tbem-gmres-root-check.log",
+    "/tmp/public-tbem-gmres-root-clippy.log",
+    "/tmp/public-tbem-gmres-cuda-clippy.log"
+  ]
+}

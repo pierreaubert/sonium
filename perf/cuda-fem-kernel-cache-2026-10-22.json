@@ -1,0 +1,61 @@
+{
+  "status": "validated_backend_local_kernel_preparation",
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/cublas.rs": "9f6a64fe3ce4caf47206afaca0c453f93c9e839f560bf667ee7e18ce9c5b17e8",
+    "crates/sonium-compute/src/cuda/fem_hex.rs": "d6a849749ae9a803e77c137ab0ad11c4979098579859d192621e5909de4ebd3c",
+    "crates/sonium-compute/src/cuda/quadrature_assembly.rs": "1bbaaf4447302ba9f567dcb79270427f6b5b3c7ed7efc97f8c7731b679d24e58",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_hex_solve.rs": "115d38c70d28e1c16a827ee92a401c1481c4ee603c5699d0cd8caada6fda70db"
+  },
+  "validation": {
+    "check": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 12.58s"
+    ],
+    "hex": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 12.53s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 744 filtered out; finished in 0.84s"
+    ],
+    "quadrature": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 1m 04s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 744 filtered out; finished in 0.43s"
+    ],
+    "session": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 1m 14s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2013 filtered out; finished in 4.18s"
+    ],
+    "hex-memcheck": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 744 filtered out; finished in 2.94s",
+      "========= ERROR SUMMARY: 0 errors"
+    ],
+    "quadrature-memcheck": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 744 filtered out; finished in 0.50s",
+      "========= ERROR SUMMARY: 0 errors"
+    ],
+    "root-check": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 39.41s"
+    ],
+    "root-clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 33.38s"
+    ],
+    "compute-cpu": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 11.68s",
+      "test result: ok. 655 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.43s"
+    ],
+    "fem-cpu": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 14.81s",
+      "test result: ok. 1964 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 23.79s"
+    ],
+    "cuda-clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 29.74s"
+    ]
+  },
+  "changes": [
+    "Cache hex and quadrature kernel functions per backend/context.",
+    "Resolve functions before operator/map uploads.",
+    "Admit FGMRES and prepare required kernels before host forms and AMG in retained hex pressure sessions."
+  ],
+  "limitations": [
+    "Driver module memory is not represented by pooled array allocation counters.",
+    "No full-solve speedup measurement in this increment.",
+    "Additional action-specific and validation-helper dependencies remain to be inventoried."
+  ]
+}

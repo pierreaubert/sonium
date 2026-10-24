@@ -1,0 +1,2741 @@
+{
+  "date": "2026-10-21",
+  "scope": "Affine complex P2 gradient Gram precomputation; P1 unchanged",
+  "hardware": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "profile": "optimized dev, opt-level=2; not a release benchmark",
+  "command": "target/debug/examples/cuda_tet_session_compare 4 8",
+  "baseline": "cuda-tet-element-storage-2026-10-21.json",
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/fem_tet.rs": "f834e2e1e8b890eb1e002fb9482b488f09f64c8982f357976637f829144b2047",
+    "crates/sonium-compute/src/cuda/kernels/fem_tet_p1.cu": "a75e0d6f0dc387ae04259a9d7a70588be9ba31c23674a80622a4ae2be47a4170",
+    "crates/sonium-fem/examples/cuda_tet_session_compare.rs": "3f45d67af306da23380418a37d0b069ec98ec99545f152db20e17ce135d295c6"
+  },
+  "benchmark_metadata": {
+    "amg_shift": [
+      16.0,
+      16.0
+    ],
+    "benchmark": "retained_tet_session",
+    "host_preparation_and_input_uploads_timed": false,
+    "initial_guess": "zero",
+    "memory_note": "element mode omits physical CSR storage and assembly maps; auxiliary AMG remains assembled",
+    "restart": 60,
+    "samples": 5,
+    "scalar": "complex64",
+    "setup_includes": "session geometry, boundary maps, auxiliary AMG, JIT and initial numeric assembly",
+    "setup_order": "CSR before Element; context and driver caches shared",
+    "smoother": "Jacobi",
+    "tolerance": 1e-09,
+    "warmups_per_frequency": 1
+  },
+  "runs": [
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "numeric_update_ms": 0.24904199999999999,
+      "operator": "Csr",
+      "relative_residual": 7.982895093622195e-10,
+      "relative_solution_error": 1.031182579883143e-09,
+      "setup_ms": 132.895635,
+      "solve": {
+        "max_ms": 16.491281999999998,
+        "median_ms": 16.468318999999997,
+        "min_ms": 16.440947,
+        "samples_ms": [
+          16.491281999999998,
+          16.475372,
+          16.440947,
+          16.454623,
+          16.468318999999997
+        ]
+      },
+      "solve_d2h_bytes": 33600,
+      "solve_h2d_bytes": 1600,
+      "step": 0,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "numeric_update_ms": 0.24772900000000003,
+      "operator": "Csr",
+      "relative_residual": 3.8121697673332535e-10,
+      "relative_solution_error": 6.364649103478598e-10,
+      "setup_ms": 132.895635,
+      "solve": {
+        "max_ms": 16.443953,
+        "median_ms": 16.41111,
+        "min_ms": 16.383748,
+        "samples_ms": [
+          16.415048000000002,
+          16.443953,
+          16.41111,
+          16.398206,
+          16.383748
+        ]
+      },
+      "solve_d2h_bytes": 33600,
+      "solve_h2d_bytes": 1600,
+      "step": 1,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        19,
+        19,
+        19,
+        19,
+        19
+      ],
+      "numeric_update_ms": 0.24834,
+      "operator": "Csr",
+      "relative_residual": 8.617852200679713e-10,
+      "relative_solution_error": 1.4714013696386282e-09,
+      "setup_ms": 132.895635,
+      "solve": {
+        "max_ms": 15.621977000000001,
+        "median_ms": 15.597029000000001,
+        "min_ms": 15.583864,
+        "samples_ms": [
+          15.583864,
+          15.597029000000001,
+          15.601407,
+          15.621977000000001,
+          15.596027
+        ]
+      },
+      "solve_d2h_bytes": 30400,
+      "solve_h2d_bytes": 1520,
+      "step": 2,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "numeric_update_ms": 0.034425000000000004,
+      "operator": "Element",
+      "relative_residual": 7.982894769188218e-10,
+      "relative_solution_error": 1.031182589207464e-09,
+      "setup_ms": 51.425872,
+      "solve": {
+        "max_ms": 19.979827,
+        "median_ms": 19.97611,
+        "min_ms": 19.929551,
+        "samples_ms": [
+          19.97611,
+          19.977512,
+          19.979827,
+          19.972083,
+          19.929551
+        ]
+      },
+      "solve_d2h_bytes": 33600,
+      "solve_h2d_bytes": 1600,
+      "step": 0,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "numeric_update_ms": 0.03161,
+      "operator": "Element",
+      "relative_residual": 3.812169866299196e-10,
+      "relative_solution_error": 6.364649388971968e-10,
+      "setup_ms": 51.425872,
+      "solve": {
+        "max_ms": 19.97061,
+        "median_ms": 19.95519,
+        "min_ms": 19.936825,
+        "samples_ms": [
+          19.97061,
+          19.95519,
+          19.936825,
+          19.94956,
+          19.96025
+        ]
+      },
+      "solve_d2h_bytes": 33600,
+      "solve_h2d_bytes": 1600,
+      "step": 1,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        19,
+        19,
+        19,
+        19,
+        19
+      ],
+      "numeric_update_ms": 0.032581,
+      "operator": "Element",
+      "relative_residual": 8.617851710438363e-10,
+      "relative_solution_error": 1.4714013081917134e-09,
+      "setup_ms": 51.425872,
+      "solve": {
+        "max_ms": 19.025360000000003,
+        "median_ms": 19.015371,
+        "min_ms": 18.970375,
+        "samples_ms": [
+          19.015371,
+          19.025360000000003,
+          19.019368,
+          18.970375,
+          18.981496
+        ]
+      },
+      "solve_d2h_bytes": 30400,
+      "solve_h2d_bytes": 1520,
+      "step": 2,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        35,
+        35,
+        35,
+        35,
+        35
+      ],
+      "numeric_update_ms": 0.307483,
+      "operator": "Csr",
+      "relative_residual": 4.1759517165206247e-10,
+      "relative_solution_error": 2.170417306664336e-09,
+      "setup_ms": 172.778212,
+      "solve": {
+        "max_ms": 41.559803,
+        "median_ms": 41.542961000000005,
+        "min_ms": 41.501032,
+        "samples_ms": [
+          41.501032,
+          41.559803,
+          41.551196999999995,
+          41.538954000000004,
+          41.542961000000005
+        ]
+      },
+      "solve_d2h_bytes": 100800,
+      "solve_h2d_bytes": 2800,
+      "step": 0,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        34,
+        34,
+        34,
+        34,
+        34
+      ],
+      "numeric_update_ms": 0.307132,
+      "operator": "Csr",
+      "relative_residual": 6.62090238637674e-10,
+      "relative_solution_error": 4.584420219519103e-09,
+      "setup_ms": 172.778212,
+      "solve": {
+        "max_ms": 40.265823,
+        "median_ms": 40.263719,
+        "min_ms": 40.228213,
+        "samples_ms": [
+          40.263929,
+          40.263719,
+          40.228213,
+          40.259231,
+          40.265823
+        ]
+      },
+      "solve_d2h_bytes": 95200,
+      "solve_h2d_bytes": 2720,
+      "step": 1,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        34,
+        34,
+        34,
+        34,
+        34
+      ],
+      "numeric_update_ms": 0.30629,
+      "operator": "Csr",
+      "relative_residual": 5.278172159671616e-10,
+      "relative_solution_error": 3.637677661292041e-09,
+      "setup_ms": 172.778212,
+      "solve": {
+        "max_ms": 40.367906000000005,
+        "median_ms": 40.251806,
+        "min_ms": 40.232019,
+        "samples_ms": [
+          40.367906000000005,
+          40.232019,
+          40.28408700000001,
+          40.24865,
+          40.251806
+        ]
+      },
+      "solve_d2h_bytes": 95200,
+      "solve_h2d_bytes": 2720,
+      "step": 2,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        35,
+        35,
+        35,
+        35,
+        35
+      ],
+      "numeric_update_ms": 0.11469700000000001,
+      "operator": "Element",
+      "relative_residual": 4.175951901656328e-10,
+      "relative_solution_error": 2.1704195590324065e-09,
+      "setup_ms": 71.915554,
+      "solve": {
+        "max_ms": 59.936836,
+        "median_ms": 59.716308000000005,
+        "min_ms": 59.698214,
+        "samples_ms": [
+          59.715877,
+          59.716308000000005,
+          59.698214,
+          59.936836,
+          59.935633
+        ]
+      },
+      "solve_d2h_bytes": 100800,
+      "solve_h2d_bytes": 2800,
+      "step": 0,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        34,
+        34,
+        34,
+        34,
+        34
+      ],
+      "numeric_update_ms": 0.109398,
+      "operator": "Element",
+      "relative_residual": 6.620902479413424e-10,
+      "relative_solution_error": 4.584421087412019e-09,
+      "setup_ms": 71.915554,
+      "solve": {
+        "max_ms": 58.1541,
+        "median_ms": 58.131628,
+        "min_ms": 57.982005,
+        "samples_ms": [
+          58.009447,
+          57.982005,
+          58.1541,
+          58.142508,
+          58.131628
+        ]
+      },
+      "solve_d2h_bytes": 95200,
+      "solve_h2d_bytes": 2720,
+      "step": 1,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        34,
+        34,
+        34,
+        34,
+        34
+      ],
+      "numeric_update_ms": 0.110359,
+      "operator": "Element",
+      "relative_residual": 5.278172022901803e-10,
+      "relative_solution_error": 3.637677323292146e-09,
+      "setup_ms": 71.915554,
+      "solve": {
+        "max_ms": 58.134483,
+        "median_ms": 57.960334,
+        "min_ms": 57.932781000000006,
+        "samples_ms": [
+          57.960334,
+          57.932781000000006,
+          58.032219000000005,
+          57.953421,
+          58.134483
+        ]
+      },
+      "solve_d2h_bytes": 95200,
+      "solve_h2d_bytes": 2720,
+      "step": 2,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.323272,
+      "operator": "Csr",
+      "relative_residual": 7.151877334583713e-10,
+      "relative_solution_error": 3.3031901861307087e-09,
+      "setup_ms": 74.05471399999999,
+      "solve": {
+        "max_ms": 29.266539,
+        "median_ms": 29.198781,
+        "min_ms": 29.191506999999998,
+        "samples_ms": [
+          29.223398,
+          29.191506999999998,
+          29.198781,
+          29.266539,
+          29.197829000000002
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 0,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.323102,
+      "operator": "Csr",
+      "relative_residual": 3.833452922735635e-10,
+      "relative_solution_error": 2.1647239709815115e-09,
+      "setup_ms": 74.05471399999999,
+      "solve": {
+        "max_ms": 29.205814,
+        "median_ms": 29.195635,
+        "min_ms": 29.174084,
+        "samples_ms": [
+          29.174084,
+          29.195635,
+          29.1982,
+          29.188341,
+          29.205814
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 1,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.32341200000000003,
+      "operator": "Csr",
+      "relative_residual": 2.635873566972302e-10,
+      "relative_solution_error": 1.7255410543809658e-09,
+      "setup_ms": 74.05471399999999,
+      "solve": {
+        "max_ms": 29.21967,
+        "median_ms": 29.209852,
+        "min_ms": 29.203509999999998,
+        "samples_ms": [
+          29.203509999999998,
+          29.209852,
+          29.21967,
+          29.218067,
+          29.206415
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 2,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.044122999999999996,
+      "operator": "Element",
+      "relative_residual": 7.151877582225776e-10,
+      "relative_solution_error": 3.3031912431220267e-09,
+      "setup_ms": 67.013904,
+      "solve": {
+        "max_ms": 46.347708000000004,
+        "median_ms": 46.340895,
+        "min_ms": 46.312652,
+        "samples_ms": [
+          46.312652,
+          46.340895,
+          46.347708000000004,
+          46.342488,
+          46.340213999999996
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 0,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.043212,
+      "operator": "Element",
+      "relative_residual": 3.833452937082207e-10,
+      "relative_solution_error": 2.164723632778071e-09,
+      "setup_ms": 67.013904,
+      "solve": {
+        "max_ms": 46.347227,
+        "median_ms": 46.338401000000005,
+        "min_ms": 46.328281,
+        "samples_ms": [
+          46.334252,
+          46.338981000000004,
+          46.338401000000005,
+          46.328281,
+          46.347227
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 1,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.043782999999999996,
+      "operator": "Element",
+      "relative_residual": 2.6358735298396984e-10,
+      "relative_solution_error": 1.725541535825073e-09,
+      "setup_ms": 67.013904,
+      "solve": {
+        "max_ms": 46.351645,
+        "median_ms": 46.344692,
+        "min_ms": 46.314645,
+        "samples_ms": [
+          46.32789,
+          46.344692,
+          46.349181,
+          46.351645,
+          46.314645
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 2,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ],
+      "numeric_update_ms": 0.4702,
+      "operator": "Csr",
+      "relative_residual": 8.73644758078009e-10,
+      "relative_solution_error": 1.7775278508892195e-08,
+      "setup_ms": 324.91342299999997,
+      "solve": {
+        "max_ms": 121.080315,
+        "median_ms": 120.999593,
+        "min_ms": 120.96462700000001,
+        "samples_ms": [
+          120.96462700000001,
+          120.999593,
+          121.015563,
+          120.978442,
+          121.080315
+        ]
+      },
+      "solve_d2h_bytes": 255360,
+      "solve_h2d_bytes": 4480,
+      "step": 0,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        55,
+        55,
+        55,
+        55,
+        55
+      ],
+      "numeric_update_ms": 0.473657,
+      "operator": "Csr",
+      "relative_residual": 6.508411433820102e-10,
+      "relative_solution_error": 1.9062841793301593e-08,
+      "setup_ms": 324.91342299999997,
+      "solve": {
+        "max_ms": 118.96938899999999,
+        "median_ms": 118.69152299999999,
+        "min_ms": 118.50748399999999,
+        "samples_ms": [
+          118.96938899999999,
+          118.765983,
+          118.69152299999999,
+          118.66891,
+          118.50748399999999
+        ]
+      },
+      "solve_d2h_bytes": 246400,
+      "solve_h2d_bytes": 4400,
+      "step": 1,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        55,
+        55,
+        55,
+        55,
+        55
+      ],
+      "numeric_update_ms": 0.467676,
+      "operator": "Csr",
+      "relative_residual": 8.388634697669659e-10,
+      "relative_solution_error": 4.010347867823752e-08,
+      "setup_ms": 324.91342299999997,
+      "solve": {
+        "max_ms": 118.607583,
+        "median_ms": 118.578408,
+        "min_ms": 118.523094,
+        "samples_ms": [
+          118.56615500000001,
+          118.586033,
+          118.578408,
+          118.523094,
+          118.607583
+        ]
+      },
+      "solve_d2h_bytes": 246400,
+      "solve_h2d_bytes": 4400,
+      "step": 2,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ],
+      "numeric_update_ms": 0.15165700000000001,
+      "operator": "Element",
+      "relative_residual": 8.736447672173803e-10,
+      "relative_solution_error": 1.7775278386570403e-08,
+      "setup_ms": 272.707063,
+      "solve": {
+        "max_ms": 172.68102900000002,
+        "median_ms": 172.623509,
+        "min_ms": 172.60181799999998,
+        "samples_ms": [
+          172.65218399999998,
+          172.68102900000002,
+          172.623509,
+          172.60181799999998,
+          172.61829
+        ]
+      },
+      "solve_d2h_bytes": 255360,
+      "solve_h2d_bytes": 4480,
+      "step": 0,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        55,
+        55,
+        55,
+        55,
+        55
+      ],
+      "numeric_update_ms": 0.150064,
+      "operator": "Element",
+      "relative_residual": 6.508411483532806e-10,
+      "relative_solution_error": 1.906284183691355e-08,
+      "setup_ms": 272.707063,
+      "solve": {
+        "max_ms": 169.357066,
+        "median_ms": 169.307682,
+        "min_ms": 169.258699,
+        "samples_ms": [
+          169.309536,
+          169.357066,
+          169.307682,
+          169.28537,
+          169.258699
+        ]
+      },
+      "solve_d2h_bytes": 246400,
+      "solve_h2d_bytes": 4400,
+      "step": 1,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        55,
+        55,
+        55,
+        55,
+        55
+      ],
+      "numeric_update_ms": 0.14970399999999998,
+      "operator": "Element",
+      "relative_residual": 8.388634680591104e-10,
+      "relative_solution_error": 4.0103479188398784e-08,
+      "setup_ms": 272.707063,
+      "solve": {
+        "max_ms": 169.416448,
+        "median_ms": 169.35070399999998,
+        "min_ms": 169.316459,
+        "samples_ms": [
+          169.37738399999998,
+          169.316459,
+          169.416448,
+          169.328962,
+          169.35070399999998
+        ]
+      },
+      "solve_d2h_bytes": 246400,
+      "solve_h2d_bytes": 4400,
+      "step": 2,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    }
+  ],
+  "comparisons": [
+    {
+      "dofs": 729,
+      "step": 0,
+      "baseline_ms": 76.705513,
+      "current_ms": 59.716308000000005,
+      "speedup": 1.2844985828661744,
+      "iterations_unchanged": true
+    },
+    {
+      "dofs": 729,
+      "step": 1,
+      "baseline_ms": 74.483636,
+      "current_ms": 58.131628,
+      "speedup": 1.2812927929697755,
+      "iterations_unchanged": true
+    },
+    {
+      "dofs": 729,
+      "step": 2,
+      "baseline_ms": 74.481672,
+      "current_ms": 57.960334,
+      "speedup": 1.2850455968731995,
+      "iterations_unchanged": true
+    },
+    {
+      "dofs": 4913,
+      "step": 0,
+      "baseline_ms": 227.799601,
+      "current_ms": 172.623509,
+      "speedup": 1.3196325478472344,
+      "iterations_unchanged": true
+    },
+    {
+      "dofs": 4913,
+      "step": 1,
+      "baseline_ms": 223.539135,
+      "current_ms": 169.307682,
+      "speedup": 1.3203130085969754,
+      "iterations_unchanged": true
+    },
+    {
+      "dofs": 4913,
+      "step": 2,
+      "baseline_ms": 223.547301,
+      "current_ms": 169.35070399999998,
+      "speedup": 1.3200258145959642,
+      "iterations_unchanged": true
+    }
+  ],
+  "validation": {
+    "compute_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 3 tests\ntest cuda::fem_tet::tests::native_tet_p1_actions_blocks_and_warm_residency ... ok\ntest cuda::fem_tet::tests::native_tet_p2_actions_blocks_and_warm_residency ... ok\ntest cuda::fem_tet::tests::tetrahedral_kernels_compile_without_device ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 730 filtered out; finished in 1.08s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "fem_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 6 tests\ntest physics::acoustics::pressure::device_tet::tests::native_tet_p2_persistent_solve ... ok\ntest physics::acoustics::pressure::device_tet::tests::native_tet_volume_persistent_solve ... ok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_element_storage_omits_physical_csr ... tet physical P2 dofs=729 element_bytes=82636 csr_bytes=1056435\nok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_p1_robin_session_frequency_lifting_and_reuse ... tet Robin scale=0 mode=Csr pass=0 iterations=23 allocations=131 error=0.0000000012467706172537222\ntet Robin scale=0 mode=Csr pass=1 iterations=22 allocations=0 error=0.000000002125556134898929\ntet Robin scale=0 mode=Csr pass=2 iterations=23 allocations=0 error=0.000000000781093432776215\ntet Robin scale=0 mode=Element pass=0 iterations=23 allocations=128 error=0.0000000012467671570485375\ntet Robin scale=0 mode=Element pass=1 iterations=22 allocations=0 error=0.0000000021255552494186773\ntet Robin scale=0 mode=Element pass=2 iterations=23 allocations=0 error=0.0000000007810920852849931\ntet Robin scale=1 mode=Csr pass=0 iterations=20 allocations=128 error=0.000000000275222122127297\ntet Robin scale=1 mode=Csr pass=1 iterations=20 allocations=0 error=0.00000000017619901155022263\ntet Robin scale=1 mode=Csr pass=2 iterations=20 allocations=0 error=0.00000000040915828296575967\ntet Robin scale=1 mode=Element pass=0 iterations=20 allocations=128 error=0.00000000027521973760464184\ntet Robin scale=1 mode=Element pass=1 iterations=20 allocations=0 error=0.0000000001761992505237836\ntet Robin scale=1 mode=Element pass=2 iterations=20 allocations=0 error=0.0000000004091577260686957\nok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_p2_robin_session_shared_edges_and_reuse ... tet P2 Robin mode=Csr pass=0 iterations=34 allocations=131 error=0.000000002993038546629073\ntet P2 Robin mode=Csr pass=1 iterations=24 allocations=0 error=0.0000000032431346928752097\ntet P2 Robin mode=Csr pass=2 iterations=22 allocations=0 error=0.0000000014237964703256395\ntet P2 Robin mode=Element pass=0 iterations=34 allocations=128 error=0.0000000029930285814294647\ntet P2 Robin mode=Element pass=1 iterations=24 allocations=0 error=0.000000003243138795744438\ntet P2 Robin mode=Element pass=2 iterations=22 allocations=0 error=0.0000000014237997246482556\nok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_sessions_p1_p2_csr_element_frequency_and_failure ... tet session N=4 mode=Csr pass=0 iterations=23 allocations=131 error=0.00000000026076704949114947\ntet session N=4 mode=Csr pass=1 iterations=22 allocations=0 error=0.0000000014009109526293255\ntet session N=4 mode=Csr pass=2 iterations=22 allocations=0 error=0.0000000015032024177689783\ntet session N=10 mode=Csr pass=0 iterations=37 allocations=128 error=0.0000000011844458941651984\ntet session N=10 mode=Csr pass=1 iterations=36 allocations=0 error=0.000000006058106757708462\ntet session N=10 mode=Csr pass=2 iterations=36 allocations=0 error=0.0000000056208406974838514\ntet session N=4 mode=Element pass=0 iterations=23 allocations=128 error=0.00000000026076793968898634\ntet session N=4 mode=Element pass=1 iterations=22 allocations=0 error=0.0000000014009124758293173\ntet session N=4 mode=Element pass=2 iterations=22 allocations=0 error=0.0000000015032017521463969\ntet session N=10 mode=Element pass=0 iterations=37 allocations=128 error=0.0000000011844398045355269\ntet session N=10 mode=Element pass=1 iterations=36 allocations=0 error=0.00000000605810415284569\ntet session N=10 mode=Element pass=2 iterations=36 allocations=0 error=0.000000005620844201789355\nok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1935 filtered out; finished in 28.69s\n\n========= ERROR SUMMARY: 0 errors\n"
+  },
+  "checks": {
+    "cargo check": "passed",
+    "cargo clippy": "passed with warnings",
+    "cargo clippy -p sonium-compute -p sonium-fem --features cuda --lib": "passed with warnings"
+  },
+  "limitations": [
+    "CSR remains faster on these fixtures.",
+    "One-time geometry preparation remains on CPU.",
+    "AMG and boundary operators remain assembled.",
+    "Benchmark predates a host chunks_exact to as_chunks lint-only change; CUDA source and timed solve path are unchanged.",
+    "Results are bounded fixtures, not complete CUDA coverage."
+  ],
+  "rejected_candidates": [
+    {
+      "name": "row-dot caching and unrolling",
+      "status": "reverted; no complete-solve improvement",
+      "runs": [
+        {
+          "amg_shift": [
+            16.0,
+            16.0
+          ],
+          "benchmark": "retained_tet_session",
+          "host_preparation_and_input_uploads_timed": false,
+          "initial_guess": "zero",
+          "memory_note": "element mode omits physical CSR storage and assembly maps; auxiliary AMG remains assembled",
+          "restart": 60,
+          "samples": 5,
+          "scalar": "complex64",
+          "setup_includes": "session geometry, boundary maps, auxiliary AMG, JIT and initial numeric assembly",
+          "setup_order": "CSR before Element; context and driver caches shared",
+          "smoother": "Jacobi",
+          "tolerance": 1e-09,
+          "warmups_per_frequency": 1
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.249933,
+          "operator": "Csr",
+          "relative_residual": 7.982895093622195e-10,
+          "relative_solution_error": 1.031182579883143e-09,
+          "setup_ms": 84.101415,
+          "solve": {
+            "max_ms": 16.466365,
+            "median_ms": 16.443161,
+            "min_ms": 16.425387,
+            "samples_ms": [
+              16.466365,
+              16.43236,
+              16.448470999999998,
+              16.425387,
+              16.443161
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.24704700000000002,
+          "operator": "Csr",
+          "relative_residual": 3.8121697673332535e-10,
+          "relative_solution_error": 6.364649103478598e-10,
+          "setup_ms": 84.101415,
+          "solve": {
+            "max_ms": 16.432591,
+            "median_ms": 16.419656,
+            "min_ms": 16.406983,
+            "samples_ms": [
+              16.429425000000002,
+              16.406983,
+              16.419656,
+              16.409418,
+              16.432591
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.246446,
+          "operator": "Csr",
+          "relative_residual": 8.617852200679713e-10,
+          "relative_solution_error": 1.4714013696386282e-09,
+          "setup_ms": 84.101415,
+          "solve": {
+            "max_ms": 15.613729999999999,
+            "median_ms": 15.610595,
+            "min_ms": 15.579666000000001,
+            "samples_ms": [
+              15.612548,
+              15.613729999999999,
+              15.579666000000001,
+              15.610595,
+              15.593181
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.033473,
+          "operator": "Element",
+          "relative_residual": 7.982894769188218e-10,
+          "relative_solution_error": 1.031182589207464e-09,
+          "setup_ms": 52.76628,
+          "solve": {
+            "max_ms": 19.96045,
+            "median_ms": 19.948066999999998,
+            "min_ms": 19.921367,
+            "samples_ms": [
+              19.948568,
+              19.948066999999998,
+              19.938859,
+              19.96045,
+              19.921367
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.03167,
+          "operator": "Element",
+          "relative_residual": 3.812169866299196e-10,
+          "relative_solution_error": 6.364649388971968e-10,
+          "setup_ms": 52.76628,
+          "solve": {
+            "max_ms": 19.943017,
+            "median_ms": 19.941042999999997,
+            "min_ms": 19.92907,
+            "samples_ms": [
+              19.92907,
+              19.933689,
+              19.941042999999997,
+              19.943017,
+              19.942906999999998
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.031129,
+          "operator": "Element",
+          "relative_residual": 8.617851710438363e-10,
+          "relative_solution_error": 1.4714013081917134e-09,
+          "setup_ms": 52.76628,
+          "solve": {
+            "max_ms": 18.994862,
+            "median_ms": 18.983590000000003,
+            "min_ms": 18.959354,
+            "samples_ms": [
+              18.976297,
+              18.989471,
+              18.983590000000003,
+              18.994862,
+              18.959354
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.37671299999999996,
+          "operator": "Csr",
+          "relative_residual": 4.1759517165206247e-10,
+          "relative_solution_error": 2.170417306664336e-09,
+          "setup_ms": 79.373925,
+          "solve": {
+            "max_ms": 42.330722,
+            "median_ms": 42.190186,
+            "min_ms": 42.162554,
+            "samples_ms": [
+              42.190186,
+              42.170179000000005,
+              42.162554,
+              42.199704999999994,
+              42.330722
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.377785,
+          "operator": "Csr",
+          "relative_residual": 6.62090238637674e-10,
+          "relative_solution_error": 4.584420219519103e-09,
+          "setup_ms": 79.373925,
+          "solve": {
+            "max_ms": 40.893822,
+            "median_ms": 40.853857,
+            "min_ms": 40.843457,
+            "samples_ms": [
+              40.843457,
+              40.853857,
+              40.852614,
+              40.893822,
+              40.861982
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.37735399999999997,
+          "operator": "Csr",
+          "relative_residual": 5.278172159671616e-10,
+          "relative_solution_error": 3.637677661292041e-09,
+          "setup_ms": 79.373925,
+          "solve": {
+            "max_ms": 40.886438,
+            "median_ms": 40.869336,
+            "min_ms": 40.836533,
+            "samples_ms": [
+              40.869336,
+              40.836533,
+              40.843106,
+              40.874486000000005,
+              40.886438
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.112963,
+          "operator": "Element",
+          "relative_residual": 4.175951901656328e-10,
+          "relative_solution_error": 2.1704195590324065e-09,
+          "setup_ms": 75.696132,
+          "solve": {
+            "max_ms": 81.99237199999999,
+            "median_ms": 81.91445399999999,
+            "min_ms": 81.89094,
+            "samples_ms": [
+              81.89094,
+              81.938711,
+              81.99237199999999,
+              81.892333,
+              81.91445399999999
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.111481,
+          "operator": "Element",
+          "relative_residual": 6.620902479413424e-10,
+          "relative_solution_error": 4.584421087412019e-09,
+          "setup_ms": 75.696132,
+          "solve": {
+            "max_ms": 79.584172,
+            "median_ms": 79.570987,
+            "min_ms": 79.550398,
+            "samples_ms": [
+              79.566519,
+              79.578542,
+              79.550398,
+              79.570987,
+              79.584172
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.11223200000000001,
+          "operator": "Element",
+          "relative_residual": 5.278172022901803e-10,
+          "relative_solution_error": 3.637677323292146e-09,
+          "setup_ms": 75.696132,
+          "solve": {
+            "max_ms": 79.550288,
+            "median_ms": 79.544718,
+            "min_ms": 79.49818,
+            "samples_ms": [
+              79.528688,
+              79.544718,
+              79.550288,
+              79.49818,
+              79.547252
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.325947,
+          "operator": "Csr",
+          "relative_residual": 7.151877334583713e-10,
+          "relative_solution_error": 3.3031901861307087e-09,
+          "setup_ms": 69.355998,
+          "solve": {
+            "max_ms": 29.231623000000003,
+            "median_ms": 29.216614,
+            "min_ms": 29.184393999999998,
+            "samples_ms": [
+              29.193991999999998,
+              29.216614,
+              29.231623000000003,
+              29.227605,
+              29.184393999999998
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 0,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.324765,
+          "operator": "Csr",
+          "relative_residual": 3.833452922735635e-10,
+          "relative_solution_error": 2.1647239709815115e-09,
+          "setup_ms": 69.355998,
+          "solve": {
+            "max_ms": 29.203289,
+            "median_ms": 29.191266,
+            "min_ms": 29.178922999999998,
+            "samples_ms": [
+              29.191266,
+              29.178922999999998,
+              29.200875,
+              29.187779,
+              29.203289
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 1,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.324654,
+          "operator": "Csr",
+          "relative_residual": 2.635873566972302e-10,
+          "relative_solution_error": 1.7255410543809658e-09,
+          "setup_ms": 69.355998,
+          "solve": {
+            "max_ms": 29.257141,
+            "median_ms": 29.211834999999997,
+            "min_ms": 29.194773,
+            "samples_ms": [
+              29.223457,
+              29.194773,
+              29.211834999999997,
+              29.210172,
+              29.257141
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 2,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.045396,
+          "operator": "Element",
+          "relative_residual": 7.151877582225776e-10,
+          "relative_solution_error": 3.3031912431220267e-09,
+          "setup_ms": 66.458192,
+          "solve": {
+            "max_ms": 46.364830000000005,
+            "median_ms": 46.320957,
+            "min_ms": 46.299286,
+            "samples_ms": [
+              46.302431999999996,
+              46.364830000000005,
+              46.320957,
+              46.299286,
+              46.338441
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 0,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.041649,
+          "operator": "Element",
+          "relative_residual": 3.833452937082207e-10,
+          "relative_solution_error": 2.164723632778071e-09,
+          "setup_ms": 66.458192,
+          "solve": {
+            "max_ms": 46.341556,
+            "median_ms": 46.319814,
+            "min_ms": 46.304264999999994,
+            "samples_ms": [
+              46.339172,
+              46.304264999999994,
+              46.341556,
+              46.319814,
+              46.316889
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 1,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.041469,
+          "operator": "Element",
+          "relative_residual": 2.6358735298396984e-10,
+          "relative_solution_error": 1.725541535825073e-09,
+          "setup_ms": 66.458192,
+          "solve": {
+            "max_ms": 46.374308000000006,
+            "median_ms": 46.328821999999995,
+            "min_ms": 46.315647,
+            "samples_ms": [
+              46.315647,
+              46.328821999999995,
+              46.327009000000004,
+              46.348469,
+              46.374308000000006
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 2,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            56,
+            56,
+            56,
+            56,
+            56
+          ],
+          "numeric_update_ms": 0.466974,
+          "operator": "Csr",
+          "relative_residual": 8.73644758078009e-10,
+          "relative_solution_error": 1.7775278508892195e-08,
+          "setup_ms": 318.05507700000004,
+          "solve": {
+            "max_ms": 122.420633,
+            "median_ms": 122.386218,
+            "min_ms": 122.295786,
+            "samples_ms": [
+              122.420633,
+              122.392169,
+              122.386218,
+              122.36520800000001,
+              122.295786
+            ]
+          },
+          "solve_d2h_bytes": 255360,
+          "solve_h2d_bytes": 4480,
+          "step": 0,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            55,
+            55,
+            55,
+            55,
+            55
+          ],
+          "numeric_update_ms": 0.46590200000000004,
+          "operator": "Csr",
+          "relative_residual": 6.508411433820102e-10,
+          "relative_solution_error": 1.9062841793301593e-08,
+          "setup_ms": 318.05507700000004,
+          "solve": {
+            "max_ms": 119.907605,
+            "median_ms": 119.906523,
+            "min_ms": 119.900431,
+            "samples_ms": [
+              119.907605,
+              119.90502000000001,
+              119.906523,
+              119.900431,
+              119.907524
+            ]
+          },
+          "solve_d2h_bytes": 246400,
+          "solve_h2d_bytes": 4400,
+          "step": 1,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            55,
+            55,
+            55,
+            55,
+            55
+          ],
+          "numeric_update_ms": 0.46661400000000003,
+          "operator": "Csr",
+          "relative_residual": 8.388634697669659e-10,
+          "relative_solution_error": 4.010347867823752e-08,
+          "setup_ms": 318.05507700000004,
+          "solve": {
+            "max_ms": 119.926191,
+            "median_ms": 119.914277,
+            "min_ms": 119.89915900000001,
+            "samples_ms": [
+              119.924417,
+              119.914277,
+              119.926191,
+              119.89915900000001,
+              119.904499
+            ]
+          },
+          "solve_d2h_bytes": 246400,
+          "solve_h2d_bytes": 4400,
+          "step": 2,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            56,
+            56,
+            56,
+            56,
+            56
+          ],
+          "numeric_update_ms": 0.152919,
+          "operator": "Element",
+          "relative_residual": 8.736447672173803e-10,
+          "relative_solution_error": 1.7775278386570403e-08,
+          "setup_ms": 272.322785,
+          "solve": {
+            "max_ms": 259.61326299999996,
+            "median_ms": 259.49888599999997,
+            "min_ms": 259.41680099999996,
+            "samples_ms": [
+              259.61326299999996,
+              259.44422299999997,
+              259.501341,
+              259.41680099999996,
+              259.49888599999997
+            ]
+          },
+          "solve_d2h_bytes": 255360,
+          "solve_h2d_bytes": 4480,
+          "step": 0,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            55,
+            55,
+            55,
+            55,
+            55
+          ],
+          "numeric_update_ms": 0.159212,
+          "operator": "Element",
+          "relative_residual": 6.508411483532806e-10,
+          "relative_solution_error": 1.906284183691355e-08,
+          "setup_ms": 272.322785,
+          "solve": {
+            "max_ms": 254.73129,
+            "median_ms": 254.70495999999997,
+            "min_ms": 254.64476600000003,
+            "samples_ms": [
+              254.64476600000003,
+              254.72931599999998,
+              254.73129,
+              254.699069,
+              254.70495999999997
+            ]
+          },
+          "solve_d2h_bytes": 246400,
+          "solve_h2d_bytes": 4400,
+          "step": 1,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            55,
+            55,
+            55,
+            55,
+            55
+          ],
+          "numeric_update_ms": 0.151367,
+          "operator": "Element",
+          "relative_residual": 8.388634680591104e-10,
+          "relative_solution_error": 4.0103479188398784e-08,
+          "setup_ms": 272.322785,
+          "solve": {
+            "max_ms": 254.74688899999998,
+            "median_ms": 254.68595399999998,
+            "min_ms": 254.627995,
+            "samples_ms": [
+              254.74688899999998,
+              254.68595399999998,
+              254.665376,
+              254.718375,
+              254.627995
+            ]
+          },
+          "solve_d2h_bytes": 246400,
+          "solve_h2d_bytes": 4400,
+          "step": 2,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        }
+      ]
+    },
+    {
+      "name": "arithmetic edge and mass lookup",
+      "status": "reverted; no complete-solve improvement",
+      "runs": [
+        {
+          "amg_shift": [
+            16.0,
+            16.0
+          ],
+          "benchmark": "retained_tet_session",
+          "host_preparation_and_input_uploads_timed": false,
+          "initial_guess": "zero",
+          "memory_note": "element mode omits physical CSR storage and assembly maps; auxiliary AMG remains assembled",
+          "restart": 60,
+          "samples": 5,
+          "scalar": "complex64",
+          "setup_includes": "session geometry, boundary maps, auxiliary AMG, JIT and initial numeric assembly",
+          "setup_order": "CSR before Element; context and driver caches shared",
+          "smoother": "Jacobi",
+          "tolerance": 1e-09,
+          "warmups_per_frequency": 1
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.247448,
+          "operator": "Csr",
+          "relative_residual": 7.982895093622195e-10,
+          "relative_solution_error": 1.031182579883143e-09,
+          "setup_ms": 132.51447299999998,
+          "solve": {
+            "max_ms": 16.465604,
+            "median_ms": 16.439975,
+            "min_ms": 16.436979,
+            "samples_ms": [
+              16.436979,
+              16.452959,
+              16.465604,
+              16.439975,
+              16.43714
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.24760899999999997,
+          "operator": "Csr",
+          "relative_residual": 3.8121697673332535e-10,
+          "relative_solution_error": 6.364649103478598e-10,
+          "setup_ms": 132.51447299999998,
+          "solve": {
+            "max_ms": 16.446036,
+            "median_ms": 16.430556999999997,
+            "min_ms": 16.425788,
+            "samples_ms": [
+              16.430556999999997,
+              16.434845,
+              16.425788,
+              16.446036,
+              16.427781999999997
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.24717800000000004,
+          "operator": "Csr",
+          "relative_residual": 8.617852200679713e-10,
+          "relative_solution_error": 1.4714013696386282e-09,
+          "setup_ms": 132.51447299999998,
+          "solve": {
+            "max_ms": 15.678082,
+            "median_ms": 15.642144,
+            "min_ms": 15.611156,
+            "samples_ms": [
+              15.678082,
+              15.642144,
+              15.65605,
+              15.611156,
+              15.615685000000001
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.034927,
+          "operator": "Element",
+          "relative_residual": 7.982894769188218e-10,
+          "relative_solution_error": 1.031182589207464e-09,
+          "setup_ms": 51.775925,
+          "solve": {
+            "max_ms": 19.945352,
+            "median_ms": 19.916637,
+            "min_ms": 19.892561999999998,
+            "samples_ms": [
+              19.945352,
+              19.892561999999998,
+              19.908321,
+              19.917168999999998,
+              19.916637
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.030177,
+          "operator": "Element",
+          "relative_residual": 3.812169866299196e-10,
+          "relative_solution_error": 6.364649388971968e-10,
+          "setup_ms": 51.775925,
+          "solve": {
+            "max_ms": 19.924292,
+            "median_ms": 19.906167,
+            "min_ms": 19.875299,
+            "samples_ms": [
+              19.875299,
+              19.914403,
+              19.924292,
+              19.906167,
+              19.89715
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.032241,
+          "operator": "Element",
+          "relative_residual": 8.617851710438363e-10,
+          "relative_solution_error": 1.4714013081917134e-09,
+          "setup_ms": 51.775925,
+          "solve": {
+            "max_ms": 19.018456,
+            "median_ms": 18.960127,
+            "min_ms": 18.956870000000002,
+            "samples_ms": [
+              18.958974,
+              18.971197,
+              18.960127,
+              19.018456,
+              18.956870000000002
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.339983,
+          "operator": "Csr",
+          "relative_residual": 4.1759517165206247e-10,
+          "relative_solution_error": 2.170417306664336e-09,
+          "setup_ms": 201.86759500000002,
+          "solve": {
+            "max_ms": 41.996159,
+            "median_ms": 41.965812,
+            "min_ms": 41.927038,
+            "samples_ms": [
+              41.960882,
+              41.996159,
+              41.965812,
+              41.983235,
+              41.927038
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.339744,
+          "operator": "Csr",
+          "relative_residual": 6.62090238637674e-10,
+          "relative_solution_error": 4.584420219519103e-09,
+          "setup_ms": 201.86759500000002,
+          "solve": {
+            "max_ms": 40.6817,
+            "median_ms": 40.675349,
+            "min_ms": 40.652376,
+            "samples_ms": [
+              40.675349,
+              40.672373,
+              40.652376,
+              40.6817,
+              40.676601
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.339302,
+          "operator": "Csr",
+          "relative_residual": 5.278172159671616e-10,
+          "relative_solution_error": 3.637677661292041e-09,
+          "setup_ms": 201.86759500000002,
+          "solve": {
+            "max_ms": 40.700526,
+            "median_ms": 40.690197,
+            "min_ms": 40.662906,
+            "samples_ms": [
+              40.690197,
+              40.662906,
+              40.69719,
+              40.700526,
+              40.681549999999994
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.11426599999999999,
+          "operator": "Element",
+          "relative_residual": 4.175951901656328e-10,
+          "relative_solution_error": 2.1704195590324065e-09,
+          "setup_ms": 69.808054,
+          "solve": {
+            "max_ms": 77.12177000000001,
+            "median_ms": 77.062529,
+            "min_ms": 77.01664199999999,
+            "samples_ms": [
+              77.12177000000001,
+              77.062529,
+              77.10532,
+              77.01664199999999,
+              77.056838
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.11082900000000001,
+          "operator": "Element",
+          "relative_residual": 6.620902479413424e-10,
+          "relative_solution_error": 4.584421087412019e-09,
+          "setup_ms": 69.808054,
+          "solve": {
+            "max_ms": 74.91274800000001,
+            "median_ms": 74.887861,
+            "min_ms": 74.867343,
+            "samples_ms": [
+              74.887861,
+              74.867343,
+              74.889194,
+              74.88273099999999,
+              74.91274800000001
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.110389,
+          "operator": "Element",
+          "relative_residual": 5.278172022901803e-10,
+          "relative_solution_error": 3.637677323292146e-09,
+          "setup_ms": 69.808054,
+          "solve": {
+            "max_ms": 74.87472700000001,
+            "median_ms": 74.82430099999999,
+            "min_ms": 74.811256,
+            "samples_ms": [
+              74.82430099999999,
+              74.816035,
+              74.869788,
+              74.811256,
+              74.87472700000001
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.324604,
+          "operator": "Csr",
+          "relative_residual": 7.151877334583713e-10,
+          "relative_solution_error": 3.3031901861307087e-09,
+          "setup_ms": 68.690508,
+          "solve": {
+            "max_ms": 29.217266,
+            "median_ms": 29.198559999999997,
+            "min_ms": 29.148956000000002,
+            "samples_ms": [
+              29.148956000000002,
+              29.198559999999997,
+              29.217266,
+              29.206495,
+              29.182049000000003
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 0,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.32345300000000005,
+          "operator": "Csr",
+          "relative_residual": 3.833452922735635e-10,
+          "relative_solution_error": 2.1647239709815115e-09,
+          "setup_ms": 68.690508,
+          "solve": {
+            "max_ms": 29.230641000000002,
+            "median_ms": 29.210773999999997,
+            "min_ms": 29.176728999999998,
+            "samples_ms": [
+              29.210773999999997,
+              29.184213,
+              29.230641000000002,
+              29.217316,
+              29.176728999999998
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 1,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.32393299999999997,
+          "operator": "Csr",
+          "relative_residual": 2.635873566972302e-10,
+          "relative_solution_error": 1.7255410543809658e-09,
+          "setup_ms": 68.690508,
+          "solve": {
+            "max_ms": 29.199502,
+            "median_ms": 29.180576,
+            "min_ms": 29.163895,
+            "samples_ms": [
+              29.163895,
+              29.188751,
+              29.180576,
+              29.199502,
+              29.179465
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 2,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.044113,
+          "operator": "Element",
+          "relative_residual": 7.151877582225776e-10,
+          "relative_solution_error": 3.3031912431220267e-09,
+          "setup_ms": 64.099817,
+          "solve": {
+            "max_ms": 46.337108,
+            "median_ms": 46.328381,
+            "min_ms": 46.321498000000005,
+            "samples_ms": [
+              46.324554,
+              46.337108,
+              46.335645,
+              46.321498000000005,
+              46.328381
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 0,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.041138,
+          "operator": "Element",
+          "relative_residual": 3.833452937082207e-10,
+          "relative_solution_error": 2.164723632778071e-09,
+          "setup_ms": 64.099817,
+          "solve": {
+            "max_ms": 46.356675,
+            "median_ms": 46.319454,
+            "min_ms": 46.317972,
+            "samples_ms": [
+              46.318893,
+              46.319454,
+              46.317972,
+              46.356675,
+              46.323972999999995
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 1,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 729,
+          "elements": 3072,
+          "iterations": [
+            22,
+            22,
+            22,
+            22,
+            22
+          ],
+          "numeric_update_ms": 0.0422,
+          "operator": "Element",
+          "relative_residual": 2.6358735298396984e-10,
+          "relative_solution_error": 1.725541535825073e-09,
+          "setup_ms": 64.099817,
+          "solve": {
+            "max_ms": 46.355993999999995,
+            "median_ms": 46.315507,
+            "min_ms": 46.288276,
+            "samples_ms": [
+              46.355993999999995,
+              46.313553,
+              46.288276,
+              46.315507,
+              46.333521000000005
+            ]
+          },
+          "solve_d2h_bytes": 40480,
+          "solve_h2d_bytes": 1760,
+          "step": 2,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            56,
+            56,
+            56,
+            56,
+            56
+          ],
+          "numeric_update_ms": 0.544802,
+          "operator": "Csr",
+          "relative_residual": 8.73644758078009e-10,
+          "relative_solution_error": 1.7775278508892195e-08,
+          "setup_ms": 318.453553,
+          "solve": {
+            "max_ms": 121.90137,
+            "median_ms": 121.895799,
+            "min_ms": 121.87762500000001,
+            "samples_ms": [
+              121.89595,
+              121.87762500000001,
+              121.895799,
+              121.895018,
+              121.90137
+            ]
+          },
+          "solve_d2h_bytes": 255360,
+          "solve_h2d_bytes": 4480,
+          "step": 0,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            55,
+            55,
+            55,
+            55,
+            55
+          ],
+          "numeric_update_ms": 0.542076,
+          "operator": "Csr",
+          "relative_residual": 6.508411433820102e-10,
+          "relative_solution_error": 1.9062841793301593e-08,
+          "setup_ms": 318.453553,
+          "solve": {
+            "max_ms": 119.529329,
+            "median_ms": 119.517858,
+            "min_ms": 119.428307,
+            "samples_ms": [
+              119.517858,
+              119.529329,
+              119.521184,
+              119.428307,
+              119.456201
+            ]
+          },
+          "solve_d2h_bytes": 246400,
+          "solve_h2d_bytes": 4400,
+          "step": 1,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            55,
+            55,
+            55,
+            55,
+            55
+          ],
+          "numeric_update_ms": 0.542978,
+          "operator": "Csr",
+          "relative_residual": 8.388634697669659e-10,
+          "relative_solution_error": 4.010347867823752e-08,
+          "setup_ms": 318.453553,
+          "solve": {
+            "max_ms": 119.50656599999999,
+            "median_ms": 119.47314300000001,
+            "min_ms": 119.443286,
+            "samples_ms": [
+              119.46770199999999,
+              119.47314300000001,
+              119.484494,
+              119.50656599999999,
+              119.443286
+            ]
+          },
+          "solve_d2h_bytes": 246400,
+          "solve_h2d_bytes": 4400,
+          "step": 2,
+          "subdivisions": 8,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            56,
+            56,
+            56,
+            56,
+            56
+          ],
+          "numeric_update_ms": 0.155043,
+          "operator": "Element",
+          "relative_residual": 8.736447672173803e-10,
+          "relative_solution_error": 1.7775278386570403e-08,
+          "setup_ms": 263.827601,
+          "solve": {
+            "max_ms": 234.577604,
+            "median_ms": 234.511328,
+            "min_ms": 234.43257,
+            "samples_ms": [
+              234.542508,
+              234.43257,
+              234.577604,
+              234.505848,
+              234.511328
+            ]
+          },
+          "solve_d2h_bytes": 255360,
+          "solve_h2d_bytes": 4480,
+          "step": 0,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            55,
+            55,
+            55,
+            55,
+            55
+          ],
+          "numeric_update_ms": 0.152369,
+          "operator": "Element",
+          "relative_residual": 6.508411483532806e-10,
+          "relative_solution_error": 1.906284183691355e-08,
+          "setup_ms": 263.827601,
+          "solve": {
+            "max_ms": 230.244321,
+            "median_ms": 230.127249,
+            "min_ms": 230.11777999999998,
+            "samples_ms": [
+              230.11888299999998,
+              230.11777999999998,
+              230.244321,
+              230.15988000000002,
+              230.127249
+            ]
+          },
+          "solve_d2h_bytes": 246400,
+          "solve_h2d_bytes": 4400,
+          "step": 1,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 3072,
+          "iterations": [
+            55,
+            55,
+            55,
+            55,
+            55
+          ],
+          "numeric_update_ms": 0.15254900000000002,
+          "operator": "Element",
+          "relative_residual": 8.388634680591104e-10,
+          "relative_solution_error": 4.0103479188398784e-08,
+          "setup_ms": 263.827601,
+          "solve": {
+            "max_ms": 230.19694099999998,
+            "median_ms": 230.116087,
+            "min_ms": 230.093655,
+            "samples_ms": [
+              230.15705499999999,
+              230.09400599999998,
+              230.093655,
+              230.19694099999998,
+              230.116087
+            ]
+          },
+          "solve_d2h_bytes": 246400,
+          "solve_h2d_bytes": 4400,
+          "step": 2,
+          "subdivisions": 8,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        }
+      ]
+    }
+  ]
+}

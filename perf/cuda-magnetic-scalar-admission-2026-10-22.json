@@ -1,0 +1,397 @@
+{
+  "date": "2026-10-22",
+  "head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree_required": true,
+  "scope": "Linear reduced scalar magnetic potential, assembled f64 H1 Tri3/tetrahedron P1/P2, forward/transpose/Hermitian",
+  "public_entrypoints": [
+    "FemWorkload::native_cuda_magnetic_scalar_potential",
+    "CudaFemSolveSession::try_assemble",
+    "fem_cuda_magnetic_scalar_capability_rows"
+  ],
+  "physics": {
+    "forms": [
+      "PermeabilityForm",
+      "MagnetSourceForm"
+    ],
+    "layer_interface": "x=0.5, mesh aligned",
+    "normalized_permeability": [
+      2.0,
+      5.0
+    ],
+    "base_remanence_x": [
+      0.4,
+      1.2
+    ],
+    "end_potentials": [
+      0.0,
+      0.1
+    ],
+    "side_boundary": "natural zero normal B",
+    "reference": "Continuous piecewise-linear potential with constant normal B from flux continuity and end-potential difference",
+    "field_recovery": "Production compute_b_field on host, checked against independent constant-flux solution"
+  },
+  "coverage_rows": 12,
+  "physical_solves": [
+    {
+      "element": "Tri3",
+      "order": "P1",
+      "action": "Forward",
+      "remanence_amplitude": 1.0,
+      "potential_error": 1.2396351306565023e-11,
+      "flux_error": 1.9174384302544922e-10,
+      "relative_residual": 1.0017763031613293e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P1",
+      "action": "Forward",
+      "remanence_amplitude": 1.5,
+      "potential_error": 2.085543890362196e-11,
+      "flux_error": 3.292217609640602e-10,
+      "relative_residual": 1.847640713589075e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P1",
+      "action": "Forward",
+      "remanence_amplitude": 0.8,
+      "potential_error": 2.91975887911633e-11,
+      "flux_error": 4.6091019889615836e-10,
+      "relative_residual": 2.718396178977086e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P1",
+      "action": "Transpose",
+      "remanence_amplitude": 1.0,
+      "potential_error": 1.2396351306565023e-11,
+      "flux_error": 1.9174384302544922e-10,
+      "relative_residual": 1.0017763031613293e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P1",
+      "action": "Transpose",
+      "remanence_amplitude": 1.5,
+      "potential_error": 2.085543890362196e-11,
+      "flux_error": 3.292217609640602e-10,
+      "relative_residual": 1.847640713589075e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P1",
+      "action": "Transpose",
+      "remanence_amplitude": 0.8,
+      "potential_error": 2.91975887911633e-11,
+      "flux_error": 4.6091019889615836e-10,
+      "relative_residual": 2.718396178977086e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P1",
+      "action": "Hermitian",
+      "remanence_amplitude": 1.0,
+      "potential_error": 1.2396351306565023e-11,
+      "flux_error": 1.9174384302544922e-10,
+      "relative_residual": 1.0017763031613293e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P1",
+      "action": "Hermitian",
+      "remanence_amplitude": 1.5,
+      "potential_error": 2.085543890362196e-11,
+      "flux_error": 3.292217609640602e-10,
+      "relative_residual": 1.847640713589075e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P1",
+      "action": "Hermitian",
+      "remanence_amplitude": 0.8,
+      "potential_error": 2.91975887911633e-11,
+      "flux_error": 4.6091019889615836e-10,
+      "relative_residual": 2.718396178977086e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P2",
+      "action": "Forward",
+      "remanence_amplitude": 1.0,
+      "potential_error": 1.2126808585088966e-10,
+      "flux_error": 1.7211101115728005e-09,
+      "relative_residual": 7.270450679704585e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P2",
+      "action": "Forward",
+      "remanence_amplitude": 1.5,
+      "potential_error": 1.0071212093454296e-10,
+      "flux_error": 2.8731125286436084e-09,
+      "relative_residual": 7.251937817982445e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P2",
+      "action": "Forward",
+      "remanence_amplitude": 0.8,
+      "potential_error": 1.867065876903773e-11,
+      "flux_error": 5.86032444793716e-10,
+      "relative_residual": 2.149568394607065e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P2",
+      "action": "Transpose",
+      "remanence_amplitude": 1.0,
+      "potential_error": 1.2126808585088966e-10,
+      "flux_error": 1.7211101115728005e-09,
+      "relative_residual": 7.270450679704585e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P2",
+      "action": "Transpose",
+      "remanence_amplitude": 1.5,
+      "potential_error": 1.0071212093454296e-10,
+      "flux_error": 2.8731125286436084e-09,
+      "relative_residual": 7.251937817982445e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P2",
+      "action": "Transpose",
+      "remanence_amplitude": 0.8,
+      "potential_error": 1.867065876903773e-11,
+      "flux_error": 5.86032444793716e-10,
+      "relative_residual": 2.149568394607065e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P2",
+      "action": "Hermitian",
+      "remanence_amplitude": 1.0,
+      "potential_error": 1.2126808585088966e-10,
+      "flux_error": 1.7211101115728005e-09,
+      "relative_residual": 7.270450679704585e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P2",
+      "action": "Hermitian",
+      "remanence_amplitude": 1.5,
+      "potential_error": 1.0071212093454296e-10,
+      "flux_error": 2.8731125286436084e-09,
+      "relative_residual": 7.251937817982445e-10
+    },
+    {
+      "element": "Tri3",
+      "order": "P2",
+      "action": "Hermitian",
+      "remanence_amplitude": 0.8,
+      "potential_error": 1.867065876903773e-11,
+      "flux_error": 5.86032444793716e-10,
+      "relative_residual": 2.149568394607065e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P1",
+      "action": "Forward",
+      "remanence_amplitude": 1.0,
+      "potential_error": 1.3782914219662157e-10,
+      "flux_error": 2.0899656449913095e-09,
+      "relative_residual": 6.651387073695663e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P1",
+      "action": "Forward",
+      "remanence_amplitude": 1.5,
+      "potential_error": 2.8582683095357275e-11,
+      "flux_error": 4.546123477666697e-10,
+      "relative_residual": 2.3446455641040267e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P1",
+      "action": "Forward",
+      "remanence_amplitude": 0.8,
+      "potential_error": 4.00157840890758e-11,
+      "flux_error": 6.364569982153512e-10,
+      "relative_residual": 3.4537871324518075e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P1",
+      "action": "Transpose",
+      "remanence_amplitude": 1.0,
+      "potential_error": 1.3782914219662157e-10,
+      "flux_error": 2.0899656449913095e-09,
+      "relative_residual": 6.651387102158786e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P1",
+      "action": "Transpose",
+      "remanence_amplitude": 1.5,
+      "potential_error": 2.8582683095357275e-11,
+      "flux_error": 4.546123477666697e-10,
+      "relative_residual": 2.3446455177415335e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P1",
+      "action": "Transpose",
+      "remanence_amplitude": 0.8,
+      "potential_error": 4.00157840890758e-11,
+      "flux_error": 6.364569982153512e-10,
+      "relative_residual": 3.453787120269729e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P1",
+      "action": "Hermitian",
+      "remanence_amplitude": 1.0,
+      "potential_error": 1.3782914219662157e-10,
+      "flux_error": 2.0899656449913095e-09,
+      "relative_residual": 6.651387102158786e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P1",
+      "action": "Hermitian",
+      "remanence_amplitude": 1.5,
+      "potential_error": 2.8582683095357275e-11,
+      "flux_error": 4.546123477666697e-10,
+      "relative_residual": 2.3446455177415335e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P1",
+      "action": "Hermitian",
+      "remanence_amplitude": 0.8,
+      "potential_error": 4.00157840890758e-11,
+      "flux_error": 6.364569982153512e-10,
+      "relative_residual": 3.453787120269729e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P2",
+      "action": "Forward",
+      "remanence_amplitude": 1.0,
+      "potential_error": 2.7991110904818095e-10,
+      "flux_error": 2.5453322782809096e-09,
+      "relative_residual": 6.314306480977193e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P2",
+      "action": "Forward",
+      "remanence_amplitude": 1.5,
+      "potential_error": 2.1771676822490704e-10,
+      "flux_error": 3.2370336966458524e-09,
+      "relative_residual": 5.703517772417257e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P2",
+      "action": "Forward",
+      "remanence_amplitude": 0.8,
+      "potential_error": 3.0480376556063504e-10,
+      "flux_error": 4.53184656468153e-09,
+      "relative_residual": 8.04699009249304e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P2",
+      "action": "Transpose",
+      "remanence_amplitude": 1.0,
+      "potential_error": 2.7991110904818095e-10,
+      "flux_error": 2.5453322782809096e-09,
+      "relative_residual": 6.314306577555976e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P2",
+      "action": "Transpose",
+      "remanence_amplitude": 1.5,
+      "potential_error": 2.1771676822490704e-10,
+      "flux_error": 3.2370336966458524e-09,
+      "relative_residual": 5.703517788871139e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P2",
+      "action": "Transpose",
+      "remanence_amplitude": 0.8,
+      "potential_error": 3.0480376556063504e-10,
+      "flux_error": 4.53184656468153e-09,
+      "relative_residual": 8.046990138583144e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P2",
+      "action": "Hermitian",
+      "remanence_amplitude": 1.0,
+      "potential_error": 2.7991110904818095e-10,
+      "flux_error": 2.5453322782809096e-09,
+      "relative_residual": 6.314306577555976e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P2",
+      "action": "Hermitian",
+      "remanence_amplitude": 1.5,
+      "potential_error": 2.1771676822490704e-10,
+      "flux_error": 3.2370336966458524e-09,
+      "relative_residual": 5.703517788871139e-10
+    },
+    {
+      "element": "Tetrahedron",
+      "order": "P2",
+      "action": "Hermitian",
+      "remanence_amplitude": 0.8,
+      "potential_error": 3.0480376556063504e-10,
+      "flux_error": 4.53184656468153e-09,
+      "relative_residual": 8.046990138583144e-10
+    }
+  ],
+  "checks": {
+    "native_tests_passed": 2,
+    "physical_solves_passed": 36,
+    "repeated_source_solves_with_zero_allocations": 24,
+    "physical_solves_with_zero_internal_h2d": 36,
+    "additional_generic_numeric_refresh_solves": 36,
+    "generic_refresh_solves_with_zero_allocations": 36,
+    "unsupported_requests_rejected_before_assembly_or_device_work": 9,
+    "memcheck_tests": 2,
+    "memcheck_errors": 0,
+    "cpu_fem_passed": 1964,
+    "cpu_fem_ignored": 1,
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_fem_clippy": "passed with existing warnings"
+  },
+  "limits": [
+    "Host form/constraint assembly and source uploads remain explicit setup/input work",
+    "B-field recovery currently downloads solution and runs on CPU",
+    "No nonlinear B-H, axisymmetric/vector-potential, eddy-current or higher-order/tensor-element coverage claim",
+    "PCG requires positive permeability and constraints removing the constant nullspace",
+    "No performance speedup claim or application-dispatch coverage beyond the public assembled session"
+  ],
+  "source_sha256": {
+    "crates/sonium-fem/src/backend.rs": "948dc66e300fd0af3c3dc064565eccbe6545da0bc0c0d0c7b6b26d57bd11eb41",
+    "crates/sonium-fem/src/lib.rs": "1a1f0a89ec4e6fdc36e1135905cf079bd7bf4aec9a65b89ccd24b3238faae97b",
+    "crates/sonium-fem/src/solver/device/tests.rs": "5c67080630a47f5d5920b5410d3bee883f4f4eb6e558bba4b4c275202a32cb46",
+    "crates/sonium-fem/src/solver/device/tests/magnetic.rs": "e4bc61d5de9f3c9104e71a09ae528bfd3f8a698f549f0b662a99840d913228ae"
+  },
+  "logs": [
+    "/tmp/magnetic-native.log",
+    "/tmp/magnetic-memcheck.log",
+    "/tmp/magnetic-cpu.log",
+    "/tmp/magnetic-check.log",
+    "/tmp/magnetic-clippy.log",
+    "/tmp/magnetic-cuda-clippy.log"
+  ]
+}

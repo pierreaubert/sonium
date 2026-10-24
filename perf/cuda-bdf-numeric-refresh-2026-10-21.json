@@ -1,0 +1,48 @@
+{
+  "scope": "BDF f64 outer polynomial and Chebyshev fixed-pattern numeric refresh",
+  "date": "2026-10-21",
+  "source_sha256": {
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda.rs": "fa26675e6bd98ba282db29a2d2b5023d083d78cfccdea86fb2aa5379d54f40eb",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/tests.rs": "79c1b32e0eb280dc21e2bd6deb0742433f1244dd2e746900c6b3d630b4bed3f5"
+  },
+  "native_command": "SONIUM_REQUIRE_CUDA=1 compute-sanitizer --tool memcheck --error-exitcode 99 target/debug/deps/sonium_fem-234ee27f8433be93 bdf_cuda::tests --test-threads=1 --nocapture",
+  "native_result": {
+    "passed": 2,
+    "failed": 0,
+    "memcheck_errors": 0,
+    "seconds": 33.42
+  },
+  "numeric_refresh": {
+    "fixture": "3x3 SPD algebra via BDF cache; production saddle-point coverage is a separate regression",
+    "preconditioners": [
+      "PolynomialJacobi",
+      "Chebyshev"
+    ],
+    "changes_per_preconditioner": 3,
+    "warm_allocations_per_change": 0,
+    "setup_builds_per_sequence": 1,
+    "solution_absolute_tolerance": 1e-10,
+    "fresh_setup_comparison": true,
+    "injected_d2d_failure_cache_eviction_and_retry": true
+  },
+  "logs": [
+    "/tmp/bdf-refresh-native.log",
+    "/tmp/bdf-refresh-check.log",
+    "/tmp/bdf-refresh-clippy.log",
+    "/tmp/bdf-refresh-cuda-clippy.log",
+    "/tmp/bdf-refresh-cpu.log"
+  ],
+  "limits": [
+    "No elapsed-time speedup claim",
+    "Schur and pressure AMG still rebuild on changed coefficients",
+    "Host matrix assembly, diagonal extraction and Chebyshev spectral estimate remain",
+    "RHS, initial guess and output still cross the host boundary",
+    "setup_reused remains false on numeric changes; allocation reuse is asserted separately"
+  ],
+  "cpu_stokes": {
+    "passed": 103,
+    "failed": 0,
+    "ignored": 1,
+    "seconds": 23.63
+  }
+}

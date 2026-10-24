@@ -1,0 +1,97 @@
+{
+  "date": "2026-10-22",
+  "scope": "Public retained prepared FGMRES and assembled P1/P2 Helmholtz frequency sweeps",
+  "snapshot": "Working tree; HEAD alone does not reproduce implementation",
+  "implementation": {
+    "api": "CudaLinearSolveSession::try_new_flexible",
+    "updates": [
+      "explicit lagged preconditioner",
+      "explicit replacement preconditioner"
+    ],
+    "reservation": "Full restart capacity including backend Krylov reductions",
+    "native_callback_contract": "Caller must verify residency; arbitrary callbacks cannot be introspected"
+  },
+  "fem": {
+    "frequencies": [
+      4.0,
+      4.2,
+      3.8
+    ],
+    "wavenumber_imaginary": 0.2,
+    "mesh": "6x6 triangulated unit square",
+    "boundary": "homogeneous Dirichlet on marker 1",
+    "preconditioner": "shifted auxiliary complex64 AMG with CUDA coarse LU",
+    "reference": "Known discrete solution with independent host CSR RHS; not analytic mesh convergence",
+    "results": [
+      {
+        "degree": "P1",
+        "wavenumber_real": 4.0,
+        "iterations": 18,
+        "relative_residual": 7.603475226299765e-10,
+        "relative_solution_error": 1.4476022014750375e-09,
+        "warm_device_allocations": 0
+      },
+      {
+        "degree": "P1",
+        "wavenumber_real": 4.2,
+        "iterations": 19,
+        "relative_residual": 1.4831314356074084e-10,
+        "relative_solution_error": 2.2388303222066464e-10,
+        "warm_device_allocations": 0
+      },
+      {
+        "degree": "P1",
+        "wavenumber_real": 3.8,
+        "iterations": 19,
+        "relative_residual": 2.1063944577337064e-10,
+        "relative_solution_error": 3.681110275326892e-10,
+        "warm_device_allocations": 0
+      },
+      {
+        "degree": "P2",
+        "wavenumber_real": 4.0,
+        "iterations": 21,
+        "relative_residual": 3.8960266800540624e-10,
+        "relative_solution_error": 5.039325464449353e-09,
+        "warm_device_allocations": 0
+      },
+      {
+        "degree": "P2",
+        "wavenumber_real": 4.2,
+        "iterations": 21,
+        "relative_residual": 7.926356096977034e-10,
+        "relative_solution_error": 1.0086802067127021e-08,
+        "warm_device_allocations": 0
+      },
+      {
+        "degree": "P2",
+        "wavenumber_real": 3.8,
+        "iterations": 21,
+        "relative_residual": 5.769832048666515e-10,
+        "relative_solution_error": 1.1425211287235952e-08,
+        "warm_device_allocations": 0
+      }
+    ]
+  },
+  "verification": {
+    "cuda_facade_regressions": 13,
+    "prepared_all_scalar_tests": 2,
+    "fem_native_tests": 1,
+    "prepared_memcheck_errors": 0,
+    "fem_memcheck_errors": 0,
+    "cpu_solver_tests": 117,
+    "cpu_fem_tests": 1945,
+    "cpu_fem_ignored": 1,
+    "cargo_check": "passed",
+    "cargo_clippy": "passed with existing warnings",
+    "cuda_lib_test_clippy": "passed with existing warnings"
+  },
+  "limitations": [
+    "Host FEM assembly and AMG hierarchy setup remain",
+    "Prepared replacement may allocate; lagged numeric update asserts zero allocations and downloads",
+    "Broader physics and application migration remain open",
+    "No elapsed-time speedup claim; concurrent GPU sanitizer workload",
+    "Large BEM sanitizer is separate and still pending"
+  ],
+  "initial_failure": "Frequency update needed a longer Krylov basis and grew two backend buffers; fixed by full-capacity backend reduction reservation."
+}

@@ -1,0 +1,52 @@
+{
+  "status": "validated_tet_kernel_preparation_and_reuse",
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/cublas.rs": "bacdfdbf4f0f568e598b592e050b29fa1a77694a44c616c141a5d87ef6b940a7",
+    "crates/sonium-compute/src/cuda/fem_tet.rs": "1d496f4e87d9f035e7a66ec56ccecc1576fa5be31af24df412fa1d746465f2ba",
+    "crates/sonium-compute/src/cuda/fem_tet/assembly.rs": "17baa991bf4954f6628f80576fd63518c81bb38574674f0a27d8c034c2bcf113",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_tet_solve.rs": "1f4c04f4b842c8fe922d5fb61d542f382cb32fa00699b9bf7b618d60a40c9a31"
+  },
+  "validation": {
+    "check": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 8.65s"
+    ],
+    "native": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 12.36s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 743 filtered out; finished in 0.66s"
+    ],
+    "sessions": [
+      "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 2009 filtered out; finished in 2.51s"
+    ],
+    "memcheck": [
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 743 filtered out; finished in 1.00s",
+      "========= ERROR SUMMARY: 0 errors"
+    ],
+    "root-check": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 1m 12s"
+    ],
+    "root-clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 11.59s"
+    ],
+    "cuda-clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 40.78s"
+    ],
+    "compute-cpu": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 0.18s",
+      "test result: ok. 655 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.03s"
+    ],
+    "fem-cpu": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 0.17s",
+      "test result: ok. 1964 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 23.77s"
+    ]
+  },
+  "changes": [
+    "Separate P1/P2 backend caches retain action/assembly functions and occupancy-derived launch sizes.",
+    "Resolve required kernels before retained FEM geometry, boundary and AMG preparation.",
+    "Resolve kernels before direct numeric-assembly host CSR-pattern construction."
+  ],
+  "limitations": [
+    "Driver module memory is separate from pooled arrays.",
+    "No new full-solve performance claim.",
+    "Runtime admission covers declared Krylov/Tet/quadrature dependencies, not arbitrary actions."
+  ]
+}

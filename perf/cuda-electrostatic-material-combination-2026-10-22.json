@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-22",
+  "scope": "Resident fixed-basis material sweeps through generic FEM solve and electrostatic energy operators",
+  "implementation": {
+    "solve_api": "CudaFemSolveSession::try_combine_system_lagged",
+    "energy_api": "CudaElectrostaticObservables::try_combine_values",
+    "numeric_path": "native copy/scale/axpy into persistent CSR and RHS; finite validation and synchronization before validity publication",
+    "preconditioner": "retains prepared symmetric AMG for PCG; caller preserves SPD/HPD and decides when to refresh",
+    "constraints": "base contains identity rows; material delta has zero constrained rows; RHS bases include matching Dirichlet lifting"
+  },
+  "validation": {
+    "native_electrostatic": "3 passed /tmp/electrostatic-combination-native-fixed.log",
+    "generic_native_fem": "18 passed /tmp/electrostatic-combination-generic-native.log",
+    "memcheck": "3 passed, zero errors /tmp/electrostatic-combination-memcheck.log",
+    "cpu_fem": "1964 passed, 1 ignored /tmp/electrostatic-combination-cpu.log",
+    "root_check": "passed /tmp/electrostatic-combination-root-check.log",
+    "root_clippy": "passed with existing warnings /tmp/electrostatic-combination-root-clippy.log",
+    "cuda_fem_clippy": "passed with existing warnings /tmp/electrostatic-combination-cuda-clippy.log"
+  },
+  "physical_cases": {
+    "combination_solves": 12,
+    "direct_replacement_solves": 12,
+    "uniform_solves": 36,
+    "combination_layouts": [
+      "Tri3 P1",
+      "Tri3 P2",
+      "tetrahedron P1",
+      "tetrahedron P2"
+    ],
+    "contrasts": [
+      2,
+      4,
+      0.5
+    ],
+    "voltages": [
+      1,
+      -2,
+      0.75
+    ],
+    "analytic_reference": "two dielectrics in series, interface x=0.5; piecewise-linear potential"
+  },
+  "asserted_gates": {
+    "warm_allocations": 0,
+    "combination_solve_h2d_bytes": 0,
+    "energy_combination_evaluation_h2d_bytes": 0,
+    "energy_combination_evaluation_d2h_bytes_max": 80,
+    "potential_absolute_error": 1e-07,
+    "analytic_observables_relative_error": 1e-07,
+    "cpu_energy_relative_error": 1e-10,
+    "independent_original_system_residual": 1.1e-09
+  },
+  "failure_cases": [
+    "nonfinite coefficient",
+    "overflowed combined values",
+    "failed device copy invalidates system and warm start",
+    "successful full combination restores solvability",
+    "energy failure disables evaluation until full replacement",
+    "terminal synchronization error requires context recreation"
+  ],
+  "limitations": [
+    "Host geometry, initial material bases and AMG setup remain. CPU assembly inside tests supplies independent reference only for combination runs.",
+    "Only affine fixed-pattern material variation is represented; arbitrary material callbacks, changing geometry and constraints require new lowering or setup.",
+    "New combination API physically validated for f64 electrostatic forward action; other scalar/action combinations need explicit coverage.",
+    "No measured speedup or arbitrary-contrast lagged-AMG convergence claim."
+  ],
+  "source_sha256": {
+    "crates/sonium-fem/src/solver/device.rs": "5f8fc553b138c810da573c66b48563854b0c1952ecf03311108666b950a59a6e",
+    "crates/sonium-fem/src/physics/electromagnetics/electrostatic_cuda.rs": "83648486d8be6d24836c9f4c426cbf3d1094d93808482506ec17d508f3605cfc",
+    "crates/sonium-fem/src/solver/device/tests/electrostatic.rs": "0f23ca9fe566fe571775aa7f8a61350196539c80b4a43c684c2c05ed8492e37b"
+  }
+}

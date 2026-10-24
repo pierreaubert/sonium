@@ -1,0 +1,143 @@
+{
+  "date": "2026-10-22",
+  "scope": "Retained native ILUT/ILUTP factor application, prepared FGMRES qualification on resolved PML matrices, and shared ILU/facade regressions",
+  "source_sha256": {
+    "crates/sonium-solvers/src/solve.rs": "4ad541d17c6398fe658008646d6e062912c282b324e1a7e786ad8d0f8a9e357f",
+    "crates/sonium-solvers/src/solve/cuda_session.rs": "9ca050e5d547a48bc6002be50b6f84673e65d9b222c6a086609d5deeb09c6b19",
+    "crates/sonium-solvers/src/solve/cuda_session/preconditioner.rs": "d3c1c2eaf1bbd98b586a61a8af13ffed2fb5f74c84f044d9cbcbfbe450d08dcd",
+    "crates/sonium-solvers/src/solve/cuda_session/update.rs": "78f3ff9a1a786eb64f7e98af416401a010576c5ef89381ff9cc1e2db1bb00f90",
+    "crates/sonium-solvers/src/solve/cuda_session/prepared.rs": "2aacc73df11db14b488cde7dbff5c689345fba936a0eb6c76591ceb580568630",
+    "crates/sonium-solvers/src/solve/cuda_session_tests.rs": "ca50cbb7fdc9d887f22da17f42844c1fcf341d9d758e59261a9b50c17fc4c7df",
+    "crates/sonium-solvers/src/solve/cuda_session_refresh_tests.rs": "5b0635c9631ce49473a3b6deca1751d6f463bb152f8d49710e32bd1e577cec41",
+    "crates/sonium-compute/src/preconditioner/chebyshev.rs": "3a47b8f8032034920d6b1f3a8e520e3f80fbe009f56a4f66daeac42a50a04330",
+    "crates/sonium-compute/src/preconditioner/matrix.rs": "ed07c433c26e1831186744a01554dc1db9b9cceca5079effa50d4fe0e3c6a627",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/chebyshev.rs": "1b89fb8ecc211b66d276f61ea096abad7b6755e45014d275e81654dfd3618007",
+    "crates/sonium-compute/src/cuda/cublas.rs": "53e30ccbbb9fcd6b15927cf67a596610dc818b7da3f129165b4694078cfa337f",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/cuda_ilu.rs": "9588e6eff1617b4f3a27c85cd21bc1ab63c46e0ea4611826ddbb1ad7d7d7103c",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/ilu.rs": "d021f2abc4c0fe5f00d8e6bd5d2ccc71123019b6256240c5de0c5710438a00ce",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/lib.rs": "47a7e5585376589ebf50567a8504a0d10cc0bbecdd5c0fe856e917ab0f5d5fb5",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/cuda_schwarz.rs": "15cb2ec4ad9a6a9d7000975667c66fc4942957aabeffdf5822caee2c0926da6b",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/schwarz.rs": "961a1a96eccc8699888a7d9f05a89ab491645fea66a100e45f2b5d0df55688ad",
+    "crates/sonium-solvers/src/solve/cuda_prepared_tests.rs": "9475b174e70327e4d6817d4d1fa39598067028bdccd0e31cacd56e0ff9ed8b9c"
+  },
+  "implementation_source_sha256": {
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/ilut.rs": "a4dc4bb12825d5c2e9fafb5d553e8f12bd9120f3f6e06eccdcfce203900a4597",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/ilut/cuda.rs": "e2b5bc5182d1714b839f58dde95d8d9afb3594a93c38df6ffaabbf2d3268feed",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/ilut/cuda/tests.rs": "4024dd23ee94fee5824c7cd56a218d590488e4fb1b378d9e8cc46df74ccb3f92",
+    "crates/sonium-sim-speaker-modeling/src/resolved_acoustics.rs": "31ff5abdfea188a61702ecb48979342de3f4f155d672ba5edc5ca71f43f7d905",
+    "crates/sonium-sim-speaker-modeling/src/resolved_acoustics/cuda_tests.rs": "56498c90b1dce946ae25cbceff4231deac1aa9fee36323b9199459c111b7152e"
+  },
+  "binaries": {
+    "target/debug/deps/sonium_solvers_preconditioners-5a941ec42cba25ac": "dae43fd1390dce4a6cd46c29ee61baddae96586f9bb2105ab333e3883757c3c8",
+    "target/debug/deps/sonium_solvers-ccc55c5008082577": "fa22b1ccff3d6f6bdd3f1f1499f7d3bf4294c9fa2a712bcb863e0cac97f7be30",
+    "target/debug/deps/sonium_sim_speaker_modeling-4375f4f4943f90bd": "3e4a4d01222955997169519dc0bbd07b9eb538d7735c39362badc01144480a79"
+  },
+  "result": "\nrunning 8 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_chebyshev_rejects_nonreal_coefficients_before_upload ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_auto_large_real_and_complex_selection ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 123 filtered out; finished in 4.22s\n\n",
+  "native_ilut": "\nrunning 2 tests\ntest ilut::cuda::tests::native_ilut_preserves_pivots_ordering_and_refresh_all_scalars ... ok\ntest ilut::cuda::tests::native_ilut_rejects_invalid_factors_before_upload ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 252 filtered out; finished in 0.53s\n\n",
+  "native_ilu_regression": "\nrunning 1 test\ntest cuda_ilu::tests::native_ilu_matches_cpu_factors_all_scalars_and_small_pivots ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 253 filtered out; finished in 0.36s\n\n",
+  "native_prepared": "\nrunning 2 tests\ntest solve::cuda_prepared_tests::native_cuda_prepared_fgmres_variable_action_all_scalars ... ok\ntest solve::cuda_prepared_tests::native_cuda_prepared_policy_rejection_and_recovery ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 129 filtered out; finished in 0.53s\n\n",
+  "native_resolved_pml": "\nrunning 1 test\ntest resolved_acoustics::cuda_tests::native_resolved_pml_retained_fgmres_ilut ... resolved native ILUT: nodes=61 frequency=400 drive=0 iterations=3 residual=0.000000000049255190990171255\nresolved native ILUT: nodes=61 frequency=400 drive=1 iterations=3 residual=0.00000000001689979316717523\nresolved native ILUT: nodes=61 frequency=450 drive=0 iterations=3 residual=0.0000000000424577960441862\nresolved native ILUT: nodes=61 frequency=450 drive=1 iterations=3 residual=0.000000000025138531647995713\nresolved native ILUT: nodes=191 frequency=400 drive=0 iterations=5 residual=0.000000000002081796540541654\nresolved native ILUT: nodes=191 frequency=400 drive=1 iterations=5 residual=0.0000000000008130701789770926\nresolved native ILUT: nodes=191 frequency=450 drive=0 iterations=5 residual=0.0000000000005051795336658441\nresolved native ILUT: nodes=191 frequency=450 drive=1 iterations=5 residual=0.00000000000017160437935006822\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 692 filtered out; finished in 0.51s\n\n",
+  "memcheck": {
+    "memcheck": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest ilut::cuda::tests::native_ilut_preserves_pivots_ordering_and_refresh_all_scalars ... ok\ntest ilut::cuda::tests::native_ilut_rejects_invalid_factors_before_upload ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 252 filtered out; finished in 1.58s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "ilu-memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest cuda_ilu::tests::native_ilu_matches_cpu_factors_all_scalars_and_small_pivots ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 253 filtered out; finished in 0.59s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "pml-memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest resolved_acoustics::cuda_tests::native_resolved_pml_retained_fgmres_ilut ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 692 filtered out; finished in 7.64s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "facade-memcheck": "========= COMPUTE-SANITIZER\n\nrunning 8 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_chebyshev_rejects_nonreal_coefficients_before_upload ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_auto_large_real_and_complex_selection ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 123 filtered out; finished in 240.70s\n\n========= ERROR SUMMARY: 0 errors\n"
+  },
+  "contract": {
+    "factorization": "Checked CPU ILUT/ILUTP; preserves drop, fill and pivot configuration. Host factor import also preserves symmetric ordering.",
+    "action": "Native CSR gather, shared dependency-level lower/upper solves, native CSR scatter; no per-application backend allocation or H2D/D2H.",
+    "permutations": "Gather with perm[new]=old; final scatter maps each factor step to perm[col_perm[step]].",
+    "refresh": "Compatible factors refresh in place without backend allocation. Changed permutations or factor sparsity return false before mutation. Failed upload invalidates application until successful refresh.",
+    "quota": "Backend-owned allocations follow existing quota policy; no new total-memory guarantee."
+  },
+  "fixtures": {
+    "factor_parity": "f32/f64/Complex32/Complex64; 13 rows; drop 1e-3, fill 3; pivoting on/off; natural and non-involutive symmetric ordering; three RHS applications per case",
+    "negative_gates": "Invalid diagnostics/nonfinite or zero inverse pivots/permutations; changed permutation and factor pattern; partial refresh failure/recovery; injected application launch failure preserves output",
+    "resolved_pml": "Existing axisymmetric resolved acoustic producer: 61-node coarse sigma=2 fixture and 191-node default sigma=18 fixture; 400/450 Hz; two complex drives per frequency; model restart/iteration/tolerance controls; CPU direct field reference",
+    "pml_iterations": "Coarse: 3 per solve; default: 5 per solve. Warmed RHS solves allocate zero backend buffers. Matrix update replaces preconditioner while retaining physical operator/Krylov session."
+  },
+  "validation": {
+    "native_ilut": 2,
+    "native_ilu_regression": 1,
+    "native_facade": 8,
+    "native_prepared": 2,
+    "native_resolved_pml": 1,
+    "memcheck_errors": 0,
+    "cpu_preconditioners": 241,
+    "cpu_facade": 117,
+    "cpu_resolved_acoustics": 24,
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_clippy": "passed with existing warnings; no warning in changed CUDA files",
+    "formatting": "passed"
+  },
+  "limitations": [
+    "Public resolved-speaker continuation/full-result APIs still use CPU solves; this qualifies their assembled matrices through the existing public persistent FGMRES API.",
+    "Forward single-vector preconditioner action only; transpose/Hermitian/block actions are not implemented.",
+    "Host factorization remains CPU work; long dependency chains can require many GPU launches.",
+    "PML fixtures do not establish mesh convergence, low-frequency robustness, product-scale performance or a speedup.",
+    "Full compute/solver/BEM/FEM CUDA coverage remains incomplete."
+  ],
+  "logs": {
+    "native-final": {
+      "path": "/tmp/cuda-ilut-native-final.log",
+      "sha256": "af03740cf5df39a09829bdb2b3157b7014201fa21be203716ad04890c50711ae"
+    },
+    "ilu-regression-final": {
+      "path": "/tmp/cuda-ilut-ilu-regression-final.log",
+      "sha256": "f61764249cbeb64bb8db4bc06e17dda73f332121808926d34f9d5928b68be357"
+    },
+    "pml-native": {
+      "path": "/tmp/cuda-ilut-pml-native.log",
+      "sha256": "50ad20fd4924eb27bffb90cf273b9e5d4d8eef7f76091c3eb8e7e78ed5d8fece"
+    },
+    "facade-native": {
+      "path": "/tmp/cuda-ilut-facade-native.log",
+      "sha256": "5f485067c5a3b6e5d2e0b02e6b536d377dcbef354ba9a97a76be29b38ff7f88a"
+    },
+    "prepared-native": {
+      "path": "/tmp/cuda-ilut-prepared-native.log",
+      "sha256": "28a1940d6811870398fe7ecf4ef9e9d655cabb8ab6ddfc8fc0886df630b9d430"
+    },
+    "memcheck": {
+      "path": "/tmp/cuda-ilut-memcheck.log",
+      "sha256": "412306d842cb6b8577efc1cda81e42a83b7342cfe8f7b14e7af61fd86db2fa57"
+    },
+    "ilu-memcheck": {
+      "path": "/tmp/cuda-ilut-ilu-memcheck.log",
+      "sha256": "8ad9182052515618e6c8ab8c6d8babc34a7b88b1407ef42b182e8052e668b71b"
+    },
+    "pml-memcheck": {
+      "path": "/tmp/cuda-ilut-pml-memcheck.log",
+      "sha256": "e991f5c6f964a5cf3622f061e2be0d88c00e1270d865bbb3f28643c8e9d39642"
+    },
+    "facade-memcheck": {
+      "path": "/tmp/cuda-ilut-facade-memcheck.log",
+      "sha256": "ec6a709224dd853e5fb4b037dda36631e22e2e0c415fd656100f77c002eb6371"
+    },
+    "cpu": {
+      "path": "/tmp/cuda-ilut-cpu.log",
+      "sha256": "d107bcb9f9e9ae12a12d2472ada514bbf3e4730113cb815bd941e4110e18c6f6"
+    },
+    "resolved-cpu": {
+      "path": "/tmp/cuda-ilut-resolved-cpu.log",
+      "sha256": "36c310b3590e94ac18e6828967141a80d96889659eda002bfc8609322f3935e0"
+    },
+    "check": {
+      "path": "/tmp/cuda-ilut-check.log",
+      "sha256": "68692616d7f5a997e357f339689a498bddf038638851398257e9721a65e5e4b9"
+    },
+    "clippy": {
+      "path": "/tmp/cuda-ilut-clippy.log",
+      "sha256": "b541fd47679efe730563228f70bfcaad15011de00576c02a67a6916d84589473"
+    },
+    "cuda-clippy": {
+      "path": "/tmp/cuda-ilut-cuda-clippy.log",
+      "sha256": "4dd486c7194160aebf534f5916bbe44cf58e3f59593ed891816ad65ad5903f4c"
+    },
+    "final-build": {
+      "path": "/tmp/cuda-ilut-final-build.log",
+      "sha256": "2c7994248765259f2db997a92cae106a79393ad3b893ab226723a9aa0c7b808b"
+    }
+  }
+}

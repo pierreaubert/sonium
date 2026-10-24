@@ -21,14 +21,17 @@ just bench --backend cpu   # CPU only
 The runner discovers Cargo workspace benchmark targets. It probes a visible
 CUDA device and the cuBLAS/cuSPARSE/cuSOLVER/NVRTC libraries before enabling
 CUDA paths. It enables OpenBLAS comparison arms when the library is installed,
-and skips platform stubs such as Apple Accelerate on Linux. On the current
-x86/CUDA box, the plan contains 44 CPU targets and eight CUDA targets.
+and skips platform stubs such as Apple Accelerate on Linux. The exact
+target counts are printed by `--dry-run`; CUDA-only targets declared through
+Cargo `required-features` are included even without a redundant source gate.
 Benchmarks run sequentially. A failure is retained in the summary while the
 remaining targets continue; the command exits unsuccessfully if any target fails.
 
-Logs and a JSON summary are retained under `target/bench-runs/<run>/`.
-Criterion measurements remain under `target/criterion/`, with separate
-`cpu` and `cuda` saved baselines. Thread budgets default to at most 16;
+Logs, exact commands, source provenance and a JSON summary are retained under
+`target/bench-runs/<run>/`. Each invocation also saves a `.criterion.json`
+snapshot containing only baseline estimates written by that invocation.
+Criterion caches retain separate `cpu` and `cuda` saved baselines; Cargo may
+place these caches under the workspace or package target directory. Thread budgets default to at most 16;
 `RAYON_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, and `OMP_NUM_THREADS` override them.
 
 For a bounded selection:
@@ -44,6 +47,44 @@ benchmarks, including expensive FEM/FMM/scaling workloads.
 
 This command runs the benchmark inventory. Use the recipes below to publish
 formatted per-platform performance tables for the website.
+
+## Publish one CPU/CUDA rerun
+
+For compute and the complete split solver family, select these packages:
+
+```bash
+just bench --package sonium-compute --package sonium-solvers \
+  --package sonium-solvers-core --package sonium-solvers-sys \
+  --package sonium-solvers-sparse --package sonium-solvers-eigen \
+  --package sonium-solvers-direct --package sonium-solvers-preconditioners \
+  --package sonium-solvers-iterative --package sonium-solvers-optimization \
+  --package sonium-solvers-nonlinear --package sonium-solvers-time-integration
+python3 scripts/publish_bench_run.py target/bench-runs/<completed-run>
+```
+
+The publisher regenerates the five x86 and five CUDA cell pages when both
+backends were run, plus `compute-solvers-benchmarks-<date>.md` and `.json`.
+It consumes the invocation snapshots, never the shared Criterion cache. It
+rejects active/truncated runs and successful CUDA targets without a measured
+CUDA arm. Failed targets remain visible and cannot supply timing rows.
+The JSON includes confidence estimates, the exact variant names, hardware and
+thread budgets, source/config hashes, and checksums for raw logs. This prevents
+stale LAPACK rows from appearing in a BLAS page or CPU-only work from being
+silently relabelled as CUDA execution.
+
+To also refresh the direct, iterative, eigen and preconditioner tradeoff reports,
+run the following after the selected benchmark process finishes:
+
+```bash
+python3 scripts/refresh_compute_solver_reports.py target/bench-runs/<completed-run>
+```
+
+This runs supplemental reports sequentially and then publishes the cell pages.
+The direct report uses seven repeats, dense sizes 128–2048 and sparse grids
+16–64; the other report generators use their full default matrices. Their logs
+and terminal status are saved in `supplemental.json`. Existing public benchmark
+harnesses determine whether setup, transfers, allocation and convergence gates
+are included; compare those scopes before interpreting a CPU/CUDA ratio.
 
 ## Workflow
 

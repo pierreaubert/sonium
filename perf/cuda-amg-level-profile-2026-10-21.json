@@ -1,0 +1,4002 @@
+{
+  "date": "2026-10-21",
+  "head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree_required": true,
+  "source_sha256": {
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/mod.rs": "47fc4092b1074d5b3a9ac40f68c29c1c6f61b29d52a365fc8f1f9ace0bd8e851",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/backend_profile.rs": "629719a5e24fb088b316261ca21bcca8838b4ca23cba2b2b9d8cdbfec28ebbe2",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/backend_zero_tests.rs": "76fa92dd8f3d70315e016a976584af24c4d7f802385354ef7ac35a6429949d55",
+    "crates/sonium-fem/examples/cuda_fem_compare.rs": "a84d2867d4ed9c2d608fab726b820d74a801734ad13b86951d71b27934d57b01"
+  },
+  "scope": "Optional synchronized per-level AMG phase attribution, disabled by default",
+  "performance_claim": false,
+  "timings_valid_for_bottleneck_selection": false,
+  "timing_limitations": [
+    "Concurrent BEM sanitizer workload on the same GPU.",
+    "Each phase includes dispatch and completion overhead; barriers perturb normal execution."
+  ],
+  "phases": [
+    "PreSmooth",
+    "Residual",
+    "Restriction",
+    "Prolongation",
+    "PostSmooth",
+    "CoarseSolve"
+  ],
+  "semantics": [
+    "Recursive work belongs to the visited level, not the parent.",
+    "W/F revisits accumulate at each visited level.",
+    "Only successful phase completions are recorded.",
+    "Coarse fallback smoothing counts as coarse solution.",
+    "Disabling removes counters and introduces no profiling synchronization."
+  ],
+  "cpu_preconditioner_suite": {
+    "passed": 339,
+    "ignored": 1,
+    "log": "/tmp/amg-profile-cpu-tests.log"
+  },
+  "native_tests": "\nrunning 2 tests\ntest amg::backend_profile::tests::native_phase_profile_coarse_failure_is_not_a_completed_phase ... ok\ntest amg::backend_zero_tests::native_zero_start_matches_independent_cycles ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 244 filtered out; finished in 1.13s\n\n",
+  "memcheck": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest amg::backend_profile::tests::native_phase_profile_coarse_failure_is_not_a_completed_phase ... ok\ntest amg::backend_zero_tests::native_zero_start_matches_independent_cycles ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 244 filtered out; finished in 34.51s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "strict_visit_count_checks": {
+    "cpu": "passed",
+    "cuda": "passed",
+    "native_log": "\nrunning 2 tests\ntest amg::backend_profile::tests::native_phase_profile_coarse_failure_is_not_a_completed_phase ... ok\ntest amg::backend_zero_tests::native_zero_start_matches_independent_cycles ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 244 filtered out; finished in 1.13s\n\n",
+    "expected_calls_for_two_columns": {
+      "V": "2 per visited level",
+      "W": "2 * 2^level",
+      "F": "2 * (level + 1)"
+    }
+  },
+  "fem_rows": [
+    {
+      "action_repetitions": 100,
+      "action_samples": 7,
+      "boundary": "natural_neumann",
+      "context_setup_ms": 321.970965,
+      "k": 5.0,
+      "preconditioner_mass_shift": [
+        25.0,
+        25.0
+      ],
+      "scalar": "complex64",
+      "solve_initial_guess": "zero",
+      "solve_samples": 5,
+      "tolerance": 1e-09
+    },
+    {
+      "amg_smoother": "Jacobi",
+      "hex_low_order_refined": true,
+      "max_iterations": 600,
+      "restart": 60,
+      "synchronized_profile": true
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 1.427465006820475e-16,
+          "timing": {
+            "max_ms": 0.03709421,
+            "median_ms": 0.02504517,
+            "min_ms": 0.02488106,
+            "samples_ms": [
+              0.02497514,
+              0.03709421,
+              0.02488106,
+              0.02500629,
+              0.0283839,
+              0.02785179,
+              0.02504517
+            ]
+          }
+        },
+        {
+          "kernel_launches": 700,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 2.740720008662111e-16,
+          "timing": {
+            "max_ms": 0.21626571,
+            "median_ms": 0.19290703999999997,
+            "min_ms": 0.1889308,
+            "samples_ms": [
+              0.21626571,
+              0.1889308,
+              0.19226432000000002,
+              0.19045439,
+              0.19291745999999999,
+              0.19290703999999997,
+              0.19389721
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        27,
+        7
+      ],
+      "amg_level_nnz": [
+        223,
+        43
+      ],
+      "amg_operator_complexity": 1.1928251121076232,
+      "csr_setup_ms": 8.722322,
+      "degree": 1,
+      "dofs": 27,
+      "elements": 48,
+      "family": "tet",
+      "host_assembly_ms": 0.859298,
+      "nnz": 223,
+      "preconditioner_apply_ms": 0.19756400000000002,
+      "preconditioner_setup_ms": 13.265994,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 30400,
+          "h2d_bytes": 1520,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "operator": "cusparse",
+          "solution_error": 1.8499086920980315e-14,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 19,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.168178
+              },
+              {
+                "calls": 19,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.745242
+              },
+              {
+                "calls": 19,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.583817
+              },
+              {
+                "calls": 19,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.679406
+              },
+              {
+                "calls": 19,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.657152
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 19,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 1.54502
+              }
+            ],
+            "d2h_bytes": 6080,
+            "h2d_bytes": 304,
+            "iterations": 19,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 20,
+              "synchronized_wall_ms": 0.634233
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 5.0537600000000005,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 19,
+              "synchronized_wall_ms": 4.609875
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.038564
+            },
+            "total_ms": 10.336432,
+            "true_relative_residual": 6.65275260461103e-15,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 13.169001,
+            "median_ms": 8.736679,
+            "min_ms": 8.56842,
+            "samples_ms": [
+              8.736679,
+              13.169001,
+              9.056074,
+              8.73166,
+              8.56842
+            ]
+          },
+          "true_relative_residual": 6.65275260461103e-15,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 30400,
+          "h2d_bytes": 1520,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "operator": "specialized",
+          "solution_error": 1.975885905618465e-14,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 19,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.168471
+              },
+              {
+                "calls": 19,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.752046
+              },
+              {
+                "calls": 19,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.582686
+              },
+              {
+                "calls": 19,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.686721
+              },
+              {
+                "calls": 19,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.963906
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 19,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 1.544377
+              }
+            ],
+            "d2h_bytes": 6080,
+            "h2d_bytes": 304,
+            "iterations": 19,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 20,
+              "synchronized_wall_ms": 3.664294
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 4.627909000000001,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 19,
+              "synchronized_wall_ms": 4.930378
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.18422
+            },
+            "total_ms": 13.406801,
+            "true_relative_residual": 7.086225779982755e-15,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 15.630235999999998,
+            "median_ms": 12.789191,
+            "min_ms": 12.201787000000001,
+            "samples_ms": [
+              12.789191,
+              12.499862,
+              15.133184,
+              12.201787000000001,
+              15.630235999999998
+            ]
+          },
+          "true_relative_residual": 7.086225779982755e-15,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 17.104249,
+      "subdivisions": 2
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 2.1968459112412414e-16,
+          "timing": {
+            "max_ms": 0.04903455,
+            "median_ms": 0.0299127,
+            "min_ms": 0.02667385,
+            "samples_ms": [
+              0.0299127,
+              0.02964149,
+              0.02667385,
+              0.026676560000000002,
+              0.03064719,
+              0.04903455,
+              0.03062765
+            ]
+          }
+        },
+        {
+          "kernel_launches": 700,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 2.8296189782119884e-16,
+          "timing": {
+            "max_ms": 0.41222393,
+            "median_ms": 0.38727013,
+            "min_ms": 0.35646083,
+            "samples_ms": [
+              0.35646083,
+              0.38244148,
+              0.40637243,
+              0.39859279,
+              0.38727013,
+              0.41222393,
+              0.37034194
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        125,
+        55,
+        13
+      ],
+      "amg_level_nnz": [
+        2441,
+        1651,
+        133
+      ],
+      "amg_operator_complexity": 1.7308480131093813,
+      "csr_setup_ms": 0.18570199999999998,
+      "degree": 2,
+      "dofs": 125,
+      "elements": 48,
+      "family": "tet",
+      "host_assembly_ms": 2.046028,
+      "nnz": 2441,
+      "preconditioner_apply_ms": 0.323162,
+      "preconditioner_setup_ms": 4.044647,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 95200,
+          "h2d_bytes": 2720,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "operator": "cusparse",
+          "solution_error": 1.1388177071957774e-09,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 34,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.309933
+              },
+              {
+                "calls": 34,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 1.3263
+              },
+              {
+                "calls": 34,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 1.373686
+              },
+              {
+                "calls": 34,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 1.215246
+              },
+              {
+                "calls": 34,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 1.238957
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 34,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.285874
+              },
+              {
+                "calls": 34,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 1.253256
+              },
+              {
+                "calls": 34,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 3.315662
+              },
+              {
+                "calls": 34,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 1.196917
+              },
+              {
+                "calls": 34,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 1.174928
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 34,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 3.064937
+              }
+            ],
+            "d2h_bytes": 19040,
+            "h2d_bytes": 544,
+            "iterations": 34,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 35,
+              "synchronized_wall_ms": 1.13003
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 7.585017000000001,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 34,
+              "synchronized_wall_ms": 16.589245
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.040146
+            },
+            "total_ms": 25.344438,
+            "true_relative_residual": 2.3983370728364865e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 24.40654,
+            "median_ms": 23.126174,
+            "min_ms": 21.173593,
+            "samples_ms": [
+              22.755190000000002,
+              21.173593,
+              24.40654,
+              23.126174,
+              24.344813
+            ]
+          },
+          "true_relative_residual": 2.3983370728364865e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 95200,
+          "h2d_bytes": 2720,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "operator": "specialized",
+          "solution_error": 1.138810505737978e-09,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 34,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.30731
+              },
+              {
+                "calls": 34,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 1.648723
+              },
+              {
+                "calls": 34,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 1.330017
+              },
+              {
+                "calls": 34,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 1.195734
+              },
+              {
+                "calls": 34,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 1.236015
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 34,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.590259
+              },
+              {
+                "calls": 34,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 1.251433
+              },
+              {
+                "calls": 34,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 1.058808
+              },
+              {
+                "calls": 34,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 2.176282
+              },
+              {
+                "calls": 34,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 1.174656
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 34,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 4.048167
+              }
+            ],
+            "d2h_bytes": 19040,
+            "h2d_bytes": 544,
+            "iterations": 34,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 35,
+              "synchronized_wall_ms": 11.812087
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 11.255114000000006,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 34,
+              "synchronized_wall_ms": 16.530803
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.338181
+            },
+            "total_ms": 39.936185,
+            "true_relative_residual": 2.3986322020741917e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 35.704184,
+            "median_ms": 33.730973999999996,
+            "min_ms": 32.508586,
+            "samples_ms": [
+              32.508586,
+              32.797324,
+              34.923073,
+              35.704184,
+              33.730973999999996
+            ]
+          },
+          "true_relative_residual": 2.3986322020741917e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 17.24137,
+      "subdivisions": 2
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 1.6088368993384636e-16,
+          "timing": {
+            "max_ms": 0.030646279999999998,
+            "median_ms": 0.02966172,
+            "min_ms": 0.026675459999999998,
+            "samples_ms": [
+              0.029900780000000002,
+              0.03060591,
+              0.026681370000000003,
+              0.02667647,
+              0.030646279999999998,
+              0.02966172,
+              0.026675459999999998
+            ]
+          }
+        },
+        {
+          "kernel_launches": 1400,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 3.844424625665778e-16,
+          "timing": {
+            "max_ms": 0.08729486,
+            "median_ms": 0.06260416,
+            "min_ms": 0.05403021,
+            "samples_ms": [
+              0.0772926,
+              0.058096220000000004,
+              0.06260416,
+              0.0584031,
+              0.05403021,
+              0.08729486,
+              0.06870142
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        125,
+        12
+      ],
+      "amg_level_nnz": [
+        2197,
+        104
+      ],
+      "amg_operator_complexity": 1.047337278106509,
+      "csr_setup_ms": 0.07328899999999999,
+      "degree": 2,
+      "dofs": 125,
+      "elements": 8,
+      "family": "hex",
+      "host_assembly_ms": 2.0841000000000003,
+      "nnz": 4913,
+      "preconditioner_apply_ms": 0.20572000000000001,
+      "preconditioner_setup_ms": 2.102656,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 3,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 196000,
+          "h2d_bytes": 3920,
+          "iterations": [
+            49,
+            49,
+            49,
+            49,
+            49
+          ],
+          "operator": "cusparse",
+          "solution_error": 5.833694906738707e-09,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 49,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.444833
+              },
+              {
+                "calls": 49,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 1.894647
+              },
+              {
+                "calls": 49,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 1.534358
+              },
+              {
+                "calls": 49,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 4.51506
+              },
+              {
+                "calls": 49,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 2.479555
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 49,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 4.236769
+              }
+            ],
+            "d2h_bytes": 39200,
+            "h2d_bytes": 784,
+            "iterations": 49,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 50,
+              "synchronized_wall_ms": 1.63082
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 11.993336999999997,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 49,
+              "synchronized_wall_ms": 16.959942
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.038343
+            },
+            "total_ms": 30.622442,
+            "true_relative_residual": 8.773727759007252e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 27.47165,
+            "median_ms": 25.898298,
+            "min_ms": 23.479152,
+            "samples_ms": [
+              27.47165,
+              23.479152,
+              25.898298,
+              24.05812,
+              26.740063000000003
+            ]
+          },
+          "true_relative_residual": 8.773727759007252e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 196000,
+          "h2d_bytes": 3920,
+          "iterations": [
+            49,
+            49,
+            49,
+            49,
+            49
+          ],
+          "operator": "specialized",
+          "solution_error": 5.833694688019396e-09,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 49,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.443947
+              },
+              {
+                "calls": 49,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 2.248728
+              },
+              {
+                "calls": 49,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 1.813521
+              },
+              {
+                "calls": 49,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 1.792417
+              },
+              {
+                "calls": 49,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 1.777892
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 49,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 4.574822
+              }
+            ],
+            "d2h_bytes": 39200,
+            "h2d_bytes": 784,
+            "iterations": 49,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 50,
+              "synchronized_wall_ms": 3.045094
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 14.857147999999999,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 49,
+              "synchronized_wall_ms": 13.260483
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.061247
+            },
+            "total_ms": 31.223972,
+            "true_relative_residual": 8.773728026359826e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 28.772064,
+            "median_ms": 28.386865,
+            "min_ms": 27.397358999999998,
+            "samples_ms": [
+              27.878671,
+              27.397358999999998,
+              28.772064,
+              28.386865,
+              28.701361000000002
+            ]
+          },
+          "true_relative_residual": 8.773728026359826e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 18.841202000000003,
+      "subdivisions": 2
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 3.5191619133753975e-16,
+          "timing": {
+            "max_ms": 0.03036465,
+            "median_ms": 0.0292277,
+            "min_ms": 0.0262214,
+            "samples_ms": [
+              0.02622732,
+              0.02945743,
+              0.0292277,
+              0.0262214,
+              0.03030895,
+              0.03036465,
+              0.026237629999999998
+            ]
+          }
+        },
+        {
+          "kernel_launches": 1400,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 1.831468493954006e-15,
+          "timing": {
+            "max_ms": 0.06734364,
+            "median_ms": 0.06338564,
+            "min_ms": 0.0633062,
+            "samples_ms": [
+              0.0634165,
+              0.0633062,
+              0.06734364,
+              0.06338294,
+              0.06333705,
+              0.06466366,
+              0.06338564
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        343,
+        94,
+        36,
+        11
+      ],
+      "amg_level_nnz": [
+        6859,
+        3117,
+        570,
+        65
+      ],
+      "amg_operator_complexity": 1.5470185158186325,
+      "csr_setup_ms": 0.31230199999999997,
+      "degree": 3,
+      "dofs": 343,
+      "elements": 8,
+      "family": "hex",
+      "host_assembly_ms": 8.640187000000001,
+      "nnz": 29791,
+      "preconditioner_apply_ms": 0.7586080000000001,
+      "preconditioner_setup_ms": 7.067636,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 990880,
+          "h2d_bytes": 17360,
+          "iterations": [
+            217,
+            217,
+            217,
+            217,
+            217
+          ],
+          "operator": "cusparse",
+          "solution_error": 2.859529228256728e-08,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 217,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 30.531008
+              },
+              {
+                "calls": 217,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 36.919909
+              },
+              {
+                "calls": 217,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 33.040912
+              },
+              {
+                "calls": 217,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 43.467026
+              },
+              {
+                "calls": 217,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 38.319127
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 217,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 28.966706
+              },
+              {
+                "calls": 217,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 41.795808
+              },
+              {
+                "calls": 217,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 37.319457
+              },
+              {
+                "calls": 217,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 36.672393
+              },
+              {
+                "calls": 217,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 39.166852
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 217,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 31.165456
+              },
+              {
+                "calls": 217,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 38.82414
+              },
+              {
+                "calls": 217,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 38.504644
+              },
+              {
+                "calls": 217,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 38.946828
+              },
+              {
+                "calls": 217,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 38.91351
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 217,
+                "level": 3,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 50.359863
+              }
+            ],
+            "d2h_bytes": 198176,
+            "h2d_bytes": 3472,
+            "iterations": 217,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 221,
+              "synchronized_wall_ms": 35.363947
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 192.5078799999999,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 217,
+              "synchronized_wall_ms": 641.893591
+            },
+            "residual": {
+              "calls": 7,
+              "synchronized_wall_ms": 2.769128
+            },
+            "total_ms": 872.534546,
+            "true_relative_residual": 9.18650200096974e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 238.05082,
+            "median_ms": 195.019589,
+            "min_ms": 193.034708,
+            "samples_ms": [
+              193.034708,
+              194.613881,
+              195.019589,
+              223.78643300000002,
+              238.05082
+            ]
+          },
+          "true_relative_residual": 9.186501800380258e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 990880,
+          "h2d_bytes": 17360,
+          "iterations": [
+            217,
+            217,
+            217,
+            217,
+            217
+          ],
+          "operator": "specialized",
+          "solution_error": 2.859528973815845e-08,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 217,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 73.289365
+              },
+              {
+                "calls": 217,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 72.399936
+              },
+              {
+                "calls": 217,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 71.76265
+              },
+              {
+                "calls": 217,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 71.132707
+              },
+              {
+                "calls": 217,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 68.005205
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 217,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 69.667857
+              },
+              {
+                "calls": 217,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 78.30189
+              },
+              {
+                "calls": 217,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 67.867775
+              },
+              {
+                "calls": 217,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 70.837492
+              },
+              {
+                "calls": 217,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 71.487564
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 217,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 63.050011
+              },
+              {
+                "calls": 217,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 70.016697
+              },
+              {
+                "calls": 217,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 69.840696
+              },
+              {
+                "calls": 217,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 73.387889
+              },
+              {
+                "calls": 217,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 75.092062
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 217,
+                "level": 3,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 82.033939
+              }
+            ],
+            "d2h_bytes": 198176,
+            "h2d_bytes": 3472,
+            "iterations": 217,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 221,
+              "synchronized_wall_ms": 84.162953
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 329.05973300000005,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 217,
+              "synchronized_wall_ms": 1217.766492
+            },
+            "residual": {
+              "calls": 7,
+              "synchronized_wall_ms": 2.518423
+            },
+            "total_ms": 1633.507601,
+            "true_relative_residual": 9.186501525753809e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 482.194324,
+            "median_ms": 476.158075,
+            "min_ms": 414.946495,
+            "samples_ms": [
+              476.158075,
+              478.65295299999997,
+              414.946495,
+              469.30818,
+              482.194324
+            ]
+          },
+          "true_relative_residual": 9.186501525753809e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 18.816635,
+      "subdivisions": 2
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 1.9094189034378926e-16,
+          "timing": {
+            "max_ms": 0.04418455,
+            "median_ms": 0.035776010000000004,
+            "min_ms": 0.033763589999999996,
+            "samples_ms": [
+              0.033763589999999996,
+              0.03755618,
+              0.04418455,
+              0.03381248,
+              0.03923877,
+              0.035776010000000004,
+              0.03568494
+            ]
+          }
+        },
+        {
+          "kernel_launches": 700,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 2.1783749606897993e-16,
+          "timing": {
+            "max_ms": 0.25913977,
+            "median_ms": 0.24379749,
+            "min_ms": 0.23360487,
+            "samples_ms": [
+              0.23849704,
+              0.25734937999999996,
+              0.25913977,
+              0.23810309000000002,
+              0.25681687000000003,
+              0.24379749,
+              0.23360487
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        125,
+        72,
+        37,
+        17,
+        6
+      ],
+      "amg_level_nnz": [
+        1333,
+        1162,
+        619,
+        193,
+        27
+      ],
+      "amg_operator_complexity": 2.50112528132033,
+      "csr_setup_ms": 0.716067,
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "family": "tet",
+      "host_assembly_ms": 3.183624,
+      "nnz": 1333,
+      "preconditioner_apply_ms": 0.871301,
+      "preconditioner_setup_ms": 13.790607999999999,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 106560,
+          "h2d_bytes": 2880,
+          "iterations": [
+            36,
+            36,
+            36,
+            36,
+            36
+          ],
+          "operator": "cusparse",
+          "solution_error": 3.2893845579279185e-09,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 36,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 13.192667
+              },
+              {
+                "calls": 36,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 15.950903
+              },
+              {
+                "calls": 36,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 17.699377
+              },
+              {
+                "calls": 36,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 15.892563
+              },
+              {
+                "calls": 36,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 19.87307
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 36,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 14.627175
+              },
+              {
+                "calls": 36,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 17.73393
+              },
+              {
+                "calls": 36,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 16.568736
+              },
+              {
+                "calls": 36,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 18.02192
+              },
+              {
+                "calls": 36,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 14.783017
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 36,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 13.544075
+              },
+              {
+                "calls": 36,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 15.424476
+              },
+              {
+                "calls": 36,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 16.455458
+              },
+              {
+                "calls": 36,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 14.060569
+              },
+              {
+                "calls": 36,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 17.79072
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 36,
+                "level": 3,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 13.775738
+              },
+              {
+                "calls": 36,
+                "level": 3,
+                "phase": "Residual",
+                "synchronized_wall_ms": 16.786808
+              },
+              {
+                "calls": 36,
+                "level": 3,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 16.862941
+              },
+              {
+                "calls": 36,
+                "level": 3,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 20.039838
+              },
+              {
+                "calls": 36,
+                "level": 3,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 18.050805
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 36,
+                "level": 4,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 16.277801
+              }
+            ],
+            "d2h_bytes": 21312,
+            "h2d_bytes": 576,
+            "iterations": 36,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 37,
+              "synchronized_wall_ms": 16.527958
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 72.69539400000002,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 36,
+              "synchronized_wall_ms": 357.814103
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.367777
+            },
+            "total_ms": 447.405232,
+            "true_relative_residual": 4.221378649387153e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 82.060285,
+            "median_ms": 80.61667899999999,
+            "min_ms": 78.553929,
+            "samples_ms": [
+              82.060285,
+              79.981465,
+              80.61667899999999,
+              78.553929,
+              80.624834
+            ]
+          },
+          "true_relative_residual": 4.221378649387153e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 106560,
+          "h2d_bytes": 2880,
+          "iterations": [
+            36,
+            36,
+            36,
+            36,
+            36
+          ],
+          "operator": "specialized",
+          "solution_error": 3.2893835165405748e-09,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 36,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 11.042968
+              },
+              {
+                "calls": 36,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 10.933211
+              },
+              {
+                "calls": 36,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 11.795098
+              },
+              {
+                "calls": 36,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 12.17686
+              },
+              {
+                "calls": 36,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 14.886589
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 36,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 9.194769
+              },
+              {
+                "calls": 36,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 11.656473
+              },
+              {
+                "calls": 36,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 14.911262
+              },
+              {
+                "calls": 36,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 13.879884
+              },
+              {
+                "calls": 36,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 11.963124
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 36,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 10.375885
+              },
+              {
+                "calls": 36,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 12.913048
+              },
+              {
+                "calls": 36,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 14.970014
+              },
+              {
+                "calls": 36,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 10.594693
+              },
+              {
+                "calls": 36,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 12.054557
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 36,
+                "level": 3,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 10.052613
+              },
+              {
+                "calls": 36,
+                "level": 3,
+                "phase": "Residual",
+                "synchronized_wall_ms": 11.611866
+              },
+              {
+                "calls": 36,
+                "level": 3,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 11.915571
+              },
+              {
+                "calls": 36,
+                "level": 3,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 14.489124
+              },
+              {
+                "calls": 36,
+                "level": 3,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 17.19871
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 36,
+                "level": 4,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 12.397466
+              }
+            ],
+            "d2h_bytes": 21312,
+            "h2d_bytes": 576,
+            "iterations": 36,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 37,
+              "synchronized_wall_ms": 19.314399
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 64.91863600000005,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 36,
+              "synchronized_wall_ms": 272.199598
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.521669
+            },
+            "total_ms": 356.954302,
+            "true_relative_residual": 4.2213789431187567e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 87.528749,
+            "median_ms": 74.069018,
+            "min_ms": 41.040347,
+            "samples_ms": [
+              85.28341400000001,
+              87.528749,
+              74.069018,
+              41.040347,
+              67.863146
+            ]
+          },
+          "true_relative_residual": 4.2213789431187567e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 14.095417000000001,
+      "subdivisions": 4
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 2.273549178818527e-16,
+          "timing": {
+            "max_ms": 0.043604050000000005,
+            "median_ms": 0.03899772,
+            "min_ms": 0.03624309,
+            "samples_ms": [
+              0.03775406,
+              0.03989562000000001,
+              0.043604050000000005,
+              0.0396261,
+              0.03624309,
+              0.03798479,
+              0.03899772
+            ]
+          }
+        },
+        {
+          "kernel_launches": 700,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 2.7928961588310865e-16,
+          "timing": {
+            "max_ms": 0.73367078,
+            "median_ms": 0.71416421,
+            "min_ms": 0.69732218,
+            "samples_ms": [
+              0.7189395599999999,
+              0.72339841,
+              0.69732218,
+              0.70026696,
+              0.71416421,
+              0.7114406400000001,
+              0.73367078
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        729,
+        337,
+        135,
+        42,
+        7
+      ],
+      "amg_level_nnz": [
+        17025,
+        15818,
+        5484,
+        983,
+        47
+      ],
+      "amg_operator_complexity": 2.311718061674009,
+      "csr_setup_ms": 0.787282,
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "family": "tet",
+      "host_assembly_ms": 15.076626,
+      "nnz": 17025,
+      "preconditioner_apply_ms": 0.889406,
+      "preconditioner_setup_ms": 35.17012,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 255360,
+          "h2d_bytes": 4480,
+          "iterations": [
+            56,
+            56,
+            56,
+            56,
+            56
+          ],
+          "operator": "cusparse",
+          "solution_error": 1.1453902114513287e-08,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 56,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 19.486444
+              },
+              {
+                "calls": 56,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 18.022386
+              },
+              {
+                "calls": 56,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 16.782658
+              },
+              {
+                "calls": 56,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 15.246351
+              },
+              {
+                "calls": 56,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 16.122051
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 56,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 13.032694
+              },
+              {
+                "calls": 56,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 17.901295
+              },
+              {
+                "calls": 56,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 16.21543
+              },
+              {
+                "calls": 56,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 16.231445
+              },
+              {
+                "calls": 56,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 14.536727
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 56,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 13.476566
+              },
+              {
+                "calls": 56,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 19.875421
+              },
+              {
+                "calls": 56,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 16.515
+              },
+              {
+                "calls": 56,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 16.422089
+              },
+              {
+                "calls": 56,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 15.177566
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 56,
+                "level": 3,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 14.151566
+              },
+              {
+                "calls": 56,
+                "level": 3,
+                "phase": "Residual",
+                "synchronized_wall_ms": 17.783461
+              },
+              {
+                "calls": 56,
+                "level": 3,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 16.851385
+              },
+              {
+                "calls": 56,
+                "level": 3,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 18.013937
+              },
+              {
+                "calls": 56,
+                "level": 3,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 16.702938
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 56,
+                "level": 4,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 17.614244
+              }
+            ],
+            "d2h_bytes": 51072,
+            "h2d_bytes": 896,
+            "iterations": 56,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 57,
+              "synchronized_wall_ms": 14.482528
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 82.68406999999996,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 56,
+              "synchronized_wall_ms": 361.678593
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.0423
+            },
+            "total_ms": 458.88749099999995,
+            "true_relative_residual": 7.450105971524244e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 140.925917,
+            "median_ms": 138.04702,
+            "min_ms": 136.56595299999998,
+            "samples_ms": [
+              140.925917,
+              139.377733,
+              138.04702,
+              137.763133,
+              136.56595299999998
+            ]
+          },
+          "true_relative_residual": 7.450105971524244e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 255360,
+          "h2d_bytes": 4480,
+          "iterations": [
+            56,
+            56,
+            56,
+            56,
+            56
+          ],
+          "operator": "specialized",
+          "solution_error": 1.1453901934250763e-08,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 56,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 19.023255
+              },
+              {
+                "calls": 56,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 22.131594
+              },
+              {
+                "calls": 56,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 21.09791
+              },
+              {
+                "calls": 56,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 19.603326
+              },
+              {
+                "calls": 56,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 18.822642
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 56,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 16.892719
+              },
+              {
+                "calls": 56,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 18.571216
+              },
+              {
+                "calls": 56,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 18.977116
+              },
+              {
+                "calls": 56,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 19.038947
+              },
+              {
+                "calls": 56,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 17.120969
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 56,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 17.015837
+              },
+              {
+                "calls": 56,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 21.911178
+              },
+              {
+                "calls": 56,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 20.030368
+              },
+              {
+                "calls": 56,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 17.589516
+              },
+              {
+                "calls": 56,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 23.278243
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 56,
+                "level": 3,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 18.452077
+              },
+              {
+                "calls": 56,
+                "level": 3,
+                "phase": "Residual",
+                "synchronized_wall_ms": 18.94677
+              },
+              {
+                "calls": 56,
+                "level": 3,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 18.889062
+              },
+              {
+                "calls": 56,
+                "level": 3,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 19.257005
+              },
+              {
+                "calls": 56,
+                "level": 3,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 19.988698
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 56,
+                "level": 4,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 22.008103
+              }
+            ],
+            "d2h_bytes": 51072,
+            "h2d_bytes": 896,
+            "iterations": 56,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 57,
+              "synchronized_wall_ms": 47.613555
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 107.44556699999993,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 56,
+              "synchronized_wall_ms": 429.563592
+            },
+            "residual": {
+              "calls": 1,
+              "synchronized_wall_ms": 0.863426
+            },
+            "total_ms": 585.48614,
+            "true_relative_residual": 7.450106055750258e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 175.024245,
+            "median_ms": 167.920501,
+            "min_ms": 163.215443,
+            "samples_ms": [
+              165.943554,
+              167.920501,
+              163.215443,
+              170.244476,
+              175.024245
+            ]
+          },
+          "true_relative_residual": 7.450106055750258e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 14.858322,
+      "subdivisions": 4
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 1.7840155827238253e-16,
+          "timing": {
+            "max_ms": 0.03942933,
+            "median_ms": 0.03863803,
+            "min_ms": 0.03488843,
+            "samples_ms": [
+              0.03670086,
+              0.03869434,
+              0.03756289,
+              0.03866228,
+              0.03942933,
+              0.03488843,
+              0.03863803
+            ]
+          }
+        },
+        {
+          "kernel_launches": 1400,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 2.520397071016613e-16,
+          "timing": {
+            "max_ms": 0.09799884,
+            "median_ms": 0.08033436999999999,
+            "min_ms": 0.07034613,
+            "samples_ms": [
+              0.07034613,
+              0.09177555000000001,
+              0.08105904,
+              0.07404113000000001,
+              0.07225325,
+              0.09799884,
+              0.08033436999999999
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        729,
+        181,
+        59,
+        22,
+        10
+      ],
+      "amg_level_nnz": [
+        15625,
+        6959,
+        1175,
+        170,
+        37
+      ],
+      "amg_operator_complexity": 1.533824,
+      "csr_setup_ms": 0.8233010000000001,
+      "degree": 2,
+      "dofs": 729,
+      "elements": 64,
+      "family": "hex",
+      "host_assembly_ms": 16.259578,
+      "nnz": 35937,
+      "preconditioner_apply_ms": 1.091639,
+      "preconditioner_setup_ms": 22.125807000000002,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 3,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 604800,
+          "h2d_bytes": 10800,
+          "iterations": [
+            135,
+            135,
+            135,
+            135,
+            135
+          ],
+          "operator": "cusparse",
+          "solution_error": 4.718846392192194e-08,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 135,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 45.214225
+              },
+              {
+                "calls": 135,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 46.873762
+              },
+              {
+                "calls": 135,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 49.448626
+              },
+              {
+                "calls": 135,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 48.655574
+              },
+              {
+                "calls": 135,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 53.125015
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 135,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 43.611905
+              },
+              {
+                "calls": 135,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 46.117738
+              },
+              {
+                "calls": 135,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 45.691633
+              },
+              {
+                "calls": 135,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 47.859086
+              },
+              {
+                "calls": 135,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 53.890327
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 135,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 43.302476
+              },
+              {
+                "calls": 135,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 50.95543
+              },
+              {
+                "calls": 135,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 48.245137
+              },
+              {
+                "calls": 135,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 49.479547
+              },
+              {
+                "calls": 135,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 47.219963
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 135,
+                "level": 3,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 40.905033
+              },
+              {
+                "calls": 135,
+                "level": 3,
+                "phase": "Residual",
+                "synchronized_wall_ms": 46.968563
+              },
+              {
+                "calls": 135,
+                "level": 3,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 44.833474
+              },
+              {
+                "calls": 135,
+                "level": 3,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 52.75853
+              },
+              {
+                "calls": 135,
+                "level": 3,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 52.039328
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 135,
+                "level": 4,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 54.408168
+              }
+            ],
+            "d2h_bytes": 120960,
+            "h2d_bytes": 2160,
+            "iterations": 135,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 138,
+              "synchronized_wall_ms": 45.679464
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 237.11366499999986,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 135,
+              "synchronized_wall_ms": 1057.575078
+            },
+            "residual": {
+              "calls": 5,
+              "synchronized_wall_ms": 1.954884
+            },
+            "total_ms": 1342.323091,
+            "true_relative_residual": 8.598256884149096e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 337.775246,
+            "median_ms": 331.74809300000004,
+            "min_ms": 294.659536,
+            "samples_ms": [
+              331.74809300000004,
+              331.463513,
+              337.775246,
+              294.659536,
+              334.995276
+            ]
+          },
+          "true_relative_residual": 8.598256884149096e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 604800,
+          "h2d_bytes": 10800,
+          "iterations": [
+            135,
+            135,
+            135,
+            135,
+            135
+          ],
+          "operator": "specialized",
+          "solution_error": 4.718846385601297e-08,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 135,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 50.891743
+              },
+              {
+                "calls": 135,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 46.84226
+              },
+              {
+                "calls": 135,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 44.023805
+              },
+              {
+                "calls": 135,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 47.958112
+              },
+              {
+                "calls": 135,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 49.186192
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 135,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 47.569323
+              },
+              {
+                "calls": 135,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 48.975705
+              },
+              {
+                "calls": 135,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 47.045139
+              },
+              {
+                "calls": 135,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 46.694935
+              },
+              {
+                "calls": 135,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 52.16567
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 135,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 47.900203
+              },
+              {
+                "calls": 135,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 48.867432
+              },
+              {
+                "calls": 135,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 50.092465
+              },
+              {
+                "calls": 135,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 51.766023
+              },
+              {
+                "calls": 135,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 49.108351
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 135,
+                "level": 3,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 44.378331
+              },
+              {
+                "calls": 135,
+                "level": 3,
+                "phase": "Residual",
+                "synchronized_wall_ms": 46.288848
+              },
+              {
+                "calls": 135,
+                "level": 3,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 48.052109
+              },
+              {
+                "calls": 135,
+                "level": 3,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 48.287754
+              },
+              {
+                "calls": 135,
+                "level": 3,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 47.04111
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 135,
+                "level": 4,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 58.730009
+              }
+            ],
+            "d2h_bytes": 120960,
+            "h2d_bytes": 2160,
+            "iterations": 135,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 138,
+              "synchronized_wall_ms": 51.857349
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 236.45059899999978,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 135,
+              "synchronized_wall_ms": 1072.038894
+            },
+            "residual": {
+              "calls": 5,
+              "synchronized_wall_ms": 0.60228
+            },
+            "total_ms": 1360.949122,
+            "true_relative_residual": 8.598256860970564e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 340.45381000000003,
+            "median_ms": 323.606838,
+            "min_ms": 298.325663,
+            "samples_ms": [
+              334.84891700000003,
+              340.45381000000003,
+              298.325663,
+              320.84845,
+              323.606838
+            ]
+          },
+          "true_relative_residual": 8.598256860970564e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 18.878582,
+      "subdivisions": 4
+    },
+    {
+      "actions": [
+        {
+          "kernel_launches": 0,
+          "library_operations": 700,
+          "operator": "cusparse",
+          "relative_error": 3.647312473115028e-16,
+          "timing": {
+            "max_ms": 0.06595852,
+            "median_ms": 0.04924133,
+            "min_ms": 0.048021619999999994,
+            "samples_ms": [
+              0.048021619999999994,
+              0.04921336999999999,
+              0.04924133,
+              0.06595852,
+              0.04928972,
+              0.05686718,
+              0.04823592
+            ]
+          }
+        },
+        {
+          "kernel_launches": 1400,
+          "library_operations": 0,
+          "operator": "specialized",
+          "relative_error": 6.587444458735068e-16,
+          "timing": {
+            "max_ms": 0.10807725000000001,
+            "median_ms": 0.09398273,
+            "min_ms": 0.08495452,
+            "samples_ms": [
+              0.10471958,
+              0.09653557,
+              0.08721390000000001,
+              0.08495452,
+              0.10807725000000001,
+              0.09398273,
+              0.08504218
+            ]
+          }
+        }
+      ],
+      "amg_level_dofs": [
+        2197,
+        1479,
+        844,
+        443,
+        205,
+        62,
+        27,
+        12
+      ],
+      "amg_level_nnz": [
+        50653,
+        67057,
+        51869,
+        24508,
+        7655,
+        999,
+        200,
+        37
+      ],
+      "amg_operator_complexity": 4.007225633230016,
+      "csr_setup_ms": 1.626744,
+      "degree": 3,
+      "dofs": 2197,
+      "elements": 64,
+      "family": "hex",
+      "host_assembly_ms": 87.36007799999999,
+      "nnz": 226981,
+      "preconditioner_apply_ms": 1.7003229999999998,
+      "preconditioner_setup_ms": 90.650564,
+      "preconditioner_warm_allocations": 0,
+      "preconditioner_warm_d2h_bytes": 0,
+      "preconditioner_warm_h2d_bytes": 0,
+      "quadrature": 4,
+      "solves": [
+        {
+          "converged": true,
+          "d2h_bytes": 962880,
+          "h2d_bytes": 16960,
+          "iterations": [
+            212,
+            212,
+            212,
+            212,
+            212
+          ],
+          "operator": "cusparse",
+          "solution_error": 5.3255313754943777e-08,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 212,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 72.139961
+              },
+              {
+                "calls": 212,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 72.262632
+              },
+              {
+                "calls": 212,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 70.19583
+              },
+              {
+                "calls": 212,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 81.210737
+              },
+              {
+                "calls": 212,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 71.943501
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 69.009173
+              },
+              {
+                "calls": 212,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 68.239559
+              },
+              {
+                "calls": 212,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 68.437785
+              },
+              {
+                "calls": 212,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 75.997912
+              },
+              {
+                "calls": 212,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 81.679995
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 68.611565
+              },
+              {
+                "calls": 212,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 71.007183
+              },
+              {
+                "calls": 212,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 74.144295
+              },
+              {
+                "calls": 212,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 73.815198
+              },
+              {
+                "calls": 212,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 70.548614
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 3,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 68.641465
+              },
+              {
+                "calls": 212,
+                "level": 3,
+                "phase": "Residual",
+                "synchronized_wall_ms": 71.387984
+              },
+              {
+                "calls": 212,
+                "level": 3,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 66.322741
+              },
+              {
+                "calls": 212,
+                "level": 3,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 66.839365
+              },
+              {
+                "calls": 212,
+                "level": 3,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 70.429687
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 4,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 63.067643
+              },
+              {
+                "calls": 212,
+                "level": 4,
+                "phase": "Residual",
+                "synchronized_wall_ms": 66.95097
+              },
+              {
+                "calls": 212,
+                "level": 4,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 69.479695
+              },
+              {
+                "calls": 212,
+                "level": 4,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 71.821386
+              },
+              {
+                "calls": 212,
+                "level": 4,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 80.328924
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 5,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 71.023935
+              },
+              {
+                "calls": 212,
+                "level": 5,
+                "phase": "Residual",
+                "synchronized_wall_ms": 69.595791
+              },
+              {
+                "calls": 212,
+                "level": 5,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 69.080942
+              },
+              {
+                "calls": 212,
+                "level": 5,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 71.670715
+              },
+              {
+                "calls": 212,
+                "level": 5,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 72.523881
+              },
+              {
+                "calls": 0,
+                "level": 5,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 6,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 69.334997
+              },
+              {
+                "calls": 212,
+                "level": 6,
+                "phase": "Residual",
+                "synchronized_wall_ms": 68.004312
+              },
+              {
+                "calls": 212,
+                "level": 6,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 68.210309
+              },
+              {
+                "calls": 212,
+                "level": 6,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 66.075132
+              },
+              {
+                "calls": 212,
+                "level": 6,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 75.249795
+              },
+              {
+                "calls": 0,
+                "level": 6,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 7,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 7,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 7,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 7,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 7,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 7,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 79.334735
+              }
+            ],
+            "d2h_bytes": 192576,
+            "h2d_bytes": 3392,
+            "iterations": 212,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 216,
+              "synchronized_wall_ms": 71.135831
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 384.7649630000001,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 212,
+              "synchronized_wall_ms": 2635.568432
+            },
+            "residual": {
+              "calls": 7,
+              "synchronized_wall_ms": 1.872188
+            },
+            "total_ms": 3093.341414,
+            "true_relative_residual": 9.814277817173812e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 654.784259,
+            "median_ms": 649.664306,
+            "min_ms": 608.875143,
+            "samples_ms": [
+              649.664306,
+              654.784259,
+              647.851237,
+              608.875143,
+              650.0139740000001
+            ]
+          },
+          "true_relative_residual": 9.814277745264595e-10,
+          "warm_allocations": 0
+        },
+        {
+          "converged": true,
+          "d2h_bytes": 962880,
+          "h2d_bytes": 16960,
+          "iterations": [
+            212,
+            212,
+            212,
+            212,
+            212
+          ],
+          "operator": "specialized",
+          "solution_error": 5.325531334237888e-08,
+          "synchronized_profile": {
+            "amg_levels": [
+              {
+                "calls": 212,
+                "level": 0,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 75.321149
+              },
+              {
+                "calls": 212,
+                "level": 0,
+                "phase": "Residual",
+                "synchronized_wall_ms": 88.7429
+              },
+              {
+                "calls": 212,
+                "level": 0,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 77.202109
+              },
+              {
+                "calls": 212,
+                "level": 0,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 73.388436
+              },
+              {
+                "calls": 212,
+                "level": 0,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 76.752245
+              },
+              {
+                "calls": 0,
+                "level": 0,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 1,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 67.638291
+              },
+              {
+                "calls": 212,
+                "level": 1,
+                "phase": "Residual",
+                "synchronized_wall_ms": 83.656294
+              },
+              {
+                "calls": 212,
+                "level": 1,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 77.929523
+              },
+              {
+                "calls": 212,
+                "level": 1,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 72.957631
+              },
+              {
+                "calls": 212,
+                "level": 1,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 78.333391
+              },
+              {
+                "calls": 0,
+                "level": 1,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 2,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 70.711558
+              },
+              {
+                "calls": 212,
+                "level": 2,
+                "phase": "Residual",
+                "synchronized_wall_ms": 79.963421
+              },
+              {
+                "calls": 212,
+                "level": 2,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 71.115334
+              },
+              {
+                "calls": 212,
+                "level": 2,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 71.705913
+              },
+              {
+                "calls": 212,
+                "level": 2,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 75.179322
+              },
+              {
+                "calls": 0,
+                "level": 2,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 3,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 74.772091
+              },
+              {
+                "calls": 212,
+                "level": 3,
+                "phase": "Residual",
+                "synchronized_wall_ms": 80.658886
+              },
+              {
+                "calls": 212,
+                "level": 3,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 78.721909
+              },
+              {
+                "calls": 212,
+                "level": 3,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 75.028138
+              },
+              {
+                "calls": 212,
+                "level": 3,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 71.779328
+              },
+              {
+                "calls": 0,
+                "level": 3,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 4,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 70.067675
+              },
+              {
+                "calls": 212,
+                "level": 4,
+                "phase": "Residual",
+                "synchronized_wall_ms": 80.844972
+              },
+              {
+                "calls": 212,
+                "level": 4,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 75.114316
+              },
+              {
+                "calls": 212,
+                "level": 4,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 75.671348
+              },
+              {
+                "calls": 212,
+                "level": 4,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 72.016531
+              },
+              {
+                "calls": 0,
+                "level": 4,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 5,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 71.474441
+              },
+              {
+                "calls": 212,
+                "level": 5,
+                "phase": "Residual",
+                "synchronized_wall_ms": 80.272885
+              },
+              {
+                "calls": 212,
+                "level": 5,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 73.233507
+              },
+              {
+                "calls": 212,
+                "level": 5,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 76.490484
+              },
+              {
+                "calls": 212,
+                "level": 5,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 85.353168
+              },
+              {
+                "calls": 0,
+                "level": 5,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 6,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 70.50865
+              },
+              {
+                "calls": 212,
+                "level": 6,
+                "phase": "Residual",
+                "synchronized_wall_ms": 78.332396
+              },
+              {
+                "calls": 212,
+                "level": 6,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 75.194134
+              },
+              {
+                "calls": 212,
+                "level": 6,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 81.542446
+              },
+              {
+                "calls": 212,
+                "level": 6,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 74.688489
+              },
+              {
+                "calls": 0,
+                "level": 6,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 7,
+                "phase": "PreSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 7,
+                "phase": "Residual",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 7,
+                "phase": "Restriction",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 7,
+                "phase": "Prolongation",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 0,
+                "level": 7,
+                "phase": "PostSmooth",
+                "synchronized_wall_ms": 0.0
+              },
+              {
+                "calls": 212,
+                "level": 7,
+                "phase": "CoarseSolve",
+                "synchronized_wall_ms": 83.814924
+              }
+            ],
+            "d2h_bytes": 192576,
+            "h2d_bytes": 3392,
+            "iterations": 212,
+            "method": "synchronized_wall_boundaries",
+            "operator": {
+              "calls": 216,
+              "synchronized_wall_ms": 80.066941
+            },
+            "other_includes": "Krylov algebra, reductions, control transfers, validation, host work and unattributed synchronization; not pure orthogonalization time",
+            "other_solve_work_ms": 385.161063,
+            "perturbs_execution": true,
+            "preconditioner": {
+              "calls": 212,
+              "synchronized_wall_ms": 2813.639111
+            },
+            "residual": {
+              "calls": 7,
+              "synchronized_wall_ms": 3.346091
+            },
+            "total_ms": 3282.213206,
+            "true_relative_residual": 9.814277830978588e-10,
+            "warm_allocations": 0
+          },
+          "timing": {
+            "max_ms": 665.090307,
+            "median_ms": 656.69637,
+            "min_ms": 611.0631920000001,
+            "samples_ms": [
+              621.850147,
+              611.0631920000001,
+              656.69637,
+              659.2533149999999,
+              665.090307
+            ]
+          },
+          "true_relative_residual": 9.814277830978588e-10,
+          "warm_allocations": 0
+        }
+      ],
+      "specialized_setup_ms": 20.491398,
+      "subdivisions": 4
+    }
+  ],
+  "fem_assertions": {
+    "solves": 16,
+    "iterations_unchanged": true,
+    "independent_residual_below": 2e-09,
+    "warm_device_allocations": 0,
+    "per_solve_transfers_unchanged": true,
+    "each_active_v_cycle_level_phase_calls": "FGMRES iteration count",
+    "sum_level_phase_time_within_preconditioner_phase": true
+  },
+  "checks": {
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_preconditioner_tests_clippy": "passed with existing warnings",
+    "cuda_fem_example_clippy": "passed with existing warnings"
+  },
+  "build_repair": "Corrected rotating_machine/planar_mesh.rs import to mesh::triangulate::triangulate_points_2d; no meshing behavior changed.",
+  "remaining": [
+    "Uncontended performance measurements before kernel selection.",
+    "Original large BEM sanitizer remains active; first two incident solves completed."
+  ]
+}

@@ -1,0 +1,232 @@
+{
+  "date": "2026-10-21",
+  "scope": "Affine Tri3/Tet4 lowest-order constant-coefficient complex-double Maxwell, homogeneous exterior PEC; native physical tests cover Tri3 forward and Tet4 forward/transpose/Hermitian",
+  "git_head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree": "uncommitted; implementation hashes below",
+  "gpu": {
+    "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+    "driver": "610.57.04",
+    "memory_mib": 97887
+  },
+  "operator": {
+    "curl_coefficient": 1.0,
+    "mass_coefficient": [
+      -1.0,
+      0.25
+    ],
+    "auxiliary_mass": 1.0
+  },
+  "controls": {
+    "method": "FGMRES",
+    "tolerance": 1e-10,
+    "restart": 60,
+    "max_iterations": 2000
+  },
+  "physical_reference_3d": "E=(sin(pi*y)*sin(pi*z),0,0)+0.2*grad(sin(pi*x)*sin(pi*y)*sin(pi*z)); curlcurl of transverse term is 2*pi^2 times that term; gradient curl is zero. J=i*(curlcurl E+mass E), with conjugated mass for Hermitian reference.",
+  "cases": [
+    {
+      "dimension": 2,
+      "action": "forward",
+      "subdivisions": 4,
+      "edge_dofs": 56,
+      "auxiliary_iterations": 28,
+      "jacobi_baseline": {
+        "iterations": 38,
+        "converged": true
+      },
+      "relative_residual": 7.206e-11,
+      "relative_field_l2": 0.2770885,
+      "reversed_node_numbering": false
+    },
+    {
+      "dimension": 2,
+      "action": "forward",
+      "subdivisions": 8,
+      "edge_dofs": 208,
+      "auxiliary_iterations": 86,
+      "jacobi_baseline": {
+        "iterations": 323,
+        "converged": true
+      },
+      "relative_residual": 9.907e-11,
+      "relative_field_l2": 0.1410018,
+      "reversed_node_numbering": false
+    },
+    {
+      "dimension": 2,
+      "action": "forward",
+      "subdivisions": 12,
+      "edge_dofs": 456,
+      "auxiliary_iterations": 102,
+      "jacobi_baseline": {
+        "iterations": 998,
+        "converged": true
+      },
+      "relative_residual": 7.562e-11,
+      "relative_field_l2": 0.09431904,
+      "reversed_node_numbering": false
+    },
+    {
+      "dimension": 3,
+      "action": "forward",
+      "subdivisions": 2,
+      "edge_dofs": 98,
+      "auxiliary_iterations": 13,
+      "jacobi_baseline": {
+        "iterations": 13,
+        "converged": true
+      },
+      "relative_residual": 2.979e-15,
+      "relative_field_l2": 0.6748304,
+      "reversed_node_numbering": false
+    },
+    {
+      "dimension": 3,
+      "action": "forward",
+      "subdivisions": 3,
+      "edge_dofs": 279,
+      "auxiliary_iterations": 45,
+      "jacobi_baseline": {
+        "iterations": 54,
+        "converged": true
+      },
+      "relative_residual": 5.419e-11,
+      "relative_field_l2": 0.4920525,
+      "reversed_node_numbering": true
+    },
+    {
+      "dimension": 3,
+      "action": "forward",
+      "subdivisions": 4,
+      "edge_dofs": 604,
+      "auxiliary_iterations": 65,
+      "jacobi_baseline": {
+        "iterations": 227,
+        "converged": true
+      },
+      "relative_residual": 8.906e-11,
+      "relative_field_l2": 0.3817896,
+      "reversed_node_numbering": false
+    },
+    {
+      "dimension": 3,
+      "action": "transpose",
+      "subdivisions": 2,
+      "edge_dofs": 98,
+      "auxiliary_iterations": 13,
+      "jacobi_baseline": null,
+      "relative_residual": 2.979e-15,
+      "relative_field_l2": 0.6748304,
+      "reversed_node_numbering": false
+    },
+    {
+      "dimension": 3,
+      "action": "transpose",
+      "subdivisions": 3,
+      "edge_dofs": 279,
+      "auxiliary_iterations": 45,
+      "jacobi_baseline": null,
+      "relative_residual": 5.419e-11,
+      "relative_field_l2": 0.4920525,
+      "reversed_node_numbering": true
+    },
+    {
+      "dimension": 3,
+      "action": "transpose",
+      "subdivisions": 4,
+      "edge_dofs": 604,
+      "auxiliary_iterations": 65,
+      "jacobi_baseline": null,
+      "relative_residual": 8.906e-11,
+      "relative_field_l2": 0.3817896,
+      "reversed_node_numbering": false
+    },
+    {
+      "dimension": 3,
+      "action": "hermitian",
+      "subdivisions": 2,
+      "edge_dofs": 98,
+      "auxiliary_iterations": 13,
+      "jacobi_baseline": null,
+      "relative_residual": 2.979e-15,
+      "relative_field_l2": 0.6748304,
+      "reversed_node_numbering": false
+    },
+    {
+      "dimension": 3,
+      "action": "hermitian",
+      "subdivisions": 3,
+      "edge_dofs": 279,
+      "auxiliary_iterations": 45,
+      "jacobi_baseline": null,
+      "relative_residual": 5.419e-11,
+      "relative_field_l2": 0.4920525,
+      "reversed_node_numbering": true
+    },
+    {
+      "dimension": 3,
+      "action": "hermitian",
+      "subdivisions": 4,
+      "edge_dofs": 604,
+      "auxiliary_iterations": 65,
+      "jacobi_baseline": null,
+      "relative_residual": 8.906e-11,
+      "relative_field_l2": 0.3817896,
+      "reversed_node_numbering": false
+    }
+  ],
+  "asserted_gates": {
+    "cpu_lu_relative_solution_error_max": 2e-07,
+    "independent_relative_residual_max": 2e-10,
+    "rhs_amplitudes": [
+      1.0,
+      -0.5,
+      1.5
+    ],
+    "warm_solve_device_allocations": 0,
+    "warm_auxiliary_device_allocations": 0,
+    "warm_auxiliary_h2d_bytes": 0,
+    "warm_auxiliary_d2h_bytes": 0,
+    "exact_sequence_tolerance": 2e-12,
+    "independent_geometric_pec_edge_check": true,
+    "reversed_global_node_numbering": true,
+    "nonmanifold_rejection": true,
+    "launch_failure_preserves_output_and_recovers": true
+  },
+  "validation": {
+    "native_tests": 3,
+    "admission_tests": 11,
+    "cuda_memcheck_errors": 0,
+    "native_stdout": "\nrunning 3 tests\ntest physics::electromagnetics::maxwell::device::tests::auxiliary_maps_preserve_exact_sequence_and_pec ... ok\ntest physics::electromagnetics::maxwell::device::tests::native_maxwell_auxiliary_retains_physical_solves ... MAXWELL_CUDA dim=2 action=Forward mesh=4 edges=56 iterations=28 jacobi_iterations=Some((38, true)) residual=7.206e-11 field_l2=2.770885e-1\nMAXWELL_CUDA dim=2 action=Forward mesh=8 edges=208 iterations=86 jacobi_iterations=Some((323, true)) residual=9.907e-11 field_l2=1.410018e-1\nMAXWELL_CUDA dim=2 action=Forward mesh=12 edges=456 iterations=102 jacobi_iterations=Some((998, true)) residual=7.562e-11 field_l2=9.431904e-2\nok\ntest physics::electromagnetics::maxwell::device::tests::native_maxwell_tetrahedron_actions_retain_physical_solves ... MAXWELL_CUDA dim=3 action=Forward mesh=2 edges=98 iterations=13 jacobi_iterations=Some((13, true)) residual=2.979e-15 field_l2=6.748304e-1\nMAXWELL_CUDA dim=3 action=Forward mesh=3 edges=279 iterations=45 jacobi_iterations=Some((54, true)) residual=5.419e-11 field_l2=4.920525e-1\nMAXWELL_CUDA dim=3 action=Forward mesh=4 edges=604 iterations=65 jacobi_iterations=Some((227, true)) residual=8.906e-11 field_l2=3.817896e-1\nMAXWELL_CUDA dim=3 action=Transpose mesh=2 edges=98 iterations=13 jacobi_iterations=None residual=2.979e-15 field_l2=6.748304e-1\nMAXWELL_CUDA dim=3 action=Transpose mesh=3 edges=279 iterations=45 jacobi_iterations=None residual=5.419e-11 field_l2=4.920525e-1\nMAXWELL_CUDA dim=3 action=Transpose mesh=4 edges=604 iterations=65 jacobi_iterations=None residual=8.906e-11 field_l2=3.817896e-1\nMAXWELL_CUDA dim=3 action=Hermitian mesh=2 edges=98 iterations=13 jacobi_iterations=None residual=2.979e-15 field_l2=6.748304e-1\nMAXWELL_CUDA dim=3 action=Hermitian mesh=3 edges=279 iterations=45 jacobi_iterations=None residual=5.419e-11 field_l2=4.920525e-1\nMAXWELL_CUDA dim=3 action=Hermitian mesh=4 edges=604 iterations=65 jacobi_iterations=None residual=8.906e-11 field_l2=3.817896e-1\nok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1962 filtered out; finished in 26.07s\n\n",
+    "memcheck_stdout": "========= COMPUTE-SANITIZER\n\nrunning 3 tests\ntest physics::electromagnetics::maxwell::device::tests::auxiliary_maps_preserve_exact_sequence_and_pec ... ok\ntest physics::electromagnetics::maxwell::device::tests::native_maxwell_auxiliary_retains_physical_solves ... MAXWELL_CUDA dim=2 action=Forward mesh=4 edges=56 iterations=28 jacobi_iterations=Some((38, true)) residual=7.206e-11 field_l2=2.770885e-1\nMAXWELL_CUDA dim=2 action=Forward mesh=8 edges=208 iterations=86 jacobi_iterations=Some((323, true)) residual=9.907e-11 field_l2=1.410018e-1\nMAXWELL_CUDA dim=2 action=Forward mesh=12 edges=456 iterations=102 jacobi_iterations=Some((998, true)) residual=7.562e-11 field_l2=9.431904e-2\nok\ntest physics::electromagnetics::maxwell::device::tests::native_maxwell_tetrahedron_actions_retain_physical_solves ... MAXWELL_CUDA dim=3 action=Forward mesh=2 edges=98 iterations=13 jacobi_iterations=Some((13, true)) residual=2.979e-15 field_l2=6.748304e-1\nMAXWELL_CUDA dim=3 action=Forward mesh=3 edges=279 iterations=45 jacobi_iterations=Some((54, true)) residual=5.419e-11 field_l2=4.920525e-1\nMAXWELL_CUDA dim=3 action=Forward mesh=4 edges=604 iterations=65 jacobi_iterations=Some((227, true)) residual=8.906e-11 field_l2=3.817896e-1\nMAXWELL_CUDA dim=3 action=Transpose mesh=2 edges=98 iterations=13 jacobi_iterations=None residual=2.979e-15 field_l2=6.748304e-1\nMAXWELL_CUDA dim=3 action=Transpose mesh=3 edges=279 iterations=45 jacobi_iterations=None residual=5.419e-11 field_l2=4.920525e-1\nMAXWELL_CUDA dim=3 action=Transpose mesh=4 edges=604 iterations=65 jacobi_iterations=None residual=8.906e-11 field_l2=3.817896e-1\nMAXWELL_CUDA dim=3 action=Hermitian mesh=2 edges=98 iterations=13 jacobi_iterations=None residual=2.979e-15 field_l2=6.748304e-1\nMAXWELL_CUDA dim=3 action=Hermitian mesh=3 edges=279 iterations=45 jacobi_iterations=None residual=5.419e-11 field_l2=4.920525e-1\nMAXWELL_CUDA dim=3 action=Hermitian mesh=4 edges=604 iterations=65 jacobi_iterations=None residual=8.906e-11 field_l2=3.817896e-1\nok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1962 filtered out; finished in 77.55s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "cargo_check": {
+      "status": "passed",
+      "summary": "Finished `dev` profile [optimized + debuginfo] target(s) in 6.22s",
+      "existing_warnings": false
+    },
+    "cargo_clippy": {
+      "status": "passed",
+      "summary": "Finished `dev` profile [optimized + debuginfo] target(s) in 9.03s",
+      "existing_warnings": true
+    },
+    "cuda_tests_clippy": {
+      "status": "passed",
+      "summary": "Finished `dev` profile [optimized + debuginfo] target(s) in 5.83s",
+      "existing_warnings": true
+    }
+  },
+  "performance_claim": "Iteration counts only. Complete-solve speedup has not been measured. The field meshes are coarse; L2 error decreases with refinement.",
+  "limits": [
+    "Host matrix/current assembly and AMG setup",
+    "No high-order, PML, nonhomogeneous boundary or variable material coverage",
+    "No block RHS or hierarchy numeric refresh",
+    "No sensitivity validation",
+    "No mesh-independent or resonance-robust convergence claim",
+    "No whole-session pool quota claim"
+  ],
+  "sha256": {
+    "crates/sonium-fem/src/backend.rs": "11326f99aae044ffdcb3a5832a2724493e07fe5629500e7eab49bf11e3b823b5",
+    "crates/sonium-fem/src/physics/electromagnetics/maxwell/device.rs": "6d99fb178f834b97655d08436e2f4859cb92aaf2c2757962e107ae63200daa13",
+    "crates/sonium-fem/src/physics/electromagnetics/maxwell/device/tests.rs": "cdca013616fcafc0866a49bf9530d518be1bcb269a319c72a2526237eecfeb00"
+  }
+}

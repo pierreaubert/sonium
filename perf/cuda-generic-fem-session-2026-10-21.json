@@ -1,0 +1,337 @@
+{
+  "date": "2026-10-21",
+  "scope": "Shared admitted host-assembled FEM -> retained CUDA CSR, RHS, device preconditioner and PCG/FGMRES session",
+  "hardware": "RTX PRO 6000 Blackwell Workstation Edition, driver 610.57.04",
+  "source_sha256": {
+    "crates/sonium-fem/src/solver/mod.rs": "d7a89d94d6eaac23b0078cd585826f295fd959b0e6a17505cd01b1de71d9b99d",
+    "crates/sonium-fem/src/solver/device.rs": "1eb07f0bd76124b5bfbbd24da2c7b99511cfbbd5afbafa96584bd02a6ad83e1e",
+    "crates/sonium-fem/src/solver/device/tests.rs": "81de808f0a86ca86547992ddc56ed680e31e094c2bc74e974240be8963ebd961"
+  },
+  "production_cases": [
+    {
+      "physics": "3D elasticity",
+      "space": "VectorH1, affine tetrahedron P1",
+      "dofs": 192,
+      "solver": "PCG",
+      "preconditioner": "stationary symmetric backend AMG",
+      "actions": [
+        "forward",
+        "transpose",
+        "Hermitian"
+      ]
+    },
+    {
+      "physics": "complex pressure Helmholtz",
+      "space": "H1, Tri3 P1/P2",
+      "dofs": [
+        49,
+        169
+      ],
+      "solver": "FGMRES",
+      "preconditioner": "shifted auxiliary AMG with retained native complex coarse LU",
+      "actions": [
+        "forward",
+        "Hermitian"
+      ]
+    }
+  ],
+  "update_assertions": {
+    "kind": "fixed-pattern numeric scaling and new RHS; lagged preconditioner",
+    "host_upload_bytes": 0,
+    "validation_download_bytes_per_matrix_and_rhs_update": 8,
+    "warm_allocations": 0
+  },
+  "metrics": [
+    {
+      "physics_metadata": "LinearElasticity",
+      "fixture_kind": "production FEM assembly",
+      "action": "Forward",
+      "pass": 0,
+      "iterations": 42,
+      "allocations": 4,
+      "independent_relative_residual": 4.182984751400384e-10
+    },
+    {
+      "physics_metadata": "LinearElasticity",
+      "fixture_kind": "production FEM assembly",
+      "action": "Forward",
+      "pass": 1,
+      "iterations": 40,
+      "allocations": 0,
+      "independent_relative_residual": 9.681733165240556e-10
+    },
+    {
+      "physics_metadata": "LinearElasticity",
+      "fixture_kind": "production FEM assembly",
+      "action": "Forward",
+      "pass": 2,
+      "iterations": 41,
+      "allocations": 0,
+      "independent_relative_residual": 8.786846237591757e-10
+    },
+    {
+      "physics_metadata": "LinearElasticity",
+      "fixture_kind": "production FEM assembly",
+      "action": "Transpose",
+      "pass": 0,
+      "iterations": 42,
+      "allocations": 4,
+      "independent_relative_residual": 4.182986487101373e-10
+    },
+    {
+      "physics_metadata": "LinearElasticity",
+      "fixture_kind": "production FEM assembly",
+      "action": "Transpose",
+      "pass": 1,
+      "iterations": 40,
+      "allocations": 0,
+      "independent_relative_residual": 9.681732822941798e-10
+    },
+    {
+      "physics_metadata": "LinearElasticity",
+      "fixture_kind": "production FEM assembly",
+      "action": "Transpose",
+      "pass": 2,
+      "iterations": 41,
+      "allocations": 0,
+      "independent_relative_residual": 8.786847069928625e-10
+    },
+    {
+      "physics_metadata": "LinearElasticity",
+      "fixture_kind": "production FEM assembly",
+      "action": "Hermitian",
+      "pass": 0,
+      "iterations": 42,
+      "allocations": 4,
+      "independent_relative_residual": 4.182986487101373e-10
+    },
+    {
+      "physics_metadata": "LinearElasticity",
+      "fixture_kind": "production FEM assembly",
+      "action": "Hermitian",
+      "pass": 1,
+      "iterations": 40,
+      "allocations": 0,
+      "independent_relative_residual": 9.681732822941798e-10
+    },
+    {
+      "physics_metadata": "LinearElasticity",
+      "fixture_kind": "production FEM assembly",
+      "action": "Hermitian",
+      "pass": 2,
+      "iterations": 41,
+      "allocations": 0,
+      "independent_relative_residual": 8.786847069928625e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Forward",
+      "pass": 0,
+      "iterations": 19,
+      "allocations": 131,
+      "independent_relative_residual": 1.0753278376175532e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Forward",
+      "pass": 1,
+      "iterations": 18,
+      "allocations": 0,
+      "independent_relative_residual": 7.167020833747367e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Forward",
+      "pass": 2,
+      "iterations": 18,
+      "allocations": 0,
+      "independent_relative_residual": 9.3304654111305e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Hermitian",
+      "pass": 0,
+      "iterations": 19,
+      "allocations": 128,
+      "independent_relative_residual": 1.0753278376175532e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Hermitian",
+      "pass": 1,
+      "iterations": 18,
+      "allocations": 0,
+      "independent_relative_residual": 7.167020833747367e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Hermitian",
+      "pass": 2,
+      "iterations": 18,
+      "allocations": 0,
+      "independent_relative_residual": 9.3304654111305e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Forward",
+      "pass": 0,
+      "iterations": 21,
+      "allocations": 128,
+      "independent_relative_residual": 2.9151334462243255e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Forward",
+      "pass": 1,
+      "iterations": 21,
+      "allocations": 0,
+      "independent_relative_residual": 3.8404834192129187e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Forward",
+      "pass": 2,
+      "iterations": 20,
+      "allocations": 0,
+      "independent_relative_residual": 8.062182718508296e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Hermitian",
+      "pass": 0,
+      "iterations": 21,
+      "allocations": 128,
+      "independent_relative_residual": 2.9151334462243255e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Hermitian",
+      "pass": 1,
+      "iterations": 21,
+      "allocations": 0,
+      "independent_relative_residual": 3.8404834192129187e-10
+    },
+    {
+      "physics_metadata": "Helmholtz",
+      "fixture_kind": "production FEM assembly",
+      "action": "Hermitian",
+      "pass": 2,
+      "iterations": 20,
+      "allocations": 0,
+      "independent_relative_residual": 8.062182718508296e-10
+    },
+    {
+      "physics_metadata": "Maxwell",
+      "fixture_kind": "synthetic algebra only",
+      "action": "Forward",
+      "pass": 0,
+      "iterations": 2,
+      "allocations": 131,
+      "independent_relative_residual": 2.7781317796657784e-16
+    },
+    {
+      "physics_metadata": "Maxwell",
+      "fixture_kind": "synthetic algebra only",
+      "action": "Forward",
+      "pass": 1,
+      "iterations": 2,
+      "allocations": 0,
+      "independent_relative_residual": 2.7497116097897406e-16
+    },
+    {
+      "physics_metadata": "Maxwell",
+      "fixture_kind": "synthetic algebra only",
+      "action": "Forward",
+      "pass": 2,
+      "iterations": 2,
+      "allocations": 0,
+      "independent_relative_residual": 1.178499294185919e-16
+    },
+    {
+      "physics_metadata": "Maxwell",
+      "fixture_kind": "synthetic algebra only",
+      "action": "Transpose",
+      "pass": 0,
+      "iterations": 2,
+      "allocations": 128,
+      "independent_relative_residual": 5.585328120300579e-17
+    },
+    {
+      "physics_metadata": "Maxwell",
+      "fixture_kind": "synthetic algebra only",
+      "action": "Transpose",
+      "pass": 1,
+      "iterations": 2,
+      "allocations": 0,
+      "independent_relative_residual": 1.0773989224278287e-17
+    },
+    {
+      "physics_metadata": "Maxwell",
+      "fixture_kind": "synthetic algebra only",
+      "action": "Transpose",
+      "pass": 2,
+      "iterations": 2,
+      "allocations": 0,
+      "independent_relative_residual": 9.7740819511255e-18
+    },
+    {
+      "physics_metadata": "Maxwell",
+      "fixture_kind": "synthetic algebra only",
+      "action": "Hermitian",
+      "pass": 0,
+      "iterations": 2,
+      "allocations": 128,
+      "independent_relative_residual": 5.585328120300579e-17
+    },
+    {
+      "physics_metadata": "Maxwell",
+      "fixture_kind": "synthetic algebra only",
+      "action": "Hermitian",
+      "pass": 1,
+      "iterations": 2,
+      "allocations": 0,
+      "independent_relative_residual": 1.0773989224278287e-17
+    },
+    {
+      "physics_metadata": "Maxwell",
+      "fixture_kind": "synthetic algebra only",
+      "action": "Hermitian",
+      "pass": 2,
+      "iterations": 2,
+      "allocations": 0,
+      "independent_relative_residual": 9.7740819511255e-18
+    }
+  ],
+  "native_memcheck": {
+    "complete_native_suite": "========= COMPUTE-SANITIZER\n\nrunning 5 tests\ntest solver::device::tests::native_generic_admission_precedes_assembly ... ok\ntest solver::device::tests::native_generic_elasticity_pcg_amg_reuses_system ... generic FEM LinearElasticity action=Forward pass=0 iterations=42 allocations=4 residual=0.0000000004182984751400384\ngeneric FEM LinearElasticity action=Forward pass=1 iterations=40 allocations=0 residual=0.0000000009681733165240556\ngeneric FEM LinearElasticity action=Forward pass=2 iterations=41 allocations=0 residual=0.0000000008786846237591757\ngeneric FEM LinearElasticity action=Transpose pass=0 iterations=42 allocations=4 residual=0.0000000004182986487101373\ngeneric FEM LinearElasticity action=Transpose pass=1 iterations=40 allocations=0 residual=0.0000000009681732822941798\ngeneric FEM LinearElasticity action=Transpose pass=2 iterations=41 allocations=0 residual=0.0000000008786847069928625\ngeneric FEM LinearElasticity action=Hermitian pass=0 iterations=42 allocations=4 residual=0.0000000004182986487101373\ngeneric FEM LinearElasticity action=Hermitian pass=1 iterations=40 allocations=0 residual=0.0000000009681732822941798\ngeneric FEM LinearElasticity action=Hermitian pass=2 iterations=41 allocations=0 residual=0.0000000008786847069928625\nok\ntest solver::device::tests::native_generic_helmholtz_fgmres_shifted_amg_reuses_system ... generic FEM Helmholtz action=Forward pass=0 iterations=19 allocations=131 residual=0.00000000010753278376175532\ngeneric FEM Helmholtz action=Forward pass=1 iterations=18 allocations=0 residual=0.0000000007167020833747367\ngeneric FEM Helmholtz action=Forward pass=2 iterations=18 allocations=0 residual=0.00000000093304654111305\ngeneric FEM Helmholtz action=Hermitian pass=0 iterations=19 allocations=128 residual=0.00000000010753278376175532\ngeneric FEM Helmholtz action=Hermitian pass=1 iterations=18 allocations=0 residual=0.0000000007167020833747367\ngeneric FEM Helmholtz action=Hermitian pass=2 iterations=18 allocations=0 residual=0.00000000093304654111305\ngeneric FEM Helmholtz action=Forward pass=0 iterations=21 allocations=128 residual=0.00000000029151334462243255\ngeneric FEM Helmholtz action=Forward pass=1 iterations=21 allocations=0 residual=0.00000000038404834192129187\ngeneric FEM Helmholtz action=Forward pass=2 iterations=20 allocations=0 residual=0.0000000008062182718508296\ngeneric FEM Helmholtz action=Hermitian pass=0 iterations=21 allocations=128 residual=0.00000000029151334462243255\ngeneric FEM Helmholtz action=Hermitian pass=1 iterations=21 allocations=0 residual=0.00000000038404834192129187\ngeneric FEM Helmholtz action=Hermitian pass=2 iterations=20 allocations=0 residual=0.0000000008062182718508296\nok\ntest solver::device::tests::native_generic_malformed_system_rejected_before_upload ... ok\ntest solver::device::tests::native_generic_nonsymmetric_action_contract ... generic FEM Maxwell action=Forward pass=0 iterations=2 allocations=131 residual=0.00000000000000027781317796657784\ngeneric FEM Maxwell action=Forward pass=1 iterations=2 allocations=0 residual=0.00000000000000027497116097897406\ngeneric FEM Maxwell action=Forward pass=2 iterations=2 allocations=0 residual=0.0000000000000001178499294185919\ngeneric FEM Maxwell action=Transpose pass=0 iterations=2 allocations=128 residual=0.00000000000000005585328120300579\ngeneric FEM Maxwell action=Transpose pass=1 iterations=2 allocations=0 residual=0.000000000000000010773989224278287\ngeneric FEM Maxwell action=Transpose pass=2 iterations=2 allocations=0 residual=0.0000000000000000097740819511255\ngeneric FEM Maxwell action=Hermitian pass=0 iterations=2 allocations=128 residual=0.00000000000000005585328120300579\ngeneric FEM Maxwell action=Hermitian pass=1 iterations=2 allocations=0 residual=0.000000000000000010773989224278287\ngeneric FEM Maxwell action=Hermitian pass=2 iterations=2 allocations=0 residual=0.0000000000000000097740819511255\nok\n\ntest result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1941 filtered out; finished in 21.97s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "supplement_initial_rhs_and_preconditioner_replacement": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest solver::device::tests::native_generic_nonsymmetric_action_contract ... generic FEM Maxwell action=Forward pass=0 iterations=2 allocations=0 residual=0.00000000000000027781317796657784\ngeneric FEM Maxwell action=Forward pass=1 iterations=2 allocations=0 residual=0.00000000000000027497116097897406\ngeneric FEM Maxwell action=Forward pass=2 iterations=2 allocations=0 residual=0.0000000000000001178499294185919\ngeneric FEM Maxwell action=Transpose pass=0 iterations=2 allocations=0 residual=0.00000000000000005585328120300579\ngeneric FEM Maxwell action=Transpose pass=1 iterations=2 allocations=0 residual=0.000000000000000010773989224278287\ngeneric FEM Maxwell action=Transpose pass=2 iterations=2 allocations=0 residual=0.0000000000000000097740819511255\ngeneric FEM Maxwell action=Hermitian pass=0 iterations=2 allocations=0 residual=0.00000000000000005585328120300579\ngeneric FEM Maxwell action=Hermitian pass=1 iterations=2 allocations=0 residual=0.000000000000000010773989224278287\ngeneric FEM Maxwell action=Hermitian pass=2 iterations=2 allocations=0 residual=0.0000000000000000097740819511255\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1945 filtered out; finished in 0.70s\n\n========= ERROR SUMMARY: 0 errors\n"
+  },
+  "validation_scope": "Five native tests on final production source, followed by focused rerun after adding initial-RHS and preconditioner-replacement assertions to the nonsymmetric test. No production source changed between these runs.",
+  "checks": {
+    "cargo check": "    Finished `dev` profile [optimized + debuginfo] target(s) in 31.28s",
+    "cargo clippy": "    Finished `dev` profile [optimized + debuginfo] target(s) in 0.25s",
+    "cargo clippy -p sonium-fem --features cuda --lib --tests": "    Finished `dev` profile [optimized + debuginfo] target(s) in 5.26s",
+    "cargo test -p sonium-fem --lib": "1923 passed, 0 failed, 1 ignored",
+    "git diff --check": "passed for tracked plan/module changes"
+  },
+  "limitations": [
+    "No new admission cells: matrix-free and partial-assembly modes rejected here.",
+    "Checked geometry/forms/BC assembly and preconditioner setup remain on host.",
+    "Synthetic Maxwell-tagged fixture tests algebraic action conventions only; it is not production Maxwell coverage.",
+    "Production Maxwell and Stokes/Schur integrations remain unverified.",
+    "Caller chooses and certifies the suitable device preconditioner; PCG requires explicit SPD/HPD assumption.",
+    "Block RHS, native generic forms/BCs, application migration and specialized Tet/hex admission reconciliation remain.",
+    "CSR and preconditioner allocations retain their existing policies; complete pool quota coverage is not established."
+  ]
+}

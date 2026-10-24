@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-22",
+  "scope": "NumCalc explicit retained CUDA TBEM/Jacobi route",
+  "sources_sha256": {
+    "crates/sonium-bem/src/numcalc/runner.rs": "171b55016b6fdaab6e10bd42dbb13b773c60836e175b03e0791ff5c4fd9e85c0",
+    "crates/sonium-bem/src/numcalc/mod.rs": "91bc2b80209e32b82b104305551158be9acd8d2b3ba1de23360a4c2ea7008c03",
+    "crates/sonium-bem/src/bin/numcalc.rs": "818f8d05bc219caf229c9d31b4d36a70be1c055549ef9318639ec7dcba037101"
+  },
+  "native_test": {
+    "passed": 1,
+    "log": "/tmp/numcalc-native.log",
+    "checks": [
+      "full and partial frequency ranges",
+      "empty and inverted ranges",
+      "surface and two evaluation points vs CPU at relative 1e-7",
+      "execution provenance and older JSON compatibility"
+    ]
+  },
+  "memcheck": {
+    "errors": 0,
+    "log": "/tmp/numcalc-memcheck.log"
+  },
+  "cpu_bem": {
+    "passed": 541,
+    "ignored": 3,
+    "log": "/tmp/numcalc-cpu.log"
+  },
+  "cli": {
+    "cuda_exit": 0,
+    "cpu_exit": 0,
+    "frequencies": 3,
+    "surface_dofs": 4,
+    "relative_surface_error": 1.511575298177087e-15,
+    "cuda_output": "/tmp/numcalc-cuda-output.json",
+    "cpu_output": "/tmp/numcalc-cpu-output.json"
+  },
+  "checks": [
+    "root cargo check passed",
+    "root cargo clippy passed with warnings",
+    "CUDA CLI check and Clippy passed; no modified-file warnings",
+    "CPU-only CLI check passed"
+  ],
+  "limitations": [
+    "CPU field evaluation explicitly recorded",
+    "constant Tri3 dense CUDA below 1000 DOFs",
+    "point Jacobi only",
+    "preserves existing first-source selection policy",
+    "no compressed sweep integration",
+    "no speedup claim"
+  ]
+}

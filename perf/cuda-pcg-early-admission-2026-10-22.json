@@ -1,0 +1,56 @@
+{
+  "status": "validated_pcg_facade_early_admission",
+  "required_primitives": [
+    "csr_spmv",
+    "blas1",
+    "fast_reduction"
+  ],
+  "changes": [
+    "Export validate_backend_pcg with read-only runtime checking.",
+    "Run strict PCG admission before CG/CG+AMG facade preconditioner preparation.",
+    "Report the specific rejected primitive."
+  ],
+  "source_sha256": {
+    "crates/sonium-solvers/crates/sonium-solvers-iterative/src/backend/pcg_session.rs": "276bba59fa7c2937e487533cbea2470dcc773607aed984132f6ac578fb5925f3",
+    "crates/sonium-solvers/crates/sonium-solvers-iterative/src/backend.rs": "ed4be3e311ff2ddc5892f0c830c5ab6b18e524bb3625cc6b529bfffa61bf0309",
+    "crates/sonium-solvers/crates/sonium-solvers-iterative/src/lib.rs": "40870470e6de011a5bf1383a7fa71f4230fcf3b911c029a8d8497b0e1f8aa382",
+    "crates/sonium-solvers/src/solve/cuda_session.rs": "8b64ee35956a2df2a631c72ee0d5de0f5f949772174fbc5b31c82baf0c47b24b",
+    "crates/sonium-solvers/src/solve/cuda_pcg_tests.rs": "da9a83c6e531a0bfa5928ea812e5371a558acf108e2fe7c3bba9433f288528f7"
+  },
+  "validation": {
+    "tests": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 6.80s",
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 327 filtered out; finished in 0.00s"
+    ],
+    "native": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 18.19s",
+      "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 120 filtered out; finished in 3.67s"
+    ],
+    "native-no-work": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 15.00s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 128 filtered out; finished in 1.44s"
+    ],
+    "check": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 7.19s"
+    ],
+    "clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 10.51s"
+    ],
+    "cuda-clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 1.24s"
+    ],
+    "iterative-cpu": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 0.18s",
+      "test result: ok. 328 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s"
+    ],
+    "facade-cpu": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 1.87s",
+      "test result: ok. 117 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s"
+    ]
+  },
+  "limitations": [
+    "Missing/fallback capability combinations use synthetic reports.",
+    "Generic DevicePcgSession and arbitrary callback residency remain their existing contracts.",
+    "Positive-definiteness and preconditioner-specific dependencies are separate requirements."
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-21",
+  "scope": "Affine P2 tetrahedral Robin boundary mapping and retained CUDA solves",
+  "source_sha256": {
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_boundary/tet.rs": "eada8e458e2fa8319a644c21dcbe7271ef10bf1d77d4e5754c76611d8625736d",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_tet_solve.rs": "1061ee55ce597f544eb327afdcf430c532c1d9308bc487ddb091401e5706b71a",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_tet_solve/boundary.rs": "55d3978873dc017c9df41ff966e488d3df3ed8cb4f093a79fb008adc245583e4",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_tet_solve_tests.rs": "1c89e51865fd9235d51f3ff6814ff0d74b628e1b32e6d11284be69da9b2bef4c"
+  },
+  "runs": [
+    {
+      "operator": "Csr",
+      "pass_index": 0,
+      "iterations": 25,
+      "allocations": 131,
+      "solution_l2_error": 1.649010758069088e-09
+    },
+    {
+      "operator": "Csr",
+      "pass_index": 1,
+      "iterations": 24,
+      "allocations": 0,
+      "solution_l2_error": 3.2431374021575423e-09
+    },
+    {
+      "operator": "Csr",
+      "pass_index": 2,
+      "iterations": 24,
+      "allocations": 0,
+      "solution_l2_error": 5.009357549017721e-09
+    },
+    {
+      "operator": "Element",
+      "pass_index": 0,
+      "iterations": 25,
+      "allocations": 128,
+      "solution_l2_error": 1.649012583632504e-09
+    },
+    {
+      "operator": "Element",
+      "pass_index": 1,
+      "iterations": 24,
+      "allocations": 0,
+      "solution_l2_error": 3.2431370927410765e-09
+    },
+    {
+      "operator": "Element",
+      "pass_index": 2,
+      "iterations": 24,
+      "allocations": 0,
+      "solution_l2_error": 5.009360646708556e-09
+    }
+  ],
+  "native_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 5 tests\ntest physics::acoustics::pressure::device_tet::tests::native_tet_p2_persistent_solve ... ok\ntest physics::acoustics::pressure::device_tet::tests::native_tet_volume_persistent_solve ... ok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_p1_robin_session_frequency_lifting_and_reuse ... tet Robin scale=0 mode=Csr pass=0 iterations=23 allocations=131 error=0.0000000012467663683667958\ntet Robin scale=0 mode=Csr pass=1 iterations=22 allocations=0 error=0.0000000021255549487464168\ntet Robin scale=0 mode=Csr pass=2 iterations=23 allocations=0 error=0.0000000007810941990824799\ntet Robin scale=0 mode=Element pass=0 iterations=23 allocations=128 error=0.0000000012467649792293717\ntet Robin scale=0 mode=Element pass=1 iterations=22 allocations=0 error=0.000000002125556815618335\ntet Robin scale=0 mode=Element pass=2 iterations=23 allocations=0 error=0.0000000007810931978131965\ntet Robin scale=1 mode=Csr pass=0 iterations=20 allocations=128 error=0.0000000002752216132449986\ntet Robin scale=1 mode=Csr pass=1 iterations=20 allocations=0 error=0.00000000017619933018007506\ntet Robin scale=1 mode=Csr pass=2 iterations=20 allocations=0 error=0.0000000004091574219351951\ntet Robin scale=1 mode=Element pass=0 iterations=20 allocations=128 error=0.00000000027521887033831577\ntet Robin scale=1 mode=Element pass=1 iterations=20 allocations=0 error=0.00000000017619912914924696\ntet Robin scale=1 mode=Element pass=2 iterations=20 allocations=0 error=0.00000000040915762264655383\nok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_p2_robin_session_shared_edges_and_reuse ... tet P2 Robin mode=Csr pass=0 iterations=25 allocations=131 error=0.000000001649010758069088\ntet P2 Robin mode=Csr pass=1 iterations=24 allocations=0 error=0.0000000032431374021575423\ntet P2 Robin mode=Csr pass=2 iterations=24 allocations=0 error=0.000000005009357549017721\ntet P2 Robin mode=Element pass=0 iterations=25 allocations=128 error=0.000000001649012583632504\ntet P2 Robin mode=Element pass=1 iterations=24 allocations=0 error=0.0000000032431370927410765\ntet P2 Robin mode=Element pass=2 iterations=24 allocations=0 error=0.000000005009360646708556\nok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_sessions_p1_p2_csr_element_frequency_and_failure ... tet session N=4 mode=Csr pass=0 iterations=23 allocations=131 error=0.00000000026076704949114947\ntet session N=4 mode=Csr pass=1 iterations=22 allocations=0 error=0.0000000014009109526293255\ntet session N=4 mode=Csr pass=2 iterations=22 allocations=0 error=0.0000000015032024177689783\ntet session N=10 mode=Csr pass=0 iterations=37 allocations=128 error=0.0000000011844430426719532\ntet session N=10 mode=Csr pass=1 iterations=36 allocations=0 error=0.000000006058118121339368\ntet session N=10 mode=Csr pass=2 iterations=36 allocations=0 error=0.000000005620841120437411\ntet session N=4 mode=Element pass=0 iterations=23 allocations=128 error=0.00000000026076793968898634\ntet session N=4 mode=Element pass=1 iterations=22 allocations=0 error=0.0000000014009124758293173\ntet session N=4 mode=Element pass=2 iterations=22 allocations=0 error=0.0000000015032017521463969\ntet session N=10 mode=Element pass=0 iterations=37 allocations=128 error=0.0000000011844455707752265\ntet session N=10 mode=Element pass=1 iterations=36 allocations=0 error=0.0000000060581086499165725\ntet session N=10 mode=Element pass=2 iterations=36 allocations=0 error=0.000000005620838955055166\nok\n\ntest result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1934 filtered out; finished in 34.47s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "validation": {
+    "fem_cpu": "1922 passed, 1 ignored",
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_clippy": "passed; no new boundary/session warnings",
+    "analytic_trace": "unit-cube surface integrals: area 6, integral x^2 = 7/3, integral x^4 = 9/5; constrained vertex and edge coupling checked"
+  },
+  "numeric_update_assertions": {
+    "allocation_operations": 0,
+    "h2d_bytes": 0,
+    "d2h_bytes": 0
+  },
+  "limits": [
+    "Affine geometry only",
+    "Boundary callbacks and quadrature are host setup; resident numeric boundary updates remain open",
+    "No complete-solve elapsed-time speedup claim",
+    "Generic FEM admission and broader physics remain incomplete"
+  ]
+}

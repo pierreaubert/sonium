@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-22",
+  "scope": "Remove full-vector staging copies from native H-matrix multi-RHS actions",
+  "implementation": {
+    "before": "copy each RHS into scalar input scratch; apply into scalar result; copy result back to output column",
+    "after": "one native output clear; indexed input/output column views; retained rank projection scratch",
+    "eliminated_d2d_payload_bytes_per_action": "2 * num_dofs * rhs_count * sizeof(Complex64)",
+    "storage": "unchanged pooled rank scratch; no width-dependent allocations",
+    "semantics": "forward/transpose/Hermitian; block output remains discard-on-error; scalar transactional path unchanged"
+  },
+  "validation": {
+    "compute_native": "1 passed /tmp/hmatrix-column-views-native.log",
+    "compute_memcheck": "1 passed, zero errors /tmp/hmatrix-column-views-memcheck.log",
+    "bem_native_block_sessions": "4 passed /tmp/hmatrix-column-views-bem.log",
+    "cpu_compute": "655 passed /tmp/hmatrix-column-views-cpu.log",
+    "root_check": "passed /tmp/hmatrix-column-views-root-check.log",
+    "root_clippy": "passed with existing warnings /tmp/hmatrix-column-views-root-clippy.log",
+    "cuda_compute_check": "passed /tmp/hmatrix-column-views-check.log",
+    "cuda_compute_clippy": "passed with existing warning /tmp/hmatrix-column-views-cuda-clippy.log"
+  },
+  "compute_gates": {
+    "rhs_widths": [
+      1,
+      3,
+      2
+    ],
+    "actions": [
+      "forward",
+      "transpose",
+      "Hermitian"
+    ],
+    "low_rank_components": 2,
+    "dense_parity_absolute_tolerance": 1e-12,
+    "allocations": 0,
+    "h2d_bytes": 0,
+    "d2h_bytes": 0,
+    "d2d_bytes": 0,
+    "invalid_inputs": "wrong extents, overflowed width and foreign backend/stream reject"
+  },
+  "application_gates": [
+    "independent dense reference residuals",
+    "low-rank compressed session",
+    "Jacobi and cluster-block preconditioning",
+    "all orientations",
+    "dependent/zero block columns",
+    "warm allocation reuse",
+    "failure publication/recovery"
+  ],
+  "limitations": [
+    "Columns still execute sequentially; shared arithmetic via batched indexed GEMM is not implemented.",
+    "No isolated elapsed-time benchmark and no complete-solve speedup claim.",
+    "The separate 1000-panel Auto memcheck remains running in session 1162 and is not covered by this focused compute memcheck."
+  ],
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/hmatrix.rs": "7c43731d5b427b9b25a136b108b57bcd5049201770221e604f9e0fe168b3a106",
+    "crates/sonium-compute/tests/hmatrix_block.rs": "85a84ebb4d41be1a1973873c72d44085d7300bad60187dde7524a060e8d86c5d"
+  }
+}

@@ -1,0 +1,194 @@
+{
+  "date": "2026-10-21",
+  "base_revision": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree": true,
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "driver": "610.57.04",
+  "memory_mib": 97887,
+  "profile": "test opt-level=2",
+  "scope": "Before native Chebyshev diagonal scaling optimization; compare pressure-only and embedded layouts with identical solver settings.",
+  "method": "One warmup then five timed complete warm linear solves, alternating layout order, zero initial guess, tolerance 1e-11. Setup/assembly excluded; RHS/guess uploads, convergence and solution download included.",
+  "native_validation": {
+    "tests_passed": 5,
+    "tests_failed": 0,
+    "memcheck_errors": 0,
+    "seconds": 77.21,
+    "physical_cpu_relative_tolerance": 2e-06,
+    "block_action_relative_tolerance": 1e-12,
+    "warm_block_allocations": 0,
+    "warm_block_h2d_bytes": 0,
+    "warm_block_d2h_bytes": 0
+  },
+  "results": [
+    {
+      "nx": 12,
+      "ny": 6,
+      "velocity_dofs": 650,
+      "pressure_dofs": 91,
+      "pressure_levels": [
+        91,
+        43
+      ],
+      "embedded_levels": [
+        741
+      ],
+      "iterations_embedded_pressure": [
+        74,
+        76
+      ],
+      "median_seconds_embedded_pressure": [
+        0.130126366,
+        0.146315633
+      ],
+      "speedup": 0.8893538122477999,
+      "samples_seconds_embedded_pressure": [
+        [
+          0.13012352,
+          0.130123971,
+          0.130126366,
+          0.130130633,
+          0.13017094
+        ],
+        [
+          0.146286338,
+          0.14628769,
+          0.146315633,
+          0.146322015,
+          0.146325723
+        ]
+      ]
+    },
+    {
+      "nx": 18,
+      "ny": 9,
+      "velocity_dofs": 1406,
+      "pressure_dofs": 190,
+      "pressure_levels": [
+        190,
+        101,
+        48
+      ],
+      "embedded_levels": [
+        1596
+      ],
+      "iterations_embedded_pressure": [
+        88,
+        82
+      ],
+      "median_seconds_embedded_pressure": [
+        0.170265538,
+        0.185624343
+      ],
+      "speedup": 0.9172586701088014,
+      "samples_seconds_embedded_pressure": [
+        [
+          0.170240962,
+          0.170262542,
+          0.170265538,
+          0.170270477,
+          0.170355248
+        ],
+        [
+          0.185604917,
+          0.185623282,
+          0.185624343,
+          0.185673367,
+          0.185692463
+        ]
+      ]
+    },
+    {
+      "nx": 24,
+      "ny": 12,
+      "velocity_dofs": 2450,
+      "pressure_dofs": 325,
+      "pressure_levels": [
+        325,
+        170,
+        87,
+        39
+      ],
+      "embedded_levels": [
+        2775
+      ],
+      "iterations_embedded_pressure": [
+        102,
+        78
+      ],
+      "median_seconds_embedded_pressure": [
+        0.211618029,
+        0.201501741
+      ],
+      "speedup": 1.0502044694492243,
+      "samples_seconds_embedded_pressure": [
+        [
+          0.211582892,
+          0.211614322,
+          0.211618029,
+          0.21164485,
+          0.21168744
+        ],
+        [
+          0.20144843,
+          0.201477145,
+          0.201501741,
+          0.201507282,
+          0.201519264
+        ]
+      ]
+    },
+    {
+      "nx": 36,
+      "ny": 18,
+      "velocity_dofs": 5402,
+      "pressure_dofs": 703,
+      "pressure_levels": [
+        703,
+        362,
+        192,
+        80,
+        26
+      ],
+      "embedded_levels": [
+        6105
+      ],
+      "iterations_embedded_pressure": [
+        135,
+        119
+      ],
+      "median_seconds_embedded_pressure": [
+        0.310764136,
+        0.350134162
+      ],
+      "speedup": 0.8875573129593678,
+      "samples_seconds_embedded_pressure": [
+        [
+          0.310726284,
+          0.310748887,
+          0.310764136,
+          0.310822546,
+          0.310954426
+        ],
+        [
+          0.349923934,
+          0.350008224,
+          0.350134162,
+          0.350160101,
+          0.350163768
+        ]
+      ]
+    }
+  ],
+  "decision": "Keep pressure-only AMG explicitly opt-in, default false. No size-only heuristic justified.",
+  "source_sha256": {
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda.rs": "de245c2ee072c00201de5baa13410e31ca53b128465a62978b5774543076a24d",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/pressure.rs": "6efd0dce8058bb15def45cdf4b096aa2d22b24dbf2024e6be0299b8d97cb6b66",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/tests.rs": "d031f048e005f207f06abd5040d0ecd071410fafda8c184fd2ca7088e57624eb",
+    "crates/sonium-fem/src/physics/fluid/stokes/navier_stokes.rs": "e89152c2de9bd234cef549959d1668283638fcdd8c73640c16825e08d7a9588e"
+  },
+  "limitations": [
+    "Small two-dimensional Taylor-Hood BDF fixtures; not a general production speedup.",
+    "Host assembly and AMG hierarchy construction remain.",
+    "Profiling capture includes two pressure-only physical steps and one embedded layout-switch solve; aggregate attribution is not pressure-only."
+  ]
+}

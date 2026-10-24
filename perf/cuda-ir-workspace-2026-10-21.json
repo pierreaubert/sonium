@@ -1,0 +1,173 @@
+{
+  "date": "2026-10-21",
+  "status": "Mixed-precision production migration verified; pure-f32 physical parity remains failing",
+  "scope": "Retained IR device scratch across solves and descriptors within each room frequency. No claim of zero whole-sweep allocations or total CUDA coverage.",
+  "source_sha256": {
+    "crates/sonium-compute/src/gmres_ir.rs": "1c74a51879a1f37713a628550e499ca72b35536d67476715c4a070dc65f23ac0",
+    "crates/sonium-compute/src/gmres_ir/workspace.rs": "83df0bfe01a20b1d203403d234fcbfc8190e1f475b90bc1a404ddb58a5259aba",
+    "crates/sonium-compute/tests/gmres_ir_workspace.rs": "c745fe4ab1a803b13a8ba559ddb910e1fd74496c01fc24e0f09af923cdc2aa2f",
+    "crates/sonium-sim-room/src/fem_runner/gpu.rs": "4e04868d72705439707f794d2899ba69eee56752b5ca84b14953a1284282b481",
+    "crates/sonium-sim-room/tests/backend_parity_runtime.rs": "91ffa179303c9a8ee439c8337002ef0122725e976d78898d21fc2426eef01736"
+  },
+  "room_evidence": {
+    "artifact": "sonium-sim-room.sr1-cuda",
+    "backend": {
+      "actual": "cuda",
+      "fallback_status": "none",
+      "host_architecture": "x86_64",
+      "precision": "f64-outer (IR)",
+      "requested": "cuda"
+    },
+    "cancellation": {
+      "mid_frequency_interrupt": "not-exercised",
+      "pre_setup_test": "cuda_cancellation_rejects_before_device_setup",
+      "status": "frequency-boundary cooperative"
+    },
+    "frequency_stats": [
+      {
+        "allocation_high_water_bytes": 229983,
+        "allocation_operations": 88,
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 80.0,
+        "inner_iterations": 33,
+        "iterations": 6,
+        "max_residual": 3.5285505975310366e-09,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 3,
+        "transfer": {
+          "d2d_bytes": 81888,
+          "d2d_operations": 136,
+          "d2h_bytes": 4292,
+          "d2h_operations": 17,
+          "h2d_bytes": 22464,
+          "h2d_operations": 23
+        }
+      },
+      {
+        "allocation_high_water_bytes": 229983,
+        "allocation_operations": 4,
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 100.0,
+        "inner_iterations": 24,
+        "iterations": 4,
+        "max_residual": 1.0994905765534109e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 3,
+        "transfer": {
+          "d2d_bytes": 67136,
+          "d2d_operations": 101,
+          "d2h_bytes": 3160,
+          "d2h_operations": 10,
+          "h2d_bytes": 136,
+          "h2d_operations": 4
+        }
+      },
+      {
+        "allocation_high_water_bytes": 229983,
+        "allocation_operations": 4,
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 120.0,
+        "inner_iterations": 24,
+        "iterations": 4,
+        "max_residual": 9.91554710874831e-08,
+        "preconditioner_age": 2,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 3,
+        "transfer": {
+          "d2d_bytes": 67136,
+          "d2d_operations": 101,
+          "d2h_bytes": 3160,
+          "d2h_operations": 10,
+          "h2d_bytes": 136,
+          "h2d_operations": 4
+        }
+      },
+      {
+        "allocation_high_water_bytes": 229983,
+        "allocation_operations": 4,
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 140.0,
+        "inner_iterations": 24,
+        "iterations": 4,
+        "max_residual": 1.66366842455386e-07,
+        "preconditioner_age": 3,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 3,
+        "transfer": {
+          "d2d_bytes": 67136,
+          "d2d_operations": 101,
+          "d2h_bytes": 3160,
+          "d2h_operations": 10,
+          "h2d_bytes": 136,
+          "h2d_operations": 4
+        }
+      }
+    ],
+    "memory": {
+      "device_free_bytes": 100990713856,
+      "device_total_bytes": 102014189568,
+      "estimated_peak_bytes": 302708
+    },
+    "parity": {
+      "candidate_backend": "cuda-f64-resident-reuse",
+      "max_relative_error": 8.824187684611366e-07,
+      "reference_backend": "cpu-f64",
+      "rms_relative_error": 2.3848355169063643e-07,
+      "sample_count": 16
+    },
+    "schema_version": 1,
+    "setup_transfer": {
+      "d2d_bytes": 0,
+      "d2d_operations": 0,
+      "d2h_bytes": 0,
+      "d2h_operations": 0,
+      "h2d_bytes": 128444,
+      "h2d_operations": 30
+    },
+    "status": "passed",
+    "total_transfer": {
+      "d2d_bytes": 283296,
+      "d2d_operations": 439,
+      "d2h_bytes": 13772,
+      "d2h_operations": 47,
+      "h2d_bytes": 22872,
+      "h2d_operations": 35
+    },
+    "workload": "f64-resident-reuse-4-frequency"
+  },
+  "logs": [
+    "/tmp/ir-native-memcheck.log",
+    "/tmp/ir-room-native-final.log",
+    "/tmp/ir-room-native-all.log",
+    "/tmp/ir-room-f32-isolated.log",
+    "/tmp/ir-room-f32-unfused.log",
+    "/tmp/ir-room-resident-cancel.log",
+    "/tmp/ir-cuda_mid_frequency_cancellation_is_typed_and_does_not_publish_partial_result.log",
+    "/tmp/ir-cuda_injected_launch_failure_is_typed_unwound_and_retryable.log",
+    "/tmp/ir-cuda_injected_device_loss_requires_recreated_context_and_retries.log",
+    "/tmp/ir-compute-cpu.log",
+    "/tmp/ir-room-cpu.log",
+    "/tmp/ir-room-pipeline.log",
+    "/tmp/ir-restored-check.log",
+    "/tmp/ir-restored-clippy.log",
+    "/tmp/ir-workspace-clippy.log"
+  ],
+  "memcheck": "========= COMPUTE-SANITIZER\n\nrunning 3 tests\ntest cpu_ir_workspace_restarts_changed_rhs_and_dimension ... ok\ntest ir_workspace_quota_failure_returns_retained_storage_on_drop ... ok\ntest native_ir_workspace_restarts_changed_rhs_and_dimension ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.42s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "open_failure": {
+    "test": "cuda_fem_f32_scalar_four_frequency_reuses_krylov_workspace",
+    "fused_log": "\nrunning 1 test\n\nthread 'cuda_fem_f32_scalar_four_frequency_reuses_krylov_workspace' (57198) panicked at crates/sonium-sim-room/tests/backend_parity_runtime.rs:179:9:\noperator balance residual parity failed at frequency 0: CPU=-1.1432484412279842e-9, accelerator=1.9068447777801506e-7, work scale=0.1\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest cuda_fem_f32_scalar_four_frequency_reuses_krylov_workspace ... FAILED\n\nfailures:\n\nfailures:\n    cuda_fem_f32_scalar_four_frequency_reuses_krylov_workspace\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.57s\n\n",
+    "unfused_log": "\nrunning 1 test\n\nthread 'cuda_fem_f32_scalar_four_frequency_reuses_krylov_workspace' (60325) panicked at crates/sonium-sim-room/tests/backend_parity_runtime.rs:179:9:\noperator balance residual parity failed at frequency 0: CPU=-1.1432484412279842e-9, accelerator=1.9068447777801506e-7, work scale=0.1\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest cuda_fem_f32_scalar_four_frequency_reuses_krylov_workspace ... FAILED\n\nfailures:\n\nfailures:\n    cuda_fem_f32_scalar_four_frequency_reuses_krylov_workspace\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.56s\n\n",
+    "baseline_delta": "Disable only native Jacobi update branch in AMG; source restored afterward"
+  },
+  "verification_note": "Final room test uses restored fused source. Workspace memcheck preceded only lint cleanup (collapsed nested Drop condition and lint annotation); no algorithm changes afterward."
+}

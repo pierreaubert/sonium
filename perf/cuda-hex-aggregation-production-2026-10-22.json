@@ -1,0 +1,235 @@
+{
+  "date": "2026-10-22",
+  "scope": "Classical/aggregation AMG in retained warped Q1/Q2/Q3 material and boundary sweeps",
+  "fix": "Explicit DeviceGmresSession cycle reservation now also reserves the restart iterate; later first restart no longer allocates",
+  "initial_failure": "Q3 aggregation converged before one full cycle, then a changed frequency needed a restart and allocated one buffer.",
+  "solves": [
+    {
+      "degree": "P1",
+      "aggregation": false,
+      "wavenumber": "0+0i",
+      "iterations": 14,
+      "residual": 6.553377233060917e-11
+    },
+    {
+      "degree": "P1",
+      "aggregation": false,
+      "wavenumber": "4+0.2i",
+      "iterations": 17,
+      "residual": 7.589087609828323e-11
+    },
+    {
+      "degree": "P1",
+      "aggregation": false,
+      "wavenumber": "6-0.1i",
+      "iterations": 19,
+      "residual": 2.3150298327923268e-11
+    },
+    {
+      "degree": "P1",
+      "aggregation": false,
+      "wavenumber": "0+0i",
+      "iterations": 15,
+      "residual": 1.0416213957266586e-11
+    },
+    {
+      "degree": "P1",
+      "aggregation": true,
+      "wavenumber": "0+0i",
+      "iterations": 14,
+      "residual": 2.6890222121174963e-11
+    },
+    {
+      "degree": "P1",
+      "aggregation": true,
+      "wavenumber": "4+0.2i",
+      "iterations": 17,
+      "residual": 3.5507880702308315e-11
+    },
+    {
+      "degree": "P1",
+      "aggregation": true,
+      "wavenumber": "6-0.1i",
+      "iterations": 19,
+      "residual": 2.0455772962495567e-13
+    },
+    {
+      "degree": "P1",
+      "aggregation": true,
+      "wavenumber": "0+0i",
+      "iterations": 14,
+      "residual": 2.3592302000448904e-11
+    },
+    {
+      "degree": "P2",
+      "aggregation": false,
+      "wavenumber": "0+0i",
+      "iterations": 32,
+      "residual": 6.350763954303436e-11
+    },
+    {
+      "degree": "P2",
+      "aggregation": false,
+      "wavenumber": "4+0.2i",
+      "iterations": 45,
+      "residual": 6.690099562466365e-11
+    },
+    {
+      "degree": "P2",
+      "aggregation": false,
+      "wavenumber": "6-0.1i",
+      "iterations": 49,
+      "residual": 5.1659866234856305e-11
+    },
+    {
+      "degree": "P2",
+      "aggregation": false,
+      "wavenumber": "0+0i",
+      "iterations": 33,
+      "residual": 4.459820057241065e-11
+    },
+    {
+      "degree": "P2",
+      "aggregation": true,
+      "wavenumber": "0+0i",
+      "iterations": 31,
+      "residual": 5.404976346775141e-11
+    },
+    {
+      "degree": "P2",
+      "aggregation": true,
+      "wavenumber": "4+0.2i",
+      "iterations": 45,
+      "residual": 4.3785011246599705e-11
+    },
+    {
+      "degree": "P2",
+      "aggregation": true,
+      "wavenumber": "6-0.1i",
+      "iterations": 48,
+      "residual": 7.445906408541477e-11
+    },
+    {
+      "degree": "P2",
+      "aggregation": true,
+      "wavenumber": "0+0i",
+      "iterations": 33,
+      "residual": 5.502236164215425e-11
+    },
+    {
+      "degree": "P3",
+      "aggregation": false,
+      "wavenumber": "0+0i",
+      "iterations": 62,
+      "residual": 8.535584193934624e-11
+    },
+    {
+      "degree": "P3",
+      "aggregation": false,
+      "wavenumber": "4+0.2i",
+      "iterations": 165,
+      "residual": 9.528001877140361e-11
+    },
+    {
+      "degree": "P3",
+      "aggregation": false,
+      "wavenumber": "6-0.1i",
+      "iterations": 224,
+      "residual": 9.991554491037071e-11
+    },
+    {
+      "degree": "P3",
+      "aggregation": false,
+      "wavenumber": "0+0i",
+      "iterations": 65,
+      "residual": 9.647430309886835e-11
+    },
+    {
+      "degree": "P3",
+      "aggregation": true,
+      "wavenumber": "0+0i",
+      "iterations": 54,
+      "residual": 8.873195439184272e-11
+    },
+    {
+      "degree": "P3",
+      "aggregation": true,
+      "wavenumber": "4+0.2i",
+      "iterations": 112,
+      "residual": 9.607515760127928e-11
+    },
+    {
+      "degree": "P3",
+      "aggregation": true,
+      "wavenumber": "6-0.1i",
+      "iterations": 166,
+      "residual": 8.29104071106808e-11
+    },
+    {
+      "degree": "P3",
+      "aggregation": true,
+      "wavenumber": "0+0i",
+      "iterations": 58,
+      "residual": 6.827880814312316e-11
+    }
+  ],
+  "refresh": [
+    {
+      "degree": "P1",
+      "aggregation": false,
+      "allocations": 0,
+      "h2d_bytes": 7744,
+      "d2h_bytes": 4
+    },
+    {
+      "degree": "P1",
+      "aggregation": true,
+      "allocations": 0,
+      "h2d_bytes": 8192,
+      "d2h_bytes": 4
+    },
+    {
+      "degree": "P2",
+      "aggregation": false,
+      "allocations": 0,
+      "h2d_bytes": 57104,
+      "d2h_bytes": 4
+    },
+    {
+      "degree": "P2",
+      "aggregation": true,
+      "allocations": 0,
+      "h2d_bytes": 67696,
+      "d2h_bytes": 4
+    },
+    {
+      "degree": "P3",
+      "aggregation": false,
+      "allocations": 0,
+      "h2d_bytes": 221248,
+      "d2h_bytes": 4
+    },
+    {
+      "degree": "P3",
+      "aggregation": true,
+      "allocations": 0,
+      "h2d_bytes": 193856,
+      "d2h_bytes": 4
+    }
+  ],
+  "validation": {
+    "native_tests_passed": 1,
+    "memcheck_errors": 0,
+    "cpu_iterative_passed": 321,
+    "cpu_fem_passed": 1947,
+    "cpu_fem_ignored": 1,
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_test_example_clippy": "passed with existing warnings"
+  },
+  "limitations": [
+    "Small manufactured discrete solution fixture; not analytic mesh convergence",
+    "Host auxiliary hierarchy setup remains",
+    "No production-wide default changed"
+  ]
+}

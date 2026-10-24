@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "scope": "Device norms for promoted block certification and contiguous CUDA device copies",
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/cublas.rs": "297377437807b9c15f0703546aac344d0e6429ead9cc47d7ab7941b7a6369208",
+    "crates/sonium-sim-room/src/fem_runner/device.rs": "8d4a7fc7defd589fc9201379a8ffea925d8503949302c2cf6aa8429989d0602b",
+    "crates/sonium-sim-room/src/fem_runner/gpu.rs": "2542dd9efbe85702e45d5fa3a94b9f86bc153f9aa36b2b8f63d0b795a31b5018"
+  },
+  "native_unit_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest fem_runner::device::tests::cuda_block_residual_norms_do_not_download_vectors ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 338 filtered out; finished in 0.50s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "production_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest cuda_fem_block_rhs_publishes_physical_ledgers ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 4.18s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "production": {
+    "artifact": "sonium-sim-room.sr1-cuda",
+    "backend": {
+      "actual": "cuda",
+      "fallback_status": "none",
+      "host_architecture": "x86_64",
+      "precision": "f32-pure",
+      "requested": "cuda"
+    },
+    "cancellation": {
+      "mid_frequency_interrupt": "not-exercised",
+      "pre_setup_test": "cuda_cancellation_rejects_before_device_setup",
+      "status": "frequency-boundary cooperative"
+    },
+    "frequency_stats": [
+      {
+        "allocation_high_water_bytes": 363201,
+        "allocation_operations": 344,
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 80.0,
+        "inner_iterations": 0,
+        "iterations": 112,
+        "max_residual": 2.499172545951525e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 3,
+        "transfer": {
+          "d2d_bytes": 234864,
+          "d2d_operations": 621,
+          "d2h_bytes": 555064,
+          "d2h_operations": 252,
+          "h2d_bytes": 20920,
+          "h2d_operations": 28
+        }
+      },
+      {
+        "allocation_high_water_bytes": 382156,
+        "allocation_operations": 77,
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 100.0,
+        "inner_iterations": 0,
+        "iterations": 52,
+        "max_residual": 9.898614052807846e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 3,
+        "transfer": {
+          "d2d_bytes": 155600,
+          "d2d_operations": 375,
+          "d2h_bytes": 266544,
+          "d2h_operations": 130,
+          "h2d_bytes": 14064,
+          "h2d_operations": 20
+        }
+      },
+      {
+        "allocation_high_water_bytes": 382692,
+        "allocation_operations": 91,
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 120.0,
+        "inner_iterations": 0,
+        "iterations": 54,
+        "max_residual": 6.580796162374061e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 3,
+        "transfer": {
+          "d2d_bytes": 159536,
+          "d2d_operations": 385,
+          "d2h_bytes": 276664,
+          "d2h_operations": 136,
+          "h2d_bytes": 16120,
+          "h2d_operations": 26
+        }
+      },
+      {
+        "allocation_high_water_bytes": 383228,
+        "allocation_operations": 85,
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 140.0,
+        "inner_iterations": 0,
+        "iterations": 84,
+        "max_residual": 7.845677831328798e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 3,
+        "transfer": {
+          "d2d_bytes": 201280,
+          "d2d_operations": 512,
+          "d2h_bytes": 420144,
+          "d2h_operations": 194,
+          "h2d_bytes": 16464,
+          "h2d_operations": 21
+        }
+      }
+    ],
+    "memory": {
+      "device_free_bytes": 100485300224,
+      "device_total_bytes": 102014189568,
+      "estimated_peak_bytes": 222536
+    },
+    "parity": {
+      "candidate_backend": "cuda-f32-block-rhs",
+      "max_relative_error": 4.412233575289707e-05,
+      "reference_backend": "cpu-f64",
+      "rms_relative_error": 1.1263059452748423e-05,
+      "sample_count": 16
+    },
+    "schema_version": 1,
+    "setup_transfer": {
+      "d2d_bytes": 0,
+      "d2d_operations": 0,
+      "d2h_bytes": 1556,
+      "d2h_operations": 5,
+      "h2d_bytes": 46692,
+      "h2d_operations": 25
+    },
+    "status": "passed",
+    "total_transfer": {
+      "d2d_bytes": 751280,
+      "d2d_operations": 1893,
+      "d2h_bytes": 1518416,
+      "d2h_operations": 712,
+      "h2d_bytes": 67568,
+      "h2d_operations": 95
+    },
+    "workload": "f32-pure-block-rhs"
+  },
+  "limitations": [
+    "Production transfer counts are unchanged; the fixture does not establish successful block acceptance rather than scalar fallback",
+    "Focused native test proves the norm helper has no new device allocations or H2D transfers and no bulk D2H transfers",
+    "Block Krylov initialization and rank fallback still use host arrays",
+    "No matched performance timing claim"
+  ]
+}

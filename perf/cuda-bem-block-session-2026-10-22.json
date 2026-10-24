@@ -1,0 +1,131 @@
+{
+  "date": "2026-10-22",
+  "revision": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree": true,
+  "scope": "Retained fixed-operator Complex64 constant-Tri3 compressed BEM block solves",
+  "api": [
+    "CudaHMatrixLinearSession::solve_block_device",
+    "CudaHMatrixLinearSession::block_solution_device",
+    "CudaHMatrixBlockSolveReport"
+  ],
+  "implementation": {
+    "operator": "Native column-major forward/transpose/Hermitian H-matrix adapters, sequential columns using retained scalar scratch",
+    "preconditioner": "Oriented Jacobi or spatial cluster inverse through persistent CSR SpMM",
+    "krylov": "Restarted block GMRES with retained restart and active-width buffers",
+    "certification": "Independent compressed per-column residual; optional host uncompressed TBEM certificate",
+    "publication": "Every scalar/block call invalidates the other publication; failure invalidates previous-solution eligibility"
+  },
+  "validation": {
+    "compute_native_tests": 1,
+    "compute_block_actions": {
+      "widths": [
+        1,
+        3,
+        2
+      ],
+      "actions": [
+        "forward",
+        "transpose",
+        "hermitian"
+      ],
+      "allocation_operations": 0,
+      "h2d_bytes": 0,
+      "d2h_bytes": 0,
+      "invalid_foreign_input_output_backend": "rejected before kernels, libraries, allocation or copies"
+    },
+    "bem_native_tests": 7,
+    "new_block_tests": 3,
+    "small_production": {
+      "panels": 80,
+      "boundary": "impedance",
+      "burton_miller": true,
+      "actions": [
+        "forward",
+        "transpose",
+        "hermitian"
+      ],
+      "preconditioners": [
+        "Jacobi",
+        "ClusterBlockJacobi"
+      ],
+      "widths": [
+        2,
+        3
+      ],
+      "width_3": "duplicate columns plus zero RHS",
+      "restart": 3
+    },
+    "compressed_production": {
+      "panels": 320,
+      "low_rank_blocks": "asserted nonzero",
+      "boundary": "rigid",
+      "burton_miller": true,
+      "action": "hermitian",
+      "preconditioner": "ClusterBlockJacobi",
+      "rhs_count": 2,
+      "restart": 5,
+      "iterations": 20,
+      "restarts": 3,
+      "host_exact_certificate": false
+    },
+    "zero_start_solve_cases": 52,
+    "identical_rhs_zero_start_repeats": 26,
+    "warm_start_cases": 26,
+    "warm_start_iterations": 0,
+    "repeat_allocation_operations": 0,
+    "compressed_residual_tolerance": 1e-09,
+    "independent_dense_residual_tolerance": 3e-07,
+    "failure_tests": [
+      "invalid widths/extent overflow",
+      "foreign RHS stream",
+      "NaN RHS",
+      "injected launch failure and recovery",
+      "exact certificate rejection",
+      "nonconvergence",
+      "zero RHS",
+      "scalar/block publication transitions"
+    ],
+    "memcheck": {
+      "compute_block_adapters": 0,
+      "bem_small_failure_recovery": 0,
+      "large_320_case": "not run under sanitizer"
+    },
+    "cpu_bem": {
+      "passed": 541,
+      "ignored": 3
+    },
+    "root_cargo_check": "passed",
+    "root_cargo_clippy": "passed with existing warnings",
+    "cuda_compute_bem_clippy": "passed with existing warnings"
+  },
+  "limits": [
+    "No performance speedup claim; H-matrix columns execute sequentially on device",
+    "Geometry, frequency, material, formulation and action remain fixed",
+    "Scalar and block workspaces coexist; common setup retains incident geometry even for arbitrary RHS",
+    "First-use widths and Krylov shapes may allocate; width replacement rebuilds block storage",
+    "Whole-session quota not established; existing raw block basis and CSR descriptor policies retained",
+    "Higher-order, directional/shared-DOF FMM and frequency-update block producers remain open",
+    "Optional exact TBEM certification downloads full solution and RHS; tests distinguish this from resident execution"
+  ],
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/hmatrix.rs": "5559a189193e04517431fc6b8b5c75aaa754fa18437ab5d1ccccd66164c9f03a",
+    "crates/sonium-compute/tests/hmatrix_block.rs": "e5669a61a1888de3e8d85b687050cbfe1fc8d4b36ce79f72dc8052209fc9859e",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_block.rs": "87673863d9d4f06a34520814f9fd82ac330463837c288e132d1c8ea3c24db6e3",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_block_tests.rs": "cfd7d557f41619e461afe8c11d002c2e4d4650fe0a674a8b9a23352694136d0f",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_linear.rs": "ebde3cdb9d8d4a02db398f3ef5e7cfe5a4a2b28f7761afe0194be8abfd10229d",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_linear_tests.rs": "ab07bc1aedc4a43737abd6615d9e730312c34abcc418e42a92233f131f025cb9",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix.rs": "0ac3ae11e0139baa22b9953d0e78a1210388e802ab80aa4d877a781b663cc1f0",
+    "crates/sonium-bem/src/core/bem_solver_cuda.rs": "547214d38bb47d36b1770f991c6ba05b3c84267363100d19020511655ccfb5db",
+    "crates/sonium-bem/src/core/bem_solver.rs": "ef19b34d735bfb81f158caf6e3ebe31aa36427dc1740a0425e3ee3b968b04117"
+  },
+  "logs": {
+    "/tmp/bem-block-all-linear-native.log": "afaab58c2b7c260cdf5fb2dad003e785db369caedd7a477dbf4ab72d50fb2447",
+    "/tmp/hmatrix-block-native-final.log": "639aa01a4752371ebae04ffb48338c23057890b08c1af408d3f77c7a57ef5ca1",
+    "/tmp/bem-block-session-memcheck.log": "754253c85dcb3c68f99b932a8f0a31ae495191fa600e1d506b962f4d430b39f1",
+    "/tmp/hmatrix-block-memcheck.log": "45d7ad95d0d88629637c3bfa8a1881bef6bcd325ec227631e0d2c5dfad77f042",
+    "/tmp/bem-block-cpu-tests.log": "43ce75b28def40b63270489afa78348a45aac098b92b83c92c8acf02bde79bbc",
+    "/tmp/bem-block-root-check.log": "6bcbb5ecc0aef810594d1b16268d43914d22420afd903b4fa9c624dab306d9fc",
+    "/tmp/bem-block-root-clippy.log": "fddd203c132fdf45cce89ea20ad8bf0ce9375c425e64e3b049539032bd162a5a",
+    "/tmp/bem-block-cuda-clippy.log": "c981ea00851f7298072fbd00cbe91382b0b16768c727fb85e17957111223916a"
+  }
+}

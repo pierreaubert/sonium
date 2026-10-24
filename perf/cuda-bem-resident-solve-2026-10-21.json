@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-21",
+  "scope": "Resident Complex64 dense LU refresh and constant Tri3 BEM assembly-to-certified-solve session",
+  "working_tree": true,
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/dense_lu.rs": "21534fa3c8f3fe58cc24e1a7f297cbde9fe1bd0b1c009750951161d393f0fc95",
+    "crates/sonium-compute/src/cuda/cublas.rs": "8788046d3648d98b53052cc4ec873e611e78eb027f6b16308664b3e1644e59e3",
+    "crates/sonium-compute/tests/cuda_dense_lu_resident.rs": "f43209923098ac81e35ad16ca44ebc22c4a09ef9ef468625e343a7ae30cffada",
+    "crates/sonium-bem/src/core/assembly/tbem_device.rs": "82e909d07bbe1226b8aeb99b3450831204ecc9f54188082f710cda0571c1a8a9",
+    "crates/sonium-bem/src/core/assembly/tbem.rs": "b6a88d221ce8f2ea84832d031414b3539c77b65b309fae9f622faffbb2268109"
+  },
+  "bem_fixture": {
+    "panels": 80,
+    "boundary_variants": 5,
+    "wave_numbers": [
+      1,
+      1.01,
+      1.02,
+      1.02
+    ],
+    "changed_rhs_each_pass": true,
+    "factorization_reused": [
+      false,
+      false,
+      false,
+      true
+    ],
+    "allocation_operations": [
+      8,
+      0,
+      0,
+      0
+    ],
+    "h2d_bytes": [
+      38400,
+      12800,
+      12800,
+      12800
+    ],
+    "tracked_d2h_bytes": [
+      20,
+      20,
+      20,
+      12
+    ],
+    "residual_tolerance": 1e-09,
+    "relative_residuals": [
+      1.2516297963438634e-15,
+      1.3237492663647552e-15,
+      1.168433991514559e-15,
+      1.1805745583690245e-15
+    ]
+  },
+  "transfer_note": "Tracked D2H counts cover explicit validation flags and LU status. cuBLAS host-result norm scalars are additional compact control traffic; bulk solution downloads occur only after the measured solve region for CPU-reference validation.",
+  "native": {
+    "resident_lu_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest native_dense_lu_refresh_actions_and_failure_recovery ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "bem_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest core::assembly::tbem::cuda_path::device::tests::native_device_tbem_mixed_boundaries_and_reuse ... BEM resident solve pass=0 residual=0.0000000000000012516297963438634 allocations=8 h2d=38400 d2h=20\nBEM resident solve pass=1 residual=0.0000000000000013237492663647552 allocations=0 h2d=12800 d2h=20\nBEM resident solve pass=2 residual=0.000000000000001168433991514559 allocations=0 h2d=12800 d2h=20\nBEM resident solve pass=3 residual=0.0000000000000011805745583690245 allocations=0 h2d=12800 d2h=12\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 550 filtered out; finished in 1.99s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "legacy_lu_parity": "\nrunning 1 test\ntest complex::cuda_dense_lu_c64_solves_forward_and_hermitian_systems ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 68 filtered out; finished in 0.41s\n\n"
+  },
+  "remaining": [
+    "Block RHS solve API and BEM adjoint session",
+    "Quadrature-schedule and geometry invalidation regression tests",
+    "Compressed and higher-order BEM producer integration",
+    "Complete CUDA coverage and FEM kernel priorities remain incomplete"
+  ],
+  "performance_claim": "No elapsed-time speedup claim; measured reuse and transfer residency only."
+}

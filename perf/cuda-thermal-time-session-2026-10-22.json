@@ -1,0 +1,132 @@
+{
+  "date": "2026-10-22",
+  "scope": "Fixed linear thermal theta integration through persistent CUDA history and PCG/AMG",
+  "public_api": [
+    "ThermalTimeStepper::prepare_cuda",
+    "CudaThermalTimeStepper::step_device",
+    "CudaThermalTimeStepper::temperature",
+    "CudaThermalTimeStepper::steps_completed"
+  ],
+  "source_sha256": "5c735f5e54814af8832ba22c995450b243b3269dfbbdcee71ba2ca194c1507f9",
+  "setup": "Host M/K/effective CSR assembly and symmetric AMG setup. Caller provides reduced free-DOF matrices, initial temperature and explicit SPD assumption.",
+  "resident_steps": "Mass and stiffness actions, theta source combination, PCG, true-residual certification and committed temperature history use CUDA. Source vectors remain caller-owned on the same stream.",
+  "validation": {
+    "native_tests": 3,
+    "memcheck_errors": 0,
+    "physical_cases": 12,
+    "physical_steps_per_case": 8,
+    "physical_steps_with_no_h2d": 96,
+    "post_first_steps_with_zero_allocations": 84,
+    "cpu_step_max_error_gate": 2e-08,
+    "continuum_max_error_gate": 0.025,
+    "physical_results": [
+      {
+        "dimension": 2,
+        "degree": "P1",
+        "theta": 0.5,
+        "free_dofs": 25,
+        "continuum_max_error": 0.002702316013122985
+      },
+      {
+        "dimension": 2,
+        "degree": "P1",
+        "theta": 0.75,
+        "free_dofs": 25,
+        "continuum_max_error": 0.0026504771599985544
+      },
+      {
+        "dimension": 2,
+        "degree": "P1",
+        "theta": 1.0,
+        "free_dofs": 25,
+        "continuum_max_error": 0.0025986581217134486
+      },
+      {
+        "dimension": 2,
+        "degree": "P2",
+        "theta": 0.5,
+        "free_dofs": 121,
+        "continuum_max_error": 0.000933010571607884
+      },
+      {
+        "dimension": 2,
+        "degree": "P2",
+        "theta": 0.75,
+        "free_dofs": 121,
+        "continuum_max_error": 0.0009703575648584151
+      },
+      {
+        "dimension": 2,
+        "degree": "P2",
+        "theta": 1.0,
+        "free_dofs": 121,
+        "continuum_max_error": 0.0010058630515337175
+      },
+      {
+        "dimension": 3,
+        "degree": "P1",
+        "theta": 0.5,
+        "free_dofs": 8,
+        "continuum_max_error": 0.021990329115978535
+      },
+      {
+        "dimension": 3,
+        "degree": "P1",
+        "theta": 0.75,
+        "free_dofs": 8,
+        "continuum_max_error": 0.02178960409477393
+      },
+      {
+        "dimension": 3,
+        "degree": "P1",
+        "theta": 1.0,
+        "free_dofs": 8,
+        "continuum_max_error": 0.021590775878233326
+      },
+      {
+        "dimension": 3,
+        "degree": "P2",
+        "theta": 0.5,
+        "free_dofs": 125,
+        "continuum_max_error": 0.01552039204262945
+      },
+      {
+        "dimension": 3,
+        "degree": "P2",
+        "theta": 0.75,
+        "free_dofs": 125,
+        "continuum_max_error": 0.01527575319522445
+      },
+      {
+        "dimension": 3,
+        "degree": "P2",
+        "theta": 1.0,
+        "free_dofs": 125,
+        "continuum_max_error": 0.015041741382834428
+      }
+    ],
+    "source_weighting": "T=2+t with M=2, K=3, f(t)=8+3t: five steps each for theta 0, 0.5, 0.75, 1; error <1e-10",
+    "failure_contract": "Invalid dt/theta/CSR; wrong-length and foreign-stream sources reject before dispatch; NaN, injected launch/D2D failures and nonconvergence preserve committed temperature and step count; valid retry succeeds",
+    "cpu_fem": "1963 passed, one ignored",
+    "root_check_then_clippy": "passed with existing warnings",
+    "cuda_fem_clippy": "passed with existing warnings"
+  },
+  "limitations": [
+    "Fixed linear M/K, dt, theta and constraint layout; reprepare for changes",
+    "No nonlinear/advection admission implied by PCG; caller must certify effective SPD operator",
+    "Pure-Neumann/DAE and boundary lifting are caller-owned; physical tests use homogeneous Dirichlet reduction",
+    "Explicit theta stability is not inferred from linear residual",
+    "Initial/assembly/source uploads and requested output downloads remain explicit",
+    "Compact validation and convergence reductions reach host",
+    "Sparse/preconditioner allocations retain partial pool-quota coverage",
+    "No end-to-end speedup claim; continuum discretization error is distinct from CPU/GPU parity"
+  ],
+  "logs": [
+    "/tmp/thermal-time-native-final.log",
+    "/tmp/thermal-time-memcheck.log",
+    "/tmp/thermal-time-cpu.log",
+    "/tmp/thermal-time-root-check.log",
+    "/tmp/thermal-time-root-clippy.log",
+    "/tmp/thermal-time-clippy-final.log"
+  ]
+}

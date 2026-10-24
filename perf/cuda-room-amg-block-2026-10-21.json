@@ -1,0 +1,540 @@
+{
+  "date": "2026-10-21",
+  "scope": "Production CUDA pure-f32 multi-source block solves with cached shifted-Laplacian AMG, plus configured mesh resolution parity",
+  "revision": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree": true,
+  "source_sha256": {
+    "crates/sonium-sim-room/src/fem_runner/gpu.rs": "9540152588f1bdb4e1e3dfa666762fb2ac381a640da3e2f9faef517a25da1522",
+    "crates/sonium-sim-room/tests/backend_parity_runtime.rs": "1b8605c18721fdc59bad69e491563a5def37dfb391ef3b38aec0ff2ce70f2a4b"
+  },
+  "point_jacobi_baseline": {
+    "artifact": "sonium-sim-room.sr1-cuda",
+    "backend": {
+      "actual": "cuda",
+      "fallback_status": "none",
+      "host_architecture": "x86_64",
+      "precision": "f32-pure",
+      "requested": "cuda"
+    },
+    "cancellation": {
+      "mid_frequency_interrupt": "not-exercised",
+      "pre_setup_test": "cuda_cancellation_rejects_before_device_setup",
+      "status": "frequency-boundary cooperative"
+    },
+    "frequency_stats": [
+      {
+        "allocation_high_water_bytes": 364199,
+        "allocation_operations": 248,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 80.0,
+        "inner_iterations": 0,
+        "iterations": 112,
+        "max_residual": 2.4991725488069387e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 205168,
+          "d2d_operations": 552,
+          "d2h_bytes": 28532,
+          "d2h_operations": 240,
+          "h2d_bytes": 2348,
+          "h2d_operations": 16
+        }
+      },
+      {
+        "allocation_high_water_bytes": 364727,
+        "allocation_operations": 3,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 100.0,
+        "inner_iterations": 0,
+        "iterations": 114,
+        "max_residual": 2.284326154688888e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 206656,
+          "d2d_operations": 556,
+          "d2h_bytes": 28736,
+          "d2h_operations": 241,
+          "h2d_bytes": 1008,
+          "h2d_operations": 9
+        }
+      },
+      {
+        "allocation_high_water_bytes": 364727,
+        "allocation_operations": 0,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 120.0,
+        "inner_iterations": 0,
+        "iterations": 116,
+        "max_residual": 1.9403449649604e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 208144,
+          "d2d_operations": 560,
+          "d2h_bytes": 29200,
+          "d2h_operations": 243,
+          "h2d_bytes": 1528,
+          "h2d_operations": 10
+        }
+      },
+      {
+        "allocation_high_water_bytes": 365255,
+        "allocation_operations": 3,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 140.0,
+        "inner_iterations": 0,
+        "iterations": 120,
+        "max_residual": 1.654564053433542e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 214128,
+          "d2d_operations": 576,
+          "d2h_bytes": 31088,
+          "d2h_operations": 251,
+          "h2d_bytes": 1048,
+          "h2d_operations": 9
+        }
+      }
+    ],
+    "memory": {
+      "device_free_bytes": 100485300224,
+      "device_total_bytes": 102014189568,
+      "estimated_peak_bytes": 222536
+    },
+    "parity": {
+      "candidate_backend": "cuda-f32-block-rhs",
+      "max_relative_error": 1.5678062945050825e-05,
+      "reference_backend": "cpu-f64",
+      "rms_relative_error": 4.459545058328167e-06,
+      "sample_count": 16
+    },
+    "schema_version": 1,
+    "setup_transfer": {
+      "d2d_bytes": 0,
+      "d2d_operations": 0,
+      "d2h_bytes": 1556,
+      "d2h_operations": 5,
+      "h2d_bytes": 46692,
+      "h2d_operations": 25
+    },
+    "status": "passed",
+    "total_transfer": {
+      "d2d_bytes": 834096,
+      "d2d_operations": 2244,
+      "d2h_bytes": 117556,
+      "d2h_operations": 975,
+      "h2d_bytes": 5932,
+      "h2d_operations": 44
+    },
+    "workload": "f32-pure-block-rhs"
+  },
+  "amg_64_nodes_2_levels": {
+    "artifact": "sonium-sim-room.sr1-cuda",
+    "backend": {
+      "actual": "cuda",
+      "fallback_status": "none",
+      "host_architecture": "x86_64",
+      "precision": "f32-pure",
+      "requested": "cuda"
+    },
+    "cancellation": {
+      "mid_frequency_interrupt": "not-exercised",
+      "pre_setup_test": "cuda_cancellation_rejects_before_device_setup",
+      "status": "frequency-boundary cooperative"
+    },
+    "frequency_stats": [
+      {
+        "allocation_high_water_bytes": 421175,
+        "allocation_operations": 232,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 80.0,
+        "inner_iterations": 0,
+        "iterations": 44,
+        "max_residual": 2.4991725488069387e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 131024,
+          "d2d_operations": 334,
+          "d2h_bytes": 7468,
+          "d2h_operations": 108,
+          "h2d_bytes": 23096,
+          "h2d_operations": 32
+        }
+      },
+      {
+        "allocation_high_water_bytes": 421175,
+        "allocation_operations": 0,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 100.0,
+        "inner_iterations": 0,
+        "iterations": 44,
+        "max_residual": 2.284326154688888e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 131024,
+          "d2d_operations": 334,
+          "d2h_bytes": 6336,
+          "d2h_operations": 101,
+          "h2d_bytes": 448,
+          "h2d_operations": 9
+        }
+      },
+      {
+        "allocation_high_water_bytes": 482097,
+        "allocation_operations": 42,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 120.0,
+        "inner_iterations": 0,
+        "iterations": 44,
+        "max_residual": 1.9403449649604e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 132448,
+          "d2d_operations": 339,
+          "d2h_bytes": 7644,
+          "d2h_operations": 110,
+          "h2d_bytes": 22892,
+          "h2d_operations": 28
+        }
+      },
+      {
+        "allocation_high_water_bytes": 482097,
+        "allocation_operations": 0,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 140.0,
+        "inner_iterations": 0,
+        "iterations": 44,
+        "max_residual": 1.654564053433542e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 132448,
+          "d2d_operations": 339,
+          "d2h_bytes": 6512,
+          "d2h_operations": 103,
+          "h2d_bytes": 456,
+          "h2d_operations": 9
+        }
+      }
+    ],
+    "memory": {
+      "device_free_bytes": 100483203072,
+      "device_total_bytes": 102014189568,
+      "estimated_peak_bytes": 234356
+    },
+    "parity": {
+      "candidate_backend": "cuda-f32-block-rhs",
+      "max_relative_error": 1.5678062945050825e-05,
+      "reference_backend": "cpu-f64",
+      "rms_relative_error": 4.459545058328167e-06,
+      "sample_count": 16
+    },
+    "schema_version": 1,
+    "setup_transfer": {
+      "d2d_bytes": 0,
+      "d2d_operations": 0,
+      "d2h_bytes": 1556,
+      "d2h_operations": 5,
+      "h2d_bytes": 49440,
+      "h2d_operations": 27
+    },
+    "status": "passed",
+    "total_transfer": {
+      "d2d_bytes": 526944,
+      "d2d_operations": 1346,
+      "d2h_bytes": 27960,
+      "d2h_operations": 422,
+      "h2d_bytes": 46892,
+      "h2d_operations": 78
+    },
+    "workload": "f32-pure-block-rhs"
+  },
+  "amg_150_nodes_3_levels": {
+    "artifact": "sonium-sim-room.sr1-cuda",
+    "backend": {
+      "actual": "cuda",
+      "fallback_status": "none",
+      "host_architecture": "x86_64",
+      "precision": "f32-pure",
+      "requested": "cuda"
+    },
+    "cancellation": {
+      "mid_frequency_interrupt": "not-exercised",
+      "pre_setup_test": "cuda_cancellation_rejects_before_device_setup",
+      "status": "frequency-boundary cooperative"
+    },
+    "frequency_stats": [
+      {
+        "allocation_high_water_bytes": 959183,
+        "allocation_operations": 255,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 80.0,
+        "inner_iterations": 0,
+        "iterations": 44,
+        "max_residual": 3.914215713222992e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 290048,
+          "d2d_operations": 339,
+          "d2h_bytes": 12484,
+          "d2h_operations": 114,
+          "h2d_bytes": 55172,
+          "h2d_operations": 44
+        }
+      },
+      {
+        "allocation_high_water_bytes": 959183,
+        "allocation_operations": 0,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 100.0,
+        "inner_iterations": 0,
+        "iterations": 44,
+        "max_residual": 2.411823370937376e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 290048,
+          "d2d_operations": 339,
+          "d2h_bytes": 9264,
+          "d2h_operations": 103,
+          "h2d_bytes": 456,
+          "h2d_operations": 9
+        }
+      },
+      {
+        "allocation_high_water_bytes": 1060805,
+        "allocation_operations": 68,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 120.0,
+        "inner_iterations": 0,
+        "iterations": 46,
+        "max_residual": 2.2673923471689762e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 295616,
+          "d2d_operations": 349,
+          "d2h_bytes": 12868,
+          "d2h_operations": 118,
+          "h2d_bytes": 55168,
+          "h2d_operations": 40
+        }
+      },
+      {
+        "allocation_high_water_bytes": 1060805,
+        "allocation_operations": 0,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 140.0,
+        "inner_iterations": 0,
+        "iterations": 48,
+        "max_residual": 1.9193219117931066e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 301184,
+          "d2d_operations": 359,
+          "d2h_bytes": 10032,
+          "d2h_operations": 111,
+          "h2d_bytes": 488,
+          "h2d_operations": 9
+        }
+      }
+    ],
+    "memory": {
+      "device_free_bytes": 100485300224,
+      "device_total_bytes": 102014189568,
+      "estimated_peak_bytes": 568068
+    },
+    "parity": {
+      "candidate_backend": "cuda-f32-block-rhs",
+      "max_relative_error": 4.611910113491485e-05,
+      "reference_backend": "cpu-f64",
+      "rms_relative_error": 1.2913983514165676e-05,
+      "sample_count": 16
+    },
+    "schema_version": 1,
+    "setup_transfer": {
+      "d2d_bytes": 0,
+      "d2d_operations": 0,
+      "d2h_bytes": 3620,
+      "d2h_operations": 5,
+      "h2d_bytes": 128608,
+      "h2d_operations": 27
+    },
+    "status": "passed",
+    "total_transfer": {
+      "d2d_bytes": 1176896,
+      "d2d_operations": 1386,
+      "d2h_bytes": 44648,
+      "d2h_operations": 446,
+      "h2d_bytes": 111284,
+      "h2d_operations": 102
+    },
+    "workload": "f32-pure-block-rhs"
+  },
+  "validation": {
+    "final-memcheck": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest cuda_fem_amg_block_refined_mesh_publishes_physical_ledgers ... [2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): building mesh for max_freq=140 Hz, grading 1.0x\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda) mesh: 150 nodes, 480 elements (fine spacing 5 elem/m, grading 1.0x, radius 0.20 m) built in 1ms\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): assembled K nnz=4800, M nnz=7680, 6 boundary matrices in 1ms\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): CUDA device 0 acquired\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): CUDA device 0 memory: free 93.58 GiB, total 95.01 GiB, conservative budget 74.87 GiB\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda, f32-pure, AMG(P,Chebyshev smoother)): estimated peak GPU memory per frequency: 0 MiB (A32 0 MiB + basis32 0 MiB + P 0 MiB + diag 0 MiB + precond scratch 0 MiB + Krylov basis 0 MiB + scratch 0 MiB + promoted residual 0 MiB)\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda, f32-pure): solving 2 sources \u00d7 4 frequencies with AMG(P,Chebyshev smoother) preconditioner\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda, f32-pure): solver budget: ir_outer<=100 ir_inner<=160 ir_restart=30 ir_tol=1.0e-6; f32_iter<=300 f32_est_tol=1.0e-6 f32_promoted_res_tol=1.0e-6\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): rebuilding reusable GPU preconditioners every 2 freqs\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): uploaded reusable CSR structure nnz=1632 in 0ms\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): uploaded reusable value bases (8 vectors, nnz=1632) in 0ms\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): precomputed 2 source RHS bases in 1ms\n[2026-10-21T16:06:14Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 1/4 (80.0 Hz) started\n[2026-10-21T16:06:14Z DEBUG sonium_sim_room::fem_runner::gpu] FEM (cuda): AMG(P) levels=3 setup+upload=91ms\n[2026-10-21T16:06:15Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 1/4 (80.0 Hz) done in 1.1s: matrix=0ms, upload=2ms, RHS=0ms, solve=992ms, outer=44, inner=0, max_res=3.91e-7\n[2026-10-21T16:06:15Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 2/4 (100.0 Hz) started\n[2026-10-21T16:06:16Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 2/4 (100.0 Hz) done in 946ms: matrix=0ms, upload=1ms, RHS=0ms, solve=944ms, outer=44, inner=0, max_res=2.41e-7\n[2026-10-21T16:06:16Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 3/4 (120.0 Hz) started\n[2026-10-21T16:06:16Z DEBUG sonium_sim_room::fem_runner::gpu] FEM (cuda): AMG(P) levels=3 setup+upload=13ms\n[2026-10-21T16:06:17Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 3/4 (120.0 Hz) done in 996ms: matrix=0ms, upload=1ms, RHS=0ms, solve=978ms, outer=46, inner=0, max_res=2.27e-7\n[2026-10-21T16:06:17Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 4/4 (140.0 Hz) started\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 4/4 (140.0 Hz) done in 1.0s: matrix=0ms, upload=1ms, RHS=0ms, solve=1.0s, outer=48, inner=0, max_res=1.92e-7\nok\ntest cuda_fem_amg_block_rhs_publishes_physical_ledgers ... [2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): building mesh for max_freq=140 Hz, grading 1.0x\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda) mesh: 64 nodes, 162 elements (fine spacing 3 elem/m, grading 1.0x, radius 0.20 m) built in 0ms\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): assembled K nnz=1620, M nnz=2592, 6 boundary matrices in 0ms\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): CUDA device 0 acquired\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): CUDA device 0 memory: free 93.58 GiB, total 95.01 GiB, conservative budget 74.87 GiB\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda, f32-pure, AMG(P,Chebyshev smoother)): estimated peak GPU memory per frequency: 0 MiB (A32 0 MiB + basis32 0 MiB + P 0 MiB + diag 0 MiB + precond scratch 0 MiB + Krylov basis 0 MiB + scratch 0 MiB + promoted residual 0 MiB)\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda, f32-pure): solving 2 sources \u00d7 4 frequencies with AMG(P,Chebyshev smoother) preconditioner\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda, f32-pure): solver budget: ir_outer<=100 ir_inner<=160 ir_restart=30 ir_tol=1.0e-6; f32_iter<=300 f32_est_tol=1.0e-6 f32_promoted_res_tol=1.0e-6\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): rebuilding reusable GPU preconditioners every 2 freqs\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): uploaded reusable CSR structure nnz=622 in 0ms\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): uploaded reusable value bases (8 vectors, nnz=622) in 0ms\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): precomputed 2 source RHS bases in 1ms\n[2026-10-21T16:06:18Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 1/4 (80.0 Hz) started\n[2026-10-21T16:06:18Z DEBUG sonium_sim_room::fem_runner::gpu] FEM (cuda): AMG(P) levels=2 setup+upload=6ms\n[2026-10-21T16:06:19Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 1/4 (80.0 Hz) done in 561ms: matrix=0ms, upload=1ms, RHS=0ms, solve=553ms, outer=44, inner=0, max_res=2.50e-7\n[2026-10-21T16:06:19Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 2/4 (100.0 Hz) started\n[2026-10-21T16:06:19Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 2/4 (100.0 Hz) done in 551ms: matrix=0ms, upload=1ms, RHS=0ms, solve=549ms, outer=44, inner=0, max_res=2.28e-7\n[2026-10-21T16:06:19Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 3/4 (120.0 Hz) started\n[2026-10-21T16:06:19Z DEBUG sonium_sim_room::fem_runner::gpu] FEM (cuda): AMG(P) levels=2 setup+upload=8ms\n[2026-10-21T16:06:20Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 3/4 (120.0 Hz) done in 638ms: matrix=0ms, upload=1ms, RHS=0ms, solve=627ms, outer=44, inner=0, max_res=1.94e-7\n[2026-10-21T16:06:20Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 4/4 (140.0 Hz) started\n[2026-10-21T16:06:21Z INFO  sonium_sim_room::fem_runner::gpu] FEM (cuda): frequency 4/4 (140.0 Hz) done in 643ms: matrix=0ms, upload=1ms, RHS=0ms, solve=641ms, outer=44, inner=0, max_res=1.65e-7\nok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 7.37s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "refined-memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\n\nthread 'cuda_fem_amg_block_refined_mesh_publishes_physical_ledgers' (2017324) panicked at crates/sonium-sim-room/tests/backend_parity_runtime.rs:814:43:\ncalled `Result::unwrap()` on an `Err` value: \"backend-parity error exceeds budget: RMS=0.35768436122998637 (limit 0.02), max=0.9425224743598414 (limit 0.05)\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\ntest cuda_fem_amg_block_refined_mesh_publishes_physical_ledgers ... FAILED\n\nfailures:\n\nfailures:\n    cuda_fem_amg_block_refined_mesh_publishes_physical_ledgers\n\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 11 filtered out; finished in 3.00s\n\n========= Target application returned an error\n========= ERROR SUMMARY: 0 errors\n",
+    "room-cpu": "    Blocking waiting for file lock on build directory\n   Compiling sonium-compute v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-compute)\n   Compiling sonium-solvers-core v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers/crates/sonium-solvers-core)\n   Compiling sonium-fft v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-fft)\n   Compiling sonium-xem v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-xem)\n   Compiling sonium-solvers-sparse v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers/crates/sonium-solvers-sparse)\n   Compiling sonium-solvers-direct v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers/crates/sonium-solvers-direct)\n   Compiling sonium-solvers-time-integration v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers/crates/sonium-solvers-time-integration)\n   Compiling sonium-wave v0.6.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-wave)\n   Compiling sonium-mesher v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-mesher)\n   Compiling sonium-solvers-eigen v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers/crates/sonium-solvers-eigen)\n   Compiling sonium-solvers-iterative v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers/crates/sonium-solvers-iterative)\n   Compiling sonium-solvers-preconditioners v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers/crates/sonium-solvers-preconditioners)\n   Compiling sonium-solvers-optimization v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers/crates/sonium-solvers-optimization)\n   Compiling sonium-audio v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-audio)\n   Compiling sonium-solvers-nonlinear v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers/crates/sonium-solvers-nonlinear)\n   Compiling sonium-solvers v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-solvers)\n   Compiling sonium-fem v0.7.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-fem)\n   Compiling sonium-bem v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-bem)\n   Compiling sonium-sim-room v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-sim-room)\n    Finished `test` profile [optimized + debuginfo] target(s) in 21.68s\n     Running unittests src/lib.rs (target/debug/deps/sonium_sim_room-d39b268af4fee873)\n\nrunning 332 tests\ntest backend_parity::tests::exact_solved_backends_have_zero_complex_error ... ok\ntest backend_parity::tests::normalized_spatial_patterns_ignore_absolute_scale ... ok\ntest backend_parity::tests::normalized_spatial_patterns_reject_topology_and_non_finite_inputs ... ok\ntest backend_parity::tests::parity_rejects_invalid_labels_tolerances_and_budgets ... ok\ntest backend_parity::tests::normalized_spatial_patterns_reject_wrong_distribution_and_bad_budget ... ok\ntest backend_parity::tests::parity_rejects_topology_provenance_and_non_finite_inputs ... ok\ntest backend_parity::tests::parity_reports_error_and_rejects_budget_overrun ... ok\ntest energy_validation::fem_operator_work_tests::boundary_flux_rejects_invalid_inputs ... ok\ntest energy_validation::fem_operator_work_tests::operator_work_rejects_mismatched_or_non_finite_inputs ... ok\ntest energy_validation::fem_operator_work_tests::physical_power_rejects_invalid_normalization_inputs_and_preserves_sign ... ok\ntest energy_validation::fem_operator_work_tests::operator_work_terms_close_with_explicit_complex_operator ... ok\ntest csv_export::tests::rejects_non_monotonic_frequency_grid_before_writing_files ... ok\ntest energy_validation::fem_operator_work_tests::physical_power_uses_peak_phasor_cycle_average_normalization ... ok\ntest energy_validation::tests::empty_and_invalid_floor_are_rejected ... ok\ntest energy_validation::tests::exact_passive_balance_passes_relative_and_absolute_budgets ... ok\ntest csv_export::tests::export_writes_provenance_sidecar_aligned_with_frequency_grid ... ok\ntest energy_validation::tests::invalid_report_metrics_and_budgets_are_rejected ... ok\ntest energy_validation::tests::malformed_frequency_grid_is_rejected ... ok\ntest energy_validation::tests::negative_power_is_rejected_as_non_passive ... ok\ntest energy_validation::tests::non_finite_power_and_residual_are_rejected ... ok\ntest energy_validation::tests::residual_is_reported_and_budgeted ... ok\ntest external_reference::tests::complex_directivity_round_trips_with_frequency_patterns ... ok\ntest external_reference::tests::directional_source_is_exported_without_downgrading_to_isotropic ... ok\ntest external_reference::tests::external_command_rejects_zero_timeout_before_launch ... ok\ntest external_reference::tests::isotropic_manifest_is_digest_bound_deterministic_and_freefem_ready ... ok\ntest external_reference::tests::tampering_or_unsafe_labels_fail_closed ... ok\ntest fast_room::tests::cpu_modal_basis_matches_independent_rigid_shoebox_reference ... ok\ntest fast_room::tests::blend_is_continuous_and_bounded ... ok\ntest external_reference::tests::sampled_directivity_round_trips_and_invalid_axes_fail_closed ... ok\ntest fast_room::tests::cpu_modal_path_matches_compact_rigid_shoebox_zero_mode_reference ... ok\ntest fast_room::tests::fast_hybrid_rejects_nonfinite_inputs_before_numerical_setup ... ok\ntest fast_room::tests::invalid_materials_return_errors_instead_of_panicking ... ok\ntest fast_room::tests::modal_convergence_rejects_malformed_requests_before_modal_work ... ok\ntest fast_room::tests::modal_convergence_accepts_the_release_fixture_budget ... ok\ntest fast_room::tests::fast_hybrid_preserves_output_shape_and_finite_phase ... ok\ntest fast_room::tests::modal_convergence_report_rejects_non_monotonic_metadata ... ok\ntest fast_room::tests::mode_frequency_reference_includes_zero_mode_and_rejects_nonfinite_inputs ... ok\ntest fast_room::tests::modal_convergence_reports_growing_basis_and_finite_adjacent_errors ... ok\ntest fast_room::tests::rejects_non_rectangular_rooms ... ok\ntest fast_room::tests::zero_mode_reference_rejects_nonphysical_inputs ... ok\ntest fem_runner::compute::tests::barycentric_coords_reproduce_point_on_non_symmetric_tet ... ok\ntest fem_runner::device::tests::block_listener_extraction_matches_per_column_results ... ok\ntest fem_runner::device::tests::block_residual_norms_handle_zero_and_nonfinite_columns ... ok\ntest fem_runner::device::tests::listeners_are_uploaded_once_and_extracted_without_full_solution_copy ... ok\ntest fast_room::tests::sampled_field_matches_listener_evaluation_and_rejects_bad_requests ... ok\ntest fem_runner::diagnostics_contract_tests::accepts_consistent_converged_stats ... ok\ntest fem_runner::device::tests::block_rhs_assembler_preserves_source_column_layout ... ok\ntest fem_runner::diagnostics_contract_tests::accepts_cuda_backend_diagnostics_with_per_frequency_evidence ... ok\ntest fem_runner::diagnostics_contract_tests::labels_reduced_domain_and_device_energy_evidence_gaps ... ok\ntest fem_runner::device::tests::rhs_basis_accumulates_on_device_for_arbitrary_entry_order ... ok\ntest fem_runner::diagnostics_contract_tests::rejects_accelerator_diagnostics_without_residency_evidence ... ok\ntest fem_runner::diagnostics_contract_tests::rejects_backend_mismatch_without_explicit_fallback ... ok\ntest fem_runner::diagnostics_contract_tests::rejects_boundary_flux_that_disagrees_with_physical_power ... ok\ntest fem_runner::diagnostics_contract_tests::rejects_boundary_flux_without_matching_physical_power ... ok\ntest fem_runner::diagnostics_contract_tests::rejects_incomplete_physical_evidence_status ... ok\ntest fem_runner::diagnostics_contract_tests::rejects_inconsistent_aggregate_counters ... ok\ntest fem_runner::diagnostics_contract_tests::rejects_invalid_metrics_and_empty_stats ... ok\ntest fem_runner::diagnostics_contract_tests::rejects_nonconverged_stats ... ok\ntest fem_runner::diagnostics_contract_tests::rejects_physical_power_without_operator_work ... ok\ntest fem_runner::diagnostics_contract_tests::transfer_deltas_saturate_when_backend_counters_reset ... ok\ntest fem_runner::fem_run_diagnostics::failure_diagnostics_tests::attaching_diagnostics_preserves_legacy_typed_downcasts ... ok\ntest fem_runner::fem_run_diagnostics::failure_diagnostics_tests::every_failure_class_maps_to_a_closed_stage_and_safe_publication ... ok\ntest fem_runner::fem_run_diagnostics::failure_diagnostics_tests::stage_and_recovery_labels_are_stable_for_artifact_checkers ... ok\ntest fem_runner::physical_convergence::tests::accepts_three_valid_labelled_specs_without_running_a_solver ... ok\ntest fem_runner::physical_convergence::tests::rejects_duplicate_or_blank_level_labels_before_expensive_work ... ok\ntest fem_runner::physical_convergence::tests::rejects_invalid_convergence_limits_before_expensive_work ... ok\ntest fem_runner::physical_convergence::tests::rejects_invalid_mesh_configuration_before_expensive_work ... ok\ntest fem_runner::physical_convergence::tests::rejects_non_refining_grading_before_expensive_work ... ok\ntest fem_runner::fem_mesh_config::l_shaped_tests::identical_consecutive_scenarios_share_the_cached_mesh ... ok\ntest fem_runner::run::lane_pool_tests::lane_budget_splits_pool_without_oversubscription ... ok\ntest fem_runner::run::schedule_tests::frequency_adapter_commits_all_source_blocks_as_one_frequency ... ok\ntest fem_runner::run::schedule_tests::frequency_adapter_requires_one_full_source_batch_per_frequency ... ok\ntest fem_runner::run::schedule_tests::resumed_frequency_adapter_replays_prefix_without_double_commit ... ok\ntest fem_runner::run_state::tests::cancellation_is_cloneable_and_first_error_wins ... ok\ntest fem_runner::run_state::tests::checkpoint_commits_in_order_and_round_trips_json ... ok\ntest fem_runner::run_state::tests::concurrent_executor_cancels_all_lanes_after_first_callback_error ... ok\ntest fem_runner::run_state::tests::concurrent_executor_runs_lanes_and_commits_in_schedule_order ... ok\ntest fem_runner::run_state::tests::executor_durably_cancels_on_callback_failure_or_request ... ok\ntest fem_runner::run_state::tests::out_of_order_and_observed_memory_are_rejected ... ok\ntest fem_runner::run_state::tests::executor_dispatches_in_order_and_resumes_persisted_work ... ok\ntest fem_runner::run_state::tests::restart_and_schedule_tampering_fail_closed ... ok\ntest fem_runner::solve::cancellation_tests::block_cancellation_is_a_typed_error_before_partial_publish ... ok\ntest fem_runner::run_state::tests::strict_json_rejects_unknown_fields_and_invalid_state ... ok\ntest fem_runner::run_state::tests::concurrent_commit_cancellation_does_not_drain_buffered_completions ... ok\ntest fem_runner::solve::cancellation_tests::scalar_cancellation_is_a_typed_error_before_partial_publish ... ok\ntest fem_runner::tests::block_source_timing_fixture ... ignored, timing fixture, run explicitly\ntest fem_runner::solve::partitioned_tests::partitioned_block_solve_rejects_gaps_and_pre_cancelled_runs ... ok\ntest fem_runner::tests::checked_tbem_admittance_rejects_invalid_materials_and_frequencies ... ok\ntest fem_runner::tests::conventional_csl_has_negative_mass_shift ... ok\ntest fem_runner::tests::invalid_boundary_materials_return_checked_errors ... ok\ntest fem_runner::tests::iteration_spike_uses_trailing_median ... ok\ntest fem_runner::tests::legacy_recycler_selector_constructs_supported_gcro_dr_subspaces ... ok\ntest external_reference::tests::external_command_round_trips_inputs_and_validates_response_topology ... ok\ntest fem_runner::tests::test_absorption_backfit_is_monotonic_at_reference_frequency ... ok\ntest fem_runner::tests::test_absorption_backfit_saturates_unreachable_high_targets ... ok\ntest fem_runner::tests::nonfinite_surface_impedance_is_rejected_at_resolve ... ok\ntest fem_runner::tests::test_absorption_tbem_admittance_matches_fem_boundary_term ... ok\ntest fem_runner::tests::test_amplitude_calibration_targets_85_db_at_1m_1khz ... ok\ntest fem_runner::tests::test_bicgstab_fallback_preserves_exact_failed_iterate ... ok\ntest fem_runner::tests::test_combined_passive_losses_strengthen_dissipative_quadratic_form ... ok\ntest fem_runner::tests::test_complex_grid_rhs_carries_pattern_phase_into_fem_forcing ... ok\ntest fem_runner::tests::test_complex_wavenumber_uses_configured_modal_damping_floor ... ok\ntest fem_runner::tests::test_directional_source_rhs_is_stronger_in_front_than_behind ... ok\ntest fem_runner::tests::test_default_solver_recycling_covers_small_restart ... ok\ntest fem_runner::tests::test_fallback_ladder_has_explicit_iteration_bounds ... ok\ntest fem_runner::tests::test_fem_run_diagnostics_aggregates_frequency_stats ... ok\ntest fem_runner::run_state::tests::checkpoint_file_round_trip_and_corruption_are_checked ... ok\ntest fem_runner::tests::test_passive_volume_and_wall_losses_have_same_operator_sign ... ok\ntest fem_runner::tests::test_iso_9613_air_absorption_matches_published_values ... ok\ntest fem_runner::tests::test_symmetry_detected_for_stereo ... ok\ntest fem_runner::tests::test_tbem_element_admittance_uses_rectangular_boundary_overrides ... ok\ntest fem_runner::tests::true_residual_checks_the_physical_operator ... ok\ntest external_reference::tests::external_command_rejects_failed_or_missing_driver_output ... ok\ntest fem_runner::tests::test_room_crossover_phase_preserves_two_source_interference_null ... ok\ntest external_reference::tests::external_command_rejects_backend_and_frequency_mismatches ... ok\ntest fem_runner::validate::tests::blank_source_name_is_rejected ... ok\ntest fem_runner::validate::tests::complex_grid_crossover_chaining_requires_explicit_opt_in ... ok\ntest fem_runner::validate::tests::complex_grid_with_full_range_crossover_is_unconditionally_allowed ... ok\ntest fem_runner::validate::tests::invalid_mesh_refinement_controls_are_rejected ... ok\ntest fem_runner::validate::tests::l_shaped_cutout_is_not_valid_room_volume ... ok\ntest fem_runner::validate::tests::non_finite_frequency_is_rejected ... ok\ntest fem_runner::validate::tests::non_finite_source_amplitude_is_rejected ... ok\ntest fem_runner::validate::tests::rectangular_source_outside_is_rejected_before_rhs_assembly ... ok\ntest fem_runner::validate::tests::zero_source_orientation_is_rejected ... ok\ntest fem_runner::tests::test_geometric_schwarz_interface_faces_are_interior_faces ... ok\ntest gallery::tests::csv_escape_quotes_source_names ... ok\ntest fem_runner::tests::test_geometric_schwarz_coefficients_keep_a_and_p_terms_separate ... ok\ntest fem_runner::fem_mesh_config::l_shaped_tests::l_shaped_mesh_omits_the_bounding_box_cutout ... ok\ntest gallery::tests::gallery_shell_contains_fail_visible_artifact_integrity_verifier ... ok\ntest fem_runner::tests::test_retry_prefers_failed_current_frequency_iterate ... ok\ntest gallery::tests::schroeder_decay_rejects_nonfinite_or_silent_impulses ... ok\ntest fem_runner::tests::test_recycled_gmres_path_solves_and_populates_subspace ... ok\ntest hf_extension::tests::checked_extension_rejects_malformed_output_without_panicking ... ok\ntest fem_runner::tests::test_listener_storage_does_not_reapply_source_directivity ... ok\ntest fem_runner::tests::test_negative_modal_damping_ratio_is_rejected ... ok\ntest hf_extension::tests::crossover_and_name_paths_agree_on_sub_rolloff ... ok\ntest hf_extension::tests::extension_near_20khz_remains_strictly_increasing ... ok\ntest fem_runner::tests::test_preconditioner_kind_parsing ... ok\ntest hf_extension::tests::simulation_reaching_20200hz_is_not_extended_backwards ... ok\ntest hf_extension::tests::hf_phase_is_continuous_and_uses_exp_minus_iwt_slope ... ok\ntest gallery::tests::digest_bound_reference_v2_accepts_valid_payload_and_rejects_tampering ... ok\ntest hf_extension::tests::subwoofer_name_fallback_covers_standard_names ... ok\ntest hf_extension::tests::test_extend_dimensions ... ok\ntest hf_extension::tests::test_extend_main_speaker_continuous ... ok\ntest hf_extension::tests::test_extend_subwoofer_rolls_off ... ok\ntest hf_extension::tests::test_smooth_noise_deterministic ... ok\ntest hf_extension::tests::test_smooth_noise_range ... ok\ntest hf_extension::tests::test_smooth_noise_varies_slowly ... ok\ntest hf_extension::tests::test_speaker_response_shape_flat_at_midband ... ok\ntest hf_extension::tests::test_speaker_response_shape_presence_peak ... ok\ntest hf_extension::tests::test_speaker_response_shape_rolloff_at_20khz ... ok\ntest hf_extension::tests::test_spl_pressure_roundtrip ... ok\ntest hf_extension::tests::test_spl_uses_peak_to_rms_acoustic_reference ... ok\ntest measured_acceptance::tests::exact_response_round_trips_uncertainty_identity_and_accepts ... ok\ntest measured_acceptance::tests::authenticated_evidence_rejects_budget_violation_after_certificate_admission ... ok\ntest measured_acceptance::tests::instrument_trust_policy_rejects_empty_duplicate_and_unknown_fields ... ok\ntest measured_acceptance::tests::authenticated_evidence_roundtrips_policy_and_accepts_budgeted_output ... ok\ntest measured_acceptance::tests::instrument_certificate_rejects_untrusted_or_mismatched_issuer ... ok\ntest measured_acceptance::tests::instrument_certificate_rejects_tampering_expiry_and_unknown_fields ... ok\ntest measured_acceptance::tests::malformed_uncertainty_shape_and_budget_are_rejected ... ok\ntest measured_acceptance::tests::normalized_error_rejects_sample_outside_supplied_uncertainty ... ok\ntest measured_acceptance::tests::uncertainty_binding_and_non_solved_output_fail_closed ... ok\ntest measured_io::tests::compares_solved_output_only_after_listener_identity_check ... ok\ntest measured_acceptance::tests::signed_instrument_certificate_binds_dataset_and_admits_evidence ... ok\ntest fem_runner::validate::tests::empty_frequency_grid_is_rejected ... ok\ntest measured_io::tests::authenticates_dataset_with_trusted_ed25519_signature ... ok\ntest fem_runner::validate::tests::invalid_frequency_grid_is_rejected ... ok\ntest fem_runner::tests::test_symmetry_cancellation_preserves_first_fatal_error ... ok\ntest measured_io::tests::dataset_json_round_trips_canonical_content_digest ... ok\ntest measured_io::tests::delegates_topology_and_provenance_validation ... ok\ntest fem_runner::types::tests::nodal_field_validation_requires_finite_listener_positions ... ok\ntest fem_runner::tests::test_shifted_laplacian_shift_value_and_parsing ... ok\ntest fem_runner::tests::test_gpu_solution_evidence_parsing ... ok\ntest measured_io::tests::parses_and_validates_calibrated_dataset_envelope ... ok\ntest measured_io::tests::parses_checked_complex_response_document ... ok\ntest measured_io::tests::loads_document_from_file ... ok\ntest fem_runner::tests::test_shifted_laplacian_amg_uses_chebyshev_and_fgmres ... ok\ntest measured_io::tests::rejects_dataset_schema_and_unknown_fields ... ok\ntest measured_io::tests::rejects_listener_name_duplicates_and_axis_mismatch ... ok\ntest measured_io::tests::loads_calibrated_dataset_from_file ... ok\ntest measured_io::tests::rejects_malformed_and_tampered_content_digests ... ok\ntest measured_io::tests::rejects_schema_drift_and_unknown_fields ... ok\ntest measured_io::tests::rejects_unproven_calibration_metadata ... ok\ntest measured_io::tests::reports_file_read_errors ... ok\ntest measured_validation::tests::comparison_budgets_reject_invalid_or_excessive_error ... ok\ntest measured_io::tests::rejects_malformed_signature_hex_and_unsupported_algorithm ... ok\ntest measured_validation::tests::exact_solved_match_has_zero_magnitude_and_phase_error ... ok\ntest measured_io::tests::rejects_signature_tampering_and_unsigned_authentication ... ok\ntest measured_io::tests::rejects_wrong_key_and_untrusted_key_id ... ok\ntest measured_validation::tests::malformed_measured_layouts_are_rejected ... ok\ntest measured_validation::tests::phase_error_wraps_across_pi_branch_cut ... ok\ntest measured_validation::tests::synthetic_or_reduced_model_is_rejected_before_comparison ... ok\ntest measured_validation::tests::topology_and_frequency_mismatches_are_rejected ... ok\ntest mesh_convergence::tests::converged_report_requires_monotonic_fine_grid_error_budget ... ok\ntest mesh_convergence::tests::fem_field_constructor_binds_mesh_and_listener_metadata_to_response ... ok\ntest mesh_convergence::tests::invalid_tolerances_and_budgets_are_rejected ... ok\ntest mesh_convergence::tests::listener_axis_mismatch_is_rejected ... ok\ntest mesh_convergence::tests::non_monotonic_refinement_is_rejected ... ok\ntest mesh_convergence::tests::non_solved_or_non_finite_responses_are_rejected ... ok\ntest mesh_convergence::tests::physical_mesh_ladder_builds_from_retained_fields ... ok\ntest mesh_convergence::tests::physical_mesh_ladder_wraps_levels_and_enforces_budgets ... ok\ntest mesh_convergence::tests::topology_mismatch_is_rejected ... ok\ntest reciprocity_validation::tests::asymmetric_pair_fails_explicit_budget ... ok\ntest reciprocity_validation::tests::exact_reciprocal_matrix_passes ... ok\ntest reciprocity_validation::tests::frequency_grid_mismatch_is_rejected ... ok\ntest reciprocity_validation::tests::invalid_tolerances_and_budgets_are_rejected ... ok\ntest reciprocity_validation::tests::listener_labels_reject_empty_duplicate_and_wrong_count ... ok\ntest reciprocity_validation::tests::non_solved_and_non_finite_outputs_are_rejected ... ok\ntest reciprocity_validation::tests::reciprocal_axes_are_checked_by_label_and_shape ... ok\ntest roomeq_config_gen::tests::block_outcome_metadata_preserves_recovery_and_legacy_records ... ok\ntest roomeq_config_gen::tests::single_position_uses_plural_measurements_contract ... ok\ntest scenarios::tests::every_builtin_scenario_passes_full_admission_validation ... ok\ntest source_calibration::tests::source_power_observation_can_use_fem_physical_power_evidence ... ok\ntest spatial_field::tests::monopole_reference_records_provenance_and_radial_decay ... ok\ntest gallery::tests::schroeder_decay_starts_at_zero_and_never_increases ... ok\ntest mesh_convergence::tests::physical_mesh_levels_require_refinement_and_listener_identity ... ok\ntest mesh_convergence::tests::physical_mesh_levels_reject_non_monotonic_counts_and_bad_positions ... ok\ntest roomeq_config_gen::tests::simulation_metadata_preserves_device_diagnostics_provenance ... ok\ntest scenarios::tests::scenario_validation_rejects_axis_and_physical_metadata_drift ... ok\ntest roomeq_config_gen::tests::every_scenario_uses_plural_measurements_including_nested_subwoofers ... ok\ntest roomeq_config_gen::tests::simulation_metadata_records_modal_damping_and_dense_band ... ok\ntest roomeq_config_gen::tests::simulation_metadata_labels_unavailable_physical_evidence ... ok\ntest roomeq_config_gen::tests::simulation_metadata_records_dense_overlap ... ok\ntest roomeq_config_gen::tests::simulation_metadata_rejects_nonconverged_fem_diagnostics ... ok\ntest gallery::tests::rt60_estimate_requires_a_standard_decay_interval ... ok\ntest tests::frequency_segment_merge_rejects_overlap_order_and_malformed_axes ... ok\ntest source_calibration::tests::measured_sweep_fit_recovers_source_amplitude ... ok\ntest source_calibration::tests::measured_sweep_fit_reports_noise_without_hiding_it ... ok\ntest source_calibration::tests::measured_sweep_fit_rejects_malformed_observations ... ok\ntest source_calibration::tests::monopole_reference_scales_with_frequency_and_inverse_distance ... ok\ntest tests::layout_rejects_non_monotone_or_empty_pressure_axes ... ok\ntest source_calibration::tests::source_power_calibration_rejects_malformed_observations ... ok\ntest source_calibration::tests::source_amplitude_calibration_round_trips_target_spl ... ok\ntest tests::layout_rejects_non_portable_source_filename_stems ... ok\ntest source_calibration::tests::source_power_calibration_corrects_mesh_frequency_power_spread ... ok\ntest tests::overlap_merge_crossfades_complex_pressure_on_exact_shared_grid ... ok\ntest tests::provenance_guard_rejects_misaligned_and_non_solved_consumers ... ok\ntest tests::roomeq_provenance_bridge_is_exact_and_layout_checked ... ok\ntest gallery::tests::reference_loader_preserves_checked_spatial_field ... ok\ntest treatment_optimization::tests::decay_constraint_rejects_malformed_physical_domains ... ok\ntest treatment_optimization::tests::decay_gradient_matches_finite_difference ... ok\ntest treatment_optimization::tests::decay_mma_constraints_have_correct_signs_and_scaling ... ok\ntest treatment_optimization::tests::decay_prediction_is_finite_and_decreases_with_absorption ... ok\ntest gallery::tests::reference_comparison_rejects_unsolved_output_before_writing_artifacts ... ok\ntest treatment_optimization::tests::default_objective_uses_acoustic_reference_pressure ... ok\ntest treatment_optimization::tests::density_filter_preserves_constants_and_pulls_back_gradients ... ok\ntest treatment_optimization::tests::density_filter_rejects_invalid_geometry_and_dimensions ... ok\ntest fem_runner::tests::test_room_mesh_has_no_unpaired_interior_faces ... ok\ntest treatment_optimization::tests::final_decay_bound_failure_is_fail_closed ... ok\ntest treatment_optimization::tests::invalid_treatment_metadata_is_rejected_before_assembly ... ok\ntest treatment_optimization::tests::lane_memory_estimate_accounts_for_solver_workspace ... ok\ntest scenarios::tests::scenario_validation_rejects_empty_axes_and_non_finite_physics ... ok\ntest spatial_field::tests::monopole_reference_rejects_invalid_grid_and_source_probe ... ok\ntest tests::all_non_solved_provenance_categories_are_rejected_by_physical_consumers ... ok\ntest tests::frequency_segment_merge_preserves_ordered_provenance_and_pressure_axes ... ok\ntest gallery::tests::reference_loader_requires_versioned_schema_and_validates_tensor ... ok\ntest tests::overlap_merge_averages_single_shared_point_and_rejects_unsafe_inputs ... ok\ntest external_reference::tests::external_command_timeout_kills_hanging_driver ... ok\ntest roomeq_config_gen::tests::simulation_metadata_roundtrips_fem_diagnostics ... ok\ntest treatment_optimization::tests::passivity_rejects_malformed_rows_without_indexing_or_panicking ... ok\ntest treatment_optimization::tests::production_objective_prefers_target_match_over_uniformly_quiet ... ok\ntest scenarios::tests::test_scenario_lookup ... ok\ntest source_calibration::tests::calibration_rejects_invalid_physical_inputs ... ok\ntest treatment_optimization::tests::spatial_constraint_builds_deterministic_position_adjacency ... ok\ntest treatment_optimization::tests::spatial_constraint_final_check_is_fail_closed ... ok\ntest treatment_optimization::tests::spatial_constraint_linearization_has_exact_pairwise_signs ... ok\ntest treatment_optimization::tests::spatial_constraint_rejects_invalid_graphs_and_duplicates ... ok\ntest treatment_projection::tests::projection_interpolates_target_layout_and_preserves_constants ... ok\ntest scenarios::tests::test_source_names_match_sources ... ok\ntest treatment_projection::tests::projection_rejects_missing_support_and_malformed_values ... ok\ntest scenarios::tests::randomized_scenario_variants_preserve_admission_invariants ... ok\ntest treatment_projection::tests::projection_transpose_is_the_adjoint_of_interpolation ... ok\ntest treatment_projection::tests::promotion_gate_rejects_regressed_reanalysis ... ok\ntest scenarios::tests::test_all_scenarios_count ... ok\ntest scenarios::tests::scenario_validation_rejects_duplicate_or_nonportable_labels ... ok\ntest scenarios::tests::scenario_validation_rejects_platform_specific_filename_labels ... ok\ntest scenarios::tests::test_all_scenarios_have_valid_frequencies ... ok\ntest scenarios::tests::test_scenario_names_unique ... ok\ntest fem_runner::types::tests::nodal_field_rejects_samples_outside_mesh ... ok\ntest fem_runner::types::tests::nodal_field_p1_sampling_recovers_linear_pressure ... ok\ntest treatment_optimization::tests::active_direction_is_rejected_with_detail ... ok\ntest treatment_optimization::tests::active_base_coefficient_is_rejected ... ok\ntest treatment_optimization::tests::passive_band_wide_direction_is_accepted ... ok\ntest treatment_optimization::tests::legacy_room_treatment_optimization_respects_spatial_constraint ... ok\ntest treatment_optimization::tests::room_treatment_optimization_reduces_seat_variance ... ok\ntest treatment_optimization::tests::room_treatment_adjoint_matches_finite_difference ... ok\ntest treatment_optimization::tests::legacy_room_treatment_optimization_returns_filtered_design ... ok\ntest treatment_optimization::tests::fixed_mesh_reanalysis_does_not_reuse_stale_design_objective ... ok\ntest treatment_optimization::tests::decay_bounds_are_checked_after_optimization_and_history_aligns ... ok\ntest treatment_optimization::tests::area_weighted_fraction_constraint_is_respected ... ok\ntest treatment_optimization::tests::multi_frequency_adjoint_matches_finite_difference ... ok\ntest treatment_optimization::tests::spatial_constraint_is_respected_by_multi_frequency_optimization ... ok\ntest treatment_optimization::tests::multi_frequency_optimization_reduces_production_objective ... ok\ntest treatment_projection::tests::reanalysis_compares_projected_design_with_target_baseline ... ok\ntest treatment_optimization::tests::lane_counts_give_bitwise_identical_results ... ok\ntest treatment_projection::tests::reanalysis_rejects_topology_mismatch_and_checks_non_regression ... ok\ntest treatment_projection::tests::promotion_reanalyzes_target_and_preserves_support_provenance ... ok\ntest treatment_projection::tests::optimization_handoff_requires_convergence_and_reanalyzes_target ... ok\ntest treatment_optimization::tests::multi_frequency_variance_mode_matches_single_frequency ... ok\ntest treatment_optimization::tests::multi_frequency_optimization_returns_filtered_design ... ok\ntest fem_runner::tests::test_full_fem_runner_recovers_rigid_shoebox_axial_mode_pressure ... ok\ntest fem_runner::tests::test_all_preconditioner_kinds_apply ... ok\ntest fem_runner::solve::partitioned_tests::partitioned_block_solve_reassembles_source_order ... ok\ntest fem_runner::tests::configured_wavelength_resolution_controls_exported_mesh ... ok\ntest fem_runner::physical_evidence_runtime_tests::symmetric_cpu_runtime_marks_reduced_domain_energy_as_unavailable ... ok\ntest fem_runner::physical_convergence::tests::executes_bounded_three_level_cpu_ladder_and_retains_physical_fields ... ok\ntest fem_runner::tests::test_modal_damping_ratio_reduces_rigid_room_peak ... ok\ntest fem_runner::tests::test_listener_interpolation_cache_matches_direct_evaluation ... ok\ntest fem_runner::tests::test_fem_rhs_basis_matches_direct_assembly ... ok\ntest fem_runner::tests::test_gpu_rhs_basis_selection_matches_cpu_source_model ... ok\ntest fem_runner::tests::test_point_source_outside_mesh_is_an_error_not_an_empty_rhs ... ok\ntest fem_runner::tests::test_fem_rhs_applies_source_amplitude_crossover_and_directivity ... ok\ntest fem_runner::tests::test_rigid_rectangular_room_peaks_near_first_axial_mode ... ok\ntest fem_runner::tests::test_wall_absorption_reduces_first_axial_modal_peak ... ok\ntest fem_runner::tests::test_fem_rhs_integrates_to_monopole_strength ... ok\ntest fem_runner::run::lane_pool_tests::concurrent_candidates_solve_inside_lane_pools ... ok\ntest fem_runner::tests::test_point_source_basis_integrates_to_monopole_strength_on_any_mesh ... ok\ntest fem_runner::tests::waveholtz_matches_default_solver_on_tiny_rigid_room ... ok\ntest fem_runner::tests::test_block_source_solve_flexible_preconditioner_path ... ok\ntest fem_runner::tests::test_block_source_solve_falls_back_on_nonconvergence ... ok\ntest gallery::tests::gallery_writes_external_reference_comparison_panels ... ok\ntest gallery::tests::gallery_writes_manifest_and_explicit_provenance ... ok\ntest gallery::tests::loaded_reference_gallery_preserves_verified_identity ... ok\ntest gallery::tests::gallery_artifacts_are_byte_deterministic_for_same_output ... ok\ntest gallery::tests::fast_gallery_emits_explicit_reduced_order_slice_provenance ... ok\ntest fem_runner::tests::freefield_monopole_matches_greens_function_magnitude ... ok\ntest gallery::tests::fem_gallery_emits_nodal_slice_and_vtu_provenance ... ok\ntest fem_runner::tests::test_block_source_solve_matches_per_source_path ... ok\ntest fem_runner::tests::test_symmetric_vs_full_solve_directional_cardioid ... ok\ntest fem_runner::tests::test_symmetric_vs_full_solve_directional_asymmetric_grid ... ok\ntest fem_runner::tests::test_free_field_point_source_tracks_greens_function_across_band ... ok\ntest fem_runner::tests::test_symmetric_vs_full_solve ... ok\n\ntest result: ok. 331 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 11.58s\n\n",
+    "final-check": "    Blocking waiting for file lock on build directory\n    Finished `dev` profile [optimized + debuginfo] target(s) in 15.52s\n",
+    "final-clippy": "warning: this lint expectation is unfulfilled\n    --> crates/sonium-compute/src/block_krylov.rs:1962:5\n     |\n1962 |     clippy::too_many_arguments,\n     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = note: explicit disjoint device scratch and QR shape\n     = note: `#[warn(unfulfilled_lint_expectations)]` on by default\n\nwarning: `sonium-compute` (lib) generated 1 warning\nwarning: the loop variable `row` is used to index `diagonal`\n    --> crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/saddle_point.rs:1030:16\n     |\n1030 |     for row in 0..schur.num_rows {\n     |                ^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_range_loop\n     = note: `#[warn(clippy::needless_range_loop)]` on by default\nhelp: consider using an iterator and enumerate()\n     |\n1030 -     for row in 0..schur.num_rows {\n1030 +     for (row, <item>) in diagonal.iter().enumerate().take(schur.num_rows) {\n     |\n\nwarning: `sonium-solvers-preconditioners` (lib) generated 1 warning\nwarning: the loop variable `d` is used to index `direction`\n   --> crates/sonium-fem/src/physics/solid/contact/augmented_lagrangian.rs:596:18\n    |\n596 |         for d in 0..3 {\n    |                  ^^^^\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_range_loop\n    = note: `#[warn(clippy::needless_range_loop)]` on by default\nhelp: consider using an iterator and enumerate()\n    |\n596 -         for d in 0..3 {\n596 +         for (d, <item>) in direction.iter().enumerate() {\n    |\n\nwarning: the loop variable `e` is used to index `normal`\n   --> crates/sonium-fem/src/physics/solid/contact/augmented_lagrangian.rs:597:22\n    |\n597 |             for e in 0..3 {\n    |                      ^^^^\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_range_loop\nhelp: consider using an iterator and enumerate()\n    |\n597 -             for e in 0..3 {\n597 +             for (e, <item>) in normal.iter().enumerate() {\n    |\n\nwarning: the loop variable `i` is used to index `free_of`\n   --> crates/sonium-fem/src/physics/solid/shell/explicit.rs:521:18\n    |\n521 |         for i in 0..self.n_dofs {\n    |                  ^^^^^^^^^^^^^^\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_range_loop\nhelp: consider using an iterator and enumerate()\n    |\n521 -         for i in 0..self.n_dofs {\n521 +         for (i, <item>) in free_of.iter_mut().enumerate().take(self.n_dofs) {\n    |\n\nwarning: `sonium-fem` (lib) generated 3 warnings\nwarning: very complex type used. Consider factoring parts into `type` definitions\n   --> crates/sonium-sim-structural-mechanics/src/bolted_flange.rs:390:6\n    |\n390 | ) -> Result<(Vec<[usize; 3]>, Vec<[usize; 3]>), StructuralMechanicsError> {\n    |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#type_complexity\n    = note: `#[warn(clippy::type_complexity)]` on by default\n\nwarning: `sonium-sim-structural-mechanics` (lib) generated 1 warning\n    Finished `dev` profile [optimized + debuginfo] target(s) in 0.24s\n",
+    "final-cuda-clippy": "warning: this lint expectation is unfulfilled\n    --> crates/sonium-compute/src/block_krylov.rs:1962:5\n     |\n1962 |     clippy::too_many_arguments,\n     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\n     = note: explicit disjoint device scratch and QR shape\n     = note: `#[warn(unfulfilled_lint_expectations)]` on by default\n\nwarning: `sonium-compute` (lib) generated 1 warning\nwarning: the loop variable `row` is used to index `diagonal`\n    --> crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/saddle_point.rs:1030:16\n     |\n1030 |     for row in 0..schur.num_rows {\n     |                ^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_range_loop\n     = note: `#[warn(clippy::needless_range_loop)]` on by default\nhelp: consider using an iterator and enumerate()\n     |\n1030 -     for row in 0..schur.num_rows {\n1030 +     for (row, <item>) in diagonal.iter().enumerate().take(schur.num_rows) {\n     |\n\nwarning: `sonium-solvers-preconditioners` (lib) generated 1 warning\nwarning: the loop variable `d` is used to index `direction`\n   --> crates/sonium-fem/src/physics/solid/contact/augmented_lagrangian.rs:596:18\n    |\n596 |         for d in 0..3 {\n    |                  ^^^^\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_range_loop\n    = note: `#[warn(clippy::needless_range_loop)]` on by default\nhelp: consider using an iterator and enumerate()\n    |\n596 -         for d in 0..3 {\n596 +         for (d, <item>) in direction.iter().enumerate() {\n    |\n\nwarning: the loop variable `e` is used to index `normal`\n   --> crates/sonium-fem/src/physics/solid/contact/augmented_lagrangian.rs:597:22\n    |\n597 |             for e in 0..3 {\n    |                      ^^^^\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_range_loop\nhelp: consider using an iterator and enumerate()\n    |\n597 -             for e in 0..3 {\n597 +             for (e, <item>) in normal.iter().enumerate() {\n    |\n\nwarning: the loop variable `i` is used to index `free_of`\n   --> crates/sonium-fem/src/physics/solid/shell/explicit.rs:521:18\n    |\n521 |         for i in 0..self.n_dofs {\n    |                  ^^^^^^^^^^^^^^\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_range_loop\nhelp: consider using an iterator and enumerate()\n    |\n521 -         for i in 0..self.n_dofs {\n521 +         for (i, <item>) in free_of.iter_mut().enumerate().take(self.n_dofs) {\n    |\n\nwarning: `sonium-fem` (lib) generated 3 warnings\n    Checking sonium-sim-room v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-sim-room)\nwarning: digits grouped inconsistently by underscores\n   --> crates/sonium-sim-room/src/csv_export.rs:117:34\n    |\n117 |             vec![20.0, 20_200.0, 20_197.9698],\n    |                                  ^^^^^^^^^^^ help: consider: `20_197.969_8`\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#inconsistent_digit_grouping\n    = note: `#[warn(clippy::inconsistent_digit_grouping)]` on by default\n\nwarning: this function has too many arguments (10/9)\n   --> crates/sonium-sim-room/src/fem_runner/gpu.rs:139:1\n    |\n139 | / fn collect_device_solution_evidence<B: Backend>(\n140 | |     backend: &B,\n141 | |     solution_device: &<B as Backend>::Buffer<Complex64>,\n142 | |     assembler: &HelmholtzAssembler,\n...   |\n149 | |     boundary_power_by_tag: &mut BTreeMap<usize, f64>,\n150 | | ) -> Result<()> {\n    | |_______________^\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#too_many_arguments\n    = note: `#[warn(clippy::too_many_arguments)]` on by default\n\nwarning: very complex type used. Consider factoring parts into `type` definitions\n   --> crates/sonium-sim-room/src/fem_runner/gpu.rs:524:6\n    |\n524 | ) -> Result<(Vec<Vec<Complex64>>, Vec<GmresBackendStatus<Complex32>>, f64, usize), String> {\n    |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#type_complexity\n    = note: `#[warn(clippy::type_complexity)]` on by default\n\nwarning: using `chunks_exact` with a constant chunk size\n    --> crates/sonium-sim-room/src/fem_runner/gpu.rs:1112:10\n     |\n1112 |         .chunks_exact(4)\n     |          ^^^^^^^^^^^^^^^ help: consider using `as_chunks` instead: `as_chunks::<4>().0.iter()`\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#chunks_exact_to_as_chunks\n     = note: `#[warn(clippy::chunks_exact_to_as_chunks)]` on by default\n\nwarning: using `chunks_exact` with a constant chunk size\n    --> crates/sonium-sim-room/src/fem_runner/gpu.rs:1123:10\n     |\n1123 |         .chunks_exact(4)\n     |          ^^^^^^^^^^^^^^^ help: consider using `as_chunks` instead: `as_chunks::<4>().0.iter()`\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#chunks_exact_to_as_chunks\n\nwarning: call to `std::mem::drop` with a value that does not implement `Drop`. Dropping such a type only extends its contained lifetimes\n    --> crates/sonium-sim-room/src/fem_runner/gpu.rs:2010:25\n     |\n2010 |                         drop(scratch);\n     |                         ^^^^^^^^^^^^^\n     |\nnote: argument has type `fem_runner::gpu::F32ResidualCorrectionScratch<'_>`\n    --> crates/sonium-sim-room/src/fem_runner/gpu.rs:2010:30\n     |\n2010 |                         drop(scratch);\n     |                              ^^^^^^^\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#drop_non_drop\n     = note: `#[warn(clippy::drop_non_drop)]` on by default\n\nwarning: this `if` statement can be collapsed\n    --> crates/sonium-sim-room/src/fem_runner/gpu.rs:2043:33\n     |\n2043 | / ...                   if gates.is_ok() && wants_full_solution_evidence(mesh_config) {\n2044 | | ...                       if let Err(error) = collect_device_solution_evidence(\n2045 | | ...                           backend,\n2046 | | ...                           &x_dev_64,\n...    |\n2066 | | ...                   }\n     | |_______________________^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#collapsible_if\n     = note: `#[warn(clippy::collapsible_if)]` on by default\nhelp: collapse nested if block\n     |\n2043 ~                                 if gates.is_ok() && wants_full_solution_evidence(mesh_config)\n2044 ~                                     && let Err(error) = collect_device_solution_evidence(\n2045 |                                         backend,\n ...\n2064 |                                         ));\n2065 ~                                     }\n     |\n\nwarning: this expression creates a reference which is immediately dereferenced by the compiler\n    --> crates/sonium-sim-room/src/fem_runner/gpu.rs:2046:41\n     |\n2046 | ...                   &x_dev_64,\n     |                       ^^^^^^^^^ help: change this to: `x_dev_64`\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_borrow\n     = note: `#[warn(clippy::needless_borrow)]` on by default\n\nwarning: this `if` statement can be collapsed\n    --> crates/sonium-sim-room/src/fem_runner/gpu.rs:2135:33\n     |\n2135 | / ...                   if status.converged && wants_full_solution_evidence(mesh_config) {\n2136 | | ...                       if let Err(error) = collect_device_solution_evidence(\n2137 | | ...                           backend,\n2138 | | ...                           x_dev,\n...    |\n2158 | | ...                   }\n     | |_______________________^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#collapsible_if\nhelp: collapse nested if block\n     |\n2135 ~                                 if status.converged && wants_full_solution_evidence(mesh_config)\n2136 ~                                     && let Err(error) = collect_device_solution_evidence(\n2137 |                                         backend,\n ...\n2156 |                                         ));\n2157 ~                                     }\n     |\n\nwarning: unneeded `return` statement\n    --> crates/sonium-sim-room/src/fem_runner/gpu.rs:2288:35\n     |\n2288 |                     Err(error) => return Err(error),\n     |                                   ^^^^^^^^^^^^^^^^^\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_return\n     = note: `#[warn(clippy::needless_return)]` on by default\nhelp: remove `return`\n     |\n2288 -                     Err(error) => return Err(error),\n2288 +                     Err(error) => Err(error),\n     |\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/src/fast_room.rs:981:9\n    |\n981 |         invalid_config.modal_damping_floor = f64::NAN;\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `fast_room::FastRoomConfig { modal_damping_floor: f64::NAN, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/src/fast_room.rs:980:9\n    |\n980 |         let mut invalid_config = FastRoomConfig::default();\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n    = note: `#[warn(clippy::field_reassign_with_default)]` on by default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n    --> crates/sonium-sim-room/src/fast_room.rs:1144:9\n     |\n1144 |         config.min_transition_hz = 500.0;\n     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     |\nnote: consider initializing the variable with `fast_room::FastRoomConfig { min_transition_hz: 500.0, max_transition_hz: 150.0, ..Default::default() }` and removing relevant reassignments\n    --> crates/sonium-sim-room/src/fast_room.rs:1143:9\n     |\n1143 |         let mut config = FastRoomConfig::default();\n     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/src/fem_runner/physical_convergence.rs:202:9\n    |\n202 |         coarse.grading_factor = 10.0;\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `fem_runner::fem_mesh_config::FemMeshConfig { grading_factor: 10.0, fine_radius: 0.0, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/src/fem_runner/physical_convergence.rs:201:9\n    |\n201 |         let mut coarse = FemMeshConfig::default();\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/src/fem_runner/physical_convergence.rs:205:9\n    |\n205 |         medium.grading_factor = 2.0;\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `fem_runner::fem_mesh_config::FemMeshConfig { grading_factor: 2.0, fine_radius: 0.3, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/src/fem_runner/physical_convergence.rs:204:9\n    |\n204 |         let mut medium = FemMeshConfig::default();\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: `sonium-sim-room` (lib) generated 9 warnings (run `cargo clippy --fix --lib -p sonium-sim-room -- ` to apply 6 suggestions)\nwarning: this assertion has a constant value\n    --> crates/sonium-sim-room/src/fem_runner/tests.rs:1123:5\n     |\n1123 | /     assert!(\n1124 | |         DEFAULT_MODAL_DAMPING_RATIO < 0.001,\n1125 | |         \"default volume damping must remain a numerical floor, not a room-loss model\"\n1126 | |     );\n     | |_____^\n     |\n     = help: consider moving this into a const block: `const { assert!(..) }`\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#assertions_on_constants\n     = note: `#[warn(clippy::assertions_on_constants)]` on by default\n\nwarning: this assertion has a constant value\n    --> crates/sonium-sim-room/src/fem_runner/tests.rs:2030:5\n     |\n2030 | /     assert!(\n2031 | |         super::gpu::GPU_IR_MAX_OUTER_ITERATIONS >= 100,\n2032 | |         \"outer budget below the measured 1600 Hz requirement\"\n2033 | |     );\n     | |_____^\n     |\n     = help: consider moving this into a const block: `const { assert!(..) }`\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#assertions_on_constants\n\nwarning: this assertion has a constant value\n    --> crates/sonium-sim-room/src/fem_runner/tests.rs:2034:5\n     |\n2034 | /     assert!(\n2035 | |         super::gpu::GPU_IR_MAX_INNER_ITERATIONS >= 160,\n2036 | |         \"inner budget below the measured high-k requirement\"\n2037 | |     );\n     | |_____^\n     |\n     = help: consider moving this into a const block: `const { assert!(..) }`\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#assertions_on_constants\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:284:9\n    |\n284 |         config.grading_factor = f64::NAN;\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `fem_runner::fem_mesh_config::FemMeshConfig { grading_factor: f64::NAN, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:283:9\n    |\n283 |         let mut config = FemMeshConfig::default();\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:293:9\n    |\n293 |         config.fine_radius = -1.0;\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `fem_runner::fem_mesh_config::FemMeshConfig { fine_radius: -1.0, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:292:9\n    |\n292 |         let mut config = FemMeshConfig::default();\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:312:9\n    |\n312 | /         gaussian.source_model =\n313 | |             super::super::fem_mesh_config::FemSourceModel::Gaussian { sigma: 0.07 };\n    | |____________________________________________________________________________________^\n    |\nnote: consider initializing the variable with `fem_runner::fem_mesh_config::FemMeshConfig { source_model: super::super::fem_mesh_config::FemSourceModel::Gaussian { sigma: 0.07 }, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:311:9\n    |\n311 |         let mut gaussian = FemMeshConfig::default();\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:324:9\n    |\n324 |         config.gmres_restart = 0;\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `fem_runner::fem_mesh_config::FemMeshConfig { gmres_restart: 0, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:323:9\n    |\n323 |         let mut config = FemMeshConfig::default();\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:333:9\n    |\n333 |         config.rebuild_precond_every = 0;\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `fem_runner::fem_mesh_config::FemMeshConfig { rebuild_precond_every: 0, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:332:9\n    |\n332 |         let mut config = FemMeshConfig::default();\n    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:303:13\n    |\n303 |             config.source_model = super::super::fem_mesh_config::FemSourceModel::Gaussian { sigma };\n    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `fem_runner::fem_mesh_config::FemMeshConfig { source_model: super::super::fem_mesh_config::FemSourceModel::Gaussian { sigma }, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:302:13\n    |\n302 |             let mut config = FemMeshConfig::default();\n    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:318:13\n    |\n318 |             config.gmres_tolerance = tolerance;\n    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `fem_runner::fem_mesh_config::FemMeshConfig { gmres_tolerance: tolerance, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/src/fem_runner/validate.rs:317:13\n    |\n317 |             let mut config = FemMeshConfig::default();\n    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n  --> crates/sonium-sim-room/tests/reciprocity_runtime.rs:80:5\n   |\n80 |     mesh_config.fine_radius = 0.4;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n   |\nnote: consider initializing the variable with `sonium_sim_room::fem_runner::FemMeshConfig { fine_radius: 0.4, ..Default::default() }` and removing relevant reassignments\n  --> crates/sonium-sim-room/tests/reciprocity_runtime.rs:79:5\n   |\n79 |     let mut mesh_config = FemMeshConfig::default();\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n   = note: `#[warn(clippy::field_reassign_with_default)]` on by default\n\nwarning: `sonium-sim-room` (test \"reciprocity_runtime\") generated 1 warning\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/tests/native_x86_reference.rs:108:5\n    |\n108 |     coarse.grading_factor = 10.0;\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `sonium_sim_room::fem_runner::FemMeshConfig { grading_factor: 10.0, fine_radius: 0.0, recycle_subspace_size: 0, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/tests/native_x86_reference.rs:107:5\n    |\n107 |     let mut coarse = FemMeshConfig::default();\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n    = note: `#[warn(clippy::field_reassign_with_default)]` on by default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/tests/native_x86_reference.rs:112:5\n    |\n112 |     medium.grading_factor = 2.0;\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `sonium_sim_room::fem_runner::FemMeshConfig { grading_factor: 2.0, fine_radius: 0.3, recycle_subspace_size: 0, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/tests/native_x86_reference.rs:111:5\n    |\n111 |     let mut medium = FemMeshConfig::default();\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/tests/native_x86_reference.rs:116:5\n    |\n116 |     fine.recycle_subspace_size = 0;\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `sonium_sim_room::fem_runner::FemMeshConfig { recycle_subspace_size: 0, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/tests/native_x86_reference.rs:115:5\n    |\n115 |     let mut fine = FemMeshConfig::default();\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/tests/native_x86_reference.rs:562:5\n    |\n562 |     mesh_config.fine_radius = 0.4;\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `sonium_sim_room::fem_runner::FemMeshConfig { fine_radius: 0.4, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/tests/native_x86_reference.rs:561:5\n    |\n561 |     let mut mesh_config = FemMeshConfig::default();\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n   --> crates/sonium-sim-room/tests/native_x86_reference.rs:663:5\n    |\n663 |     reciprocity_config.fine_radius = 0.4;\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    |\nnote: consider initializing the variable with `sonium_sim_room::fem_runner::FemMeshConfig { fine_radius: 0.4, recycle_subspace_size: 0, ..Default::default() }` and removing relevant reassignments\n   --> crates/sonium-sim-room/tests/native_x86_reference.rs:662:5\n    |\n662 |     let mut reciprocity_config = FemMeshConfig::default();\n    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n\nwarning: `sonium-sim-room` (test \"native_x86_reference\") generated 5 warnings\nwarning: unnecessary use of `clone` to create a slice from a reference\n   --> crates/sonium-sim-room/src/source_calibration.rs:629:40\n    |\n629 |         assert!(calibrate_source_power(&[valid.clone()], 1.0).is_err());\n    |                                        ^^^^^^^^^^^^^^^^ help: try: `std::slice::from_ref(&valid)`\n    |\n    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#cloned_ref_to_slice_refs\n    = note: `#[warn(clippy::cloned_ref_to_slice_refs)]` on by default\n\nwarning: field assignment outside of initializer for an instance created with Default::default()\n  --> crates/sonium-sim-room/tests/backend_parity_runtime.rs:58:5\n   |\n58 |     per_source_config.fine_radius = 0.4;\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n   |\nnote: consider initializing the variable with `sonium_sim_room::fem_runner::FemMeshConfig { fine_radius: 0.4, block_source_solve: false, ..Default::default() }` and removing relevant reassignments\n  --> crates/sonium-sim-room/tests/backend_parity_runtime.rs:57:5\n   |\n57 |     let mut per_source_config = FemMeshConfig::default();\n   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#field_reassign_with_default\n   = note: `#[warn(clippy::field_reassign_with_default)]` on by default\n\nwarning: using `clone` on type `FemMeshConfig` which implements the `Copy` trait\n  --> crates/sonium-sim-room/tests/backend_parity_runtime.rs:60:28\n   |\n60 |     let mut block_config = per_source_config.clone();\n   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^ help: try removing the `clone` call: `per_source_config`\n   |\n   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#clone_on_copy\n   = note: `#[warn(clippy::clone_on_copy)]` on by default\n\nwarning: `sonium-sim-room` (test \"backend_parity_runtime\") generated 2 warnings (run `cargo clippy --fix --test \"backend_parity_runtime\" -p sonium-sim-room -- ` to apply 1 suggestion)\nwarning: the borrowed expression implements the required traits\n    --> crates/sonium-sim-room/bin/generate_roomeq_data.rs:2612:51\n     |\n2612 |         sonium_xem::io::validate_gallery_manifest(&gallery_dir.join(\"gallery.json\")).unwrap();\n     |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: change this to: `gallery_dir.join(\"gallery.json\")`\n     |\n     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#needless_borrows_for_generic_args\n     = note: `#[warn(clippy::needless_borrows_for_generic_args)]` on by default\n\nwarning: `sonium-sim-room` (bin \"generate-roomeq-data\" test) generated 1 warning (run `cargo clippy --fix --bin \"generate-roomeq-data\" -p sonium-sim-room --tests -- ` to apply 1 suggestion)\nwarning: `sonium-sim-room` (lib test) generated 25 warnings (9 duplicates) (run `cargo clippy --fix --lib -p sonium-sim-room --tests -- ` to apply 1 suggestion)\n    Finished `dev` profile [optimized + debuginfo] target(s) in 1.63s\n",
+    "final-lanes": "{\"lane\": \"cuda_fem_\", \"exit_code\": 0}\n{\"lane\": \"cuda_cancellation_rejects_before_device_setup\", \"exit_code\": 0}\n{\"lane\": \"cuda_mid_frequency_cancellation_is_typed_and_does_not_publish_partial_result\", \"exit_code\": 0}\n{\"lane\": \"cuda_resident_mid_frequency_cancellation_retries_after_warm_state\", \"exit_code\": 0}\n{\"lane\": \"cuda_injected_launch_failure_is_typed_unwound_and_retryable\", \"exit_code\": 0}\n{\"lane\": \"cuda_injected_device_loss_requires_recreated_context_and_retries\", \"exit_code\": 0}\n"
+  },
+  "native_room_lanes": [
+    {
+      "test_filter": "cuda_fem_",
+      "environment": {
+        "SONIUM_SIM_ROOM_F32_RESIDENT_ARTIFACT": "/tmp/f32-certified-room.json"
+      },
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-0.log",
+      "output": "\nrunning 6 tests\ntest cuda_fem_amg_block_refined_mesh_publishes_physical_ledgers ... ok\ntest cuda_fem_amg_block_rhs_publishes_physical_ledgers ... ok\ntest cuda_fem_block_rhs_publishes_physical_ledgers ... ok\ntest cuda_fem_f32_scalar_four_frequency_reuses_krylov_workspace ... ok\ntest cuda_fem_four_frequency_resident_state_reuses_preconditioner ... ok\ntest cuda_fem_matches_cpu_backend_with_checked_parity_budget ... ok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 2.13s\n\n"
+    },
+    {
+      "test_filter": "cuda_cancellation_rejects_before_device_setup",
+      "environment": {},
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-1.log",
+      "output": "\nrunning 1 test\ntest cuda_cancellation_rejects_before_device_setup ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s\n\n"
+    },
+    {
+      "test_filter": "cuda_mid_frequency_cancellation_is_typed_and_does_not_publish_partial_result",
+      "environment": {
+        "SONIUM_SIM_ROOM_SR1_CANCEL_FREQUENCY": "0"
+      },
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-2.log",
+      "output": "\nrunning 1 test\ntest cuda_mid_frequency_cancellation_is_typed_and_does_not_publish_partial_result ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.53s\n\n"
+    },
+    {
+      "test_filter": "cuda_resident_mid_frequency_cancellation_retries_after_warm_state",
+      "environment": {
+        "SONIUM_SIM_ROOM_SR1_RESIDENT_CANCEL_FREQUENCY": "2"
+      },
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-3.log",
+      "output": "\nrunning 1 test\ntest cuda_resident_mid_frequency_cancellation_retries_after_warm_state ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.73s\n\n"
+    },
+    {
+      "test_filter": "cuda_injected_launch_failure_is_typed_unwound_and_retryable",
+      "environment": {
+        "SONIUM_SIM_ROOM_SR1_FAILURE_POINT": "launch",
+        "SONIUM_SIM_ROOM_SR1_FAILURE_ARTIFACT": "/tmp/f32-certified-launch-failure.json",
+        "SONIUM_SIM_ROOM_SR1_FAILURE_RETRY_ARTIFACT": "/tmp/f32-certified-launch-retry.json"
+      },
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-4.log",
+      "output": "\nrunning 1 test\ntest cuda_injected_launch_failure_is_typed_unwound_and_retryable ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.66s\n\n"
+    },
+    {
+      "test_filter": "cuda_injected_device_loss_requires_recreated_context_and_retries",
+      "environment": {
+        "SONIUM_SIM_ROOM_SR1_FAILURE_POINT": "device-loss",
+        "SONIUM_SIM_ROOM_SR1_FAILURE_ARTIFACT": "/tmp/f32-certified-device-loss-failure.json",
+        "SONIUM_SIM_ROOM_SR1_FAILURE_RETRY_ARTIFACT": "/tmp/f32-certified-device-loss-retry.json"
+      },
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-5.log",
+      "output": "\nrunning 1 test\ntest cuda_injected_device_loss_requires_recreated_context_and_retries ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.66s\n\n"
+    }
+  ],
+  "limitations": [
+    "AMG hierarchy setup remains on CPU with device upload; scheduled rebuild still allocates.",
+    "AMG block application runs device-resident columns sequentially through one retained cycle workspace.",
+    "Pure-f32 AMG and point-Jacobi block routes covered; other precisions and preconditioners remain on scalar paths.",
+    "Small production fixture parity and iteration evidence does not establish scalability or wall-clock speedup.",
+    "Broader CUDA solver/BEM/FEM coverage and kernel priorities remain unfinished."
+  ]
+}

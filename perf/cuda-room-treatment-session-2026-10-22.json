@@ -1,0 +1,97 @@
+{
+  "date": "2026-10-22",
+  "scope": "Frequency-local room boundary treatment objective/adjoint and MMA with retained configured CUDA solves",
+  "source_sha256": {
+    "crates/sonium-sim-room/Cargo.toml": "1680efb361ec49723b7b4c9d789c29b7bee1883105c1e052813f1aeb3bcbc45f",
+    "crates/sonium-sim-room/src/treatment_optimization.rs": "a4ef1daf502a4d2af9b3378cb9b2d3b9c13418b31da8f77951f6c31879e5c54e",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda.rs": "966c679a31a84b1b75eeebd30d0b33333ec3cd01288e33464966d78091aab963",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda/tests.rs": "9f3415a90b69752da22657e39c33da67d926dd1d5a3e9985c085a0e20c1cb4a4",
+    "crates/sonium-fem/src/solver/device.rs": "50992559d5f56d5047e2176cdbc75ccd2d288ac2d66769719386004b978442f5",
+    "crates/sonium-fem/src/solver/device/configured.rs": "43cf2d6e9858615f5a41ef6e536394a5435c7164d1db0f45f0655288f847e93d"
+  },
+  "binary": {
+    "path": "target/debug/deps/sonium_sim_room-fe04168d8c708c2c",
+    "sha256": "384d93bddfd697f8b931163c1dfeed5fb4f254d577a8f0fa416416d18df21f17"
+  },
+  "fixture": {
+    "mesh": "4x4 triangular grid, P1, actual stiffness/mass and two boundary mass forms",
+    "wavenumber": [
+      2.0,
+      0.2
+    ],
+    "strategies": [
+      "GmresIlu",
+      "GmresSchwarz with 3 subdomains and overlap 1"
+    ],
+    "actions": [
+      "Forward",
+      "Hermitian"
+    ],
+    "preconditioner_policy": "Explicit lagging at initial treatment; reprepare on unsuitable action, no fallback",
+    "oracle": "CPU direct solves of the same physical system and finite differences of its objective",
+    "reuse": "Three design evaluations plus four MMA iterations, separate retained forward and adjoint sessions",
+    "boundaries": "Host matrix/RHS uploads and full certified solution downloads are explicit; host objective, sensitivity and MMA",
+    "failure": "Injected D2D transfer failure returns error; repaired next evaluation matches CPU; invalid physics and unsupported Direct reject"
+  },
+  "assertions": {
+    "warm_backend_allocations": 0,
+    "objective_absolute_error": 1e-08,
+    "gradient_scaled_error": 1e-07,
+    "finite_difference_scaled_error": 1e-06,
+    "mma_history_absolute_error": 1e-07,
+    "mma_final_design_absolute_error": 1e-06
+  },
+  "results": {
+    "native": "1 passed",
+    "memcheck": "1 passed; 0 errors",
+    "cpu": "331 passed; 1 ignored",
+    "pipeline": "12 passed",
+    "check": "passed",
+    "clippy": "passed with existing warnings",
+    "cuda_clippy": "passed with existing warnings",
+    "inventory": "22 packages; 1356 source units; freshness passed",
+    "registry": "40 retained-dispatch rows; zero complete; validator and 10 audit tests passed"
+  },
+  "logs": {
+    "build": {
+      "path": "/tmp/room-treatment-cuda-build-final.log",
+      "sha256": "a055f6152cedec3a12b42f5cccebeec01dda795e96d2704999c79c49a77c1f5b"
+    },
+    "native": {
+      "path": "/tmp/room-treatment-native.log",
+      "sha256": "4c1f3bd464b76b3529ec204d62396ea849b3f3a178ffd45ea10410046f1bd05c"
+    },
+    "memcheck": {
+      "path": "/tmp/room-treatment-memcheck.log",
+      "sha256": "883709269baf6c31f26bb0cac9745473d90947d208187d81e168ef3ccd81d489"
+    },
+    "cpu": {
+      "path": "/tmp/room-treatment-cpu-tests.log",
+      "sha256": "b8809467bc99d49322b4e620e95f8e72f43dae72ff664e7928ed03a8b0a7296b"
+    },
+    "pipeline": {
+      "path": "/tmp/room-treatment-pipeline.log",
+      "sha256": "fc6342ff7babf9edd4a227f3c0f8671d8b4d83f0f334d4f782fe04673ec3659f"
+    },
+    "check": {
+      "path": "/tmp/room-treatment-root-check.log",
+      "sha256": "9944199e69d9b07818d8a843fc155b72d11197f66e88d7ab0e88a5b02e9e606e"
+    },
+    "clippy": {
+      "path": "/tmp/room-treatment-root-clippy.log",
+      "sha256": "3f6d1468f8d5288db42e525d99a7c675e755070597ebfd7245e636e605f59d7d"
+    },
+    "cuda_clippy": {
+      "path": "/tmp/room-treatment-cuda-clippy.log",
+      "sha256": "feabe3c9966580530ae1b663b9f1dc61ae2fdfa5b263b4e66f3fac6ad516a2ea"
+    }
+  },
+  "limitations": [
+    "No performance measurements or speedup claim",
+    "No multi-frequency treatment integration",
+    "No CLI backend selection for treatment optimization",
+    "Host numeric assembly, objective, adjoint RHS and sensitivities remain",
+    "No automatic preconditioner numeric refresh or rebuild; explicit preparation required",
+    "Physical fixture is bounded P1 2D; not all geometries/orders/materials"
+  ]
+}

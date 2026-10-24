@@ -1,0 +1,197 @@
+{
+  "date": "2026-10-22",
+  "scope": "Complex64 resident Helmholtz frequency combinations and requested adjoint actions",
+  "production_api": "CudaFemSolveSession::try_combine_system_lagged",
+  "fixture": {
+    "mesh": "6x6 unit-square triangles, homogeneous Dirichlet at x=0",
+    "orders": [
+      "P1",
+      "P2"
+    ],
+    "actions": [
+      "forward",
+      "transpose",
+      "Hermitian"
+    ],
+    "wavenumbers": [
+      "4+0.2i",
+      "4.2+0.2i",
+      "3.8+0.2i"
+    ],
+    "operator": "K-k^2 M; Hermitian coefficients conjugated",
+    "preconditioner": "FGMRES with retained auxiliary K+16M AMG, Jacobi smoother and native complex coarse LU",
+    "rhs": "manufactured discrete load; independent host assembly and action verify each result after the resident solve",
+    "initial_guess": "zero for every frequency, with positive iteration count asserted"
+  },
+  "asserted_gates": {
+    "independent_relative_residual": 1.1e-09,
+    "relative_solution_error": 1e-07,
+    "warm_device_allocations": 0,
+    "combination_h2d_bytes": 0,
+    "combination_d2h_bytes_max": 32
+  },
+  "samples": [
+    {
+      "order": "P1",
+      "action": "Forward",
+      "wavenumber": "4+0.2i",
+      "iterations": 18,
+      "solve_and_update_h2d_bytes": 288,
+      "solve_and_update_d2h_bytes": 5480
+    },
+    {
+      "order": "P1",
+      "action": "Forward",
+      "wavenumber": "4.2+0.2i",
+      "iterations": 19,
+      "solve_and_update_h2d_bytes": 304,
+      "solve_and_update_d2h_bytes": 6088
+    },
+    {
+      "order": "P1",
+      "action": "Forward",
+      "wavenumber": "3.8+0.2i",
+      "iterations": 18,
+      "solve_and_update_h2d_bytes": 288,
+      "solve_and_update_d2h_bytes": 5480
+    },
+    {
+      "order": "P1",
+      "action": "Transpose",
+      "wavenumber": "4+0.2i",
+      "iterations": 18,
+      "solve_and_update_h2d_bytes": 288,
+      "solve_and_update_d2h_bytes": 5480
+    },
+    {
+      "order": "P1",
+      "action": "Transpose",
+      "wavenumber": "4.2+0.2i",
+      "iterations": 19,
+      "solve_and_update_h2d_bytes": 304,
+      "solve_and_update_d2h_bytes": 6088
+    },
+    {
+      "order": "P1",
+      "action": "Transpose",
+      "wavenumber": "3.8+0.2i",
+      "iterations": 18,
+      "solve_and_update_h2d_bytes": 288,
+      "solve_and_update_d2h_bytes": 5480
+    },
+    {
+      "order": "P1",
+      "action": "Hermitian",
+      "wavenumber": "4+0.2i",
+      "iterations": 18,
+      "solve_and_update_h2d_bytes": 288,
+      "solve_and_update_d2h_bytes": 5480
+    },
+    {
+      "order": "P1",
+      "action": "Hermitian",
+      "wavenumber": "4.2+0.2i",
+      "iterations": 19,
+      "solve_and_update_h2d_bytes": 304,
+      "solve_and_update_d2h_bytes": 6088
+    },
+    {
+      "order": "P1",
+      "action": "Hermitian",
+      "wavenumber": "3.8+0.2i",
+      "iterations": 18,
+      "solve_and_update_h2d_bytes": 288,
+      "solve_and_update_d2h_bytes": 5480
+    },
+    {
+      "order": "P2",
+      "action": "Forward",
+      "wavenumber": "4+0.2i",
+      "iterations": 21,
+      "solve_and_update_h2d_bytes": 336,
+      "solve_and_update_d2h_bytes": 7400
+    },
+    {
+      "order": "P2",
+      "action": "Forward",
+      "wavenumber": "4.2+0.2i",
+      "iterations": 21,
+      "solve_and_update_h2d_bytes": 336,
+      "solve_and_update_d2h_bytes": 7400
+    },
+    {
+      "order": "P2",
+      "action": "Forward",
+      "wavenumber": "3.8+0.2i",
+      "iterations": 21,
+      "solve_and_update_h2d_bytes": 336,
+      "solve_and_update_d2h_bytes": 7400
+    },
+    {
+      "order": "P2",
+      "action": "Transpose",
+      "wavenumber": "4+0.2i",
+      "iterations": 21,
+      "solve_and_update_h2d_bytes": 336,
+      "solve_and_update_d2h_bytes": 7400
+    },
+    {
+      "order": "P2",
+      "action": "Transpose",
+      "wavenumber": "4.2+0.2i",
+      "iterations": 21,
+      "solve_and_update_h2d_bytes": 336,
+      "solve_and_update_d2h_bytes": 7400
+    },
+    {
+      "order": "P2",
+      "action": "Transpose",
+      "wavenumber": "3.8+0.2i",
+      "iterations": 21,
+      "solve_and_update_h2d_bytes": 336,
+      "solve_and_update_d2h_bytes": 7400
+    },
+    {
+      "order": "P2",
+      "action": "Hermitian",
+      "wavenumber": "4+0.2i",
+      "iterations": 21,
+      "solve_and_update_h2d_bytes": 336,
+      "solve_and_update_d2h_bytes": 7400
+    },
+    {
+      "order": "P2",
+      "action": "Hermitian",
+      "wavenumber": "4.2+0.2i",
+      "iterations": 21,
+      "solve_and_update_h2d_bytes": 336,
+      "solve_and_update_d2h_bytes": 7400
+    },
+    {
+      "order": "P2",
+      "action": "Hermitian",
+      "wavenumber": "3.8+0.2i",
+      "iterations": 21,
+      "solve_and_update_h2d_bytes": 336,
+      "solve_and_update_d2h_bytes": 7400
+    }
+  ],
+  "checks": {
+    "native": "1 test / 18 solves passed, /tmp/helmholtz-combination-native-final.log",
+    "memcheck": "1 test passed, zero errors, /tmp/helmholtz-combination-memcheck.log",
+    "cpu_fem": "1964 passed, 1 ignored, /tmp/helmholtz-combination-cpu.log",
+    "root_check": "passed /tmp/helmholtz-combination-root-check.log",
+    "root_clippy": "passed with existing warnings /tmp/helmholtz-combination-root-clippy.log",
+    "cuda_fem_lib_tests_clippy": "passed with warnings; none reference changed test file; /tmp/helmholtz-combination-cuda-clippy.log"
+  },
+  "limitations": [
+    "Bounded triangle P1/P2 discrete manufactured load with homogeneous Dirichlet; not full scattering or arbitrary frequency/BC coverage.",
+    "FGMRES retains bulk vectors but exchanges compact Krylov controls; total solve transfers are explicitly nonzero.",
+    "Initial basis and auxiliary AMG assembly remain host setup.",
+    "This increment adds physical integration evidence for existing production APIs; no performance speedup claimed."
+  ],
+  "source_sha256": {
+    "crates/sonium-fem/src/solver/device.rs": "5f8fc553b138c810da573c66b48563854b0c1952ecf03311108666b950a59a6e",
+    "crates/sonium-fem/src/solver/device/tests/public_flexible.rs": "ef68caccabd04328d17bfbb2e6aaa83d6998a3625a0eeb0465c69a29e5618981"
+  }
+}

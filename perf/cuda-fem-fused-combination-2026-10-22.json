@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-22",
+  "scope": "Fused two-base numeric combinations in persistent FEM CSR and RHS updates",
+  "implementation": {
+    "operation": "output = alpha*x + beta*y",
+    "scalars": [
+      "f32",
+      "f64",
+      "Complex32",
+      "Complex64"
+    ],
+    "dispatch": "optional native Backend hook; CUDA local kernel; unchanged copy/scale/AXPY device fallback when unavailable or more than two bases",
+    "connections": [
+      "PersistentDeviceCsr::combine_values",
+      "CudaFemSolveSession::try_combine_system_lagged",
+      "electrostatic energy operator through PersistentDeviceCsr"
+    ],
+    "failure_contract": "validate extents, finite coefficients and streams before launch; FEM publications and warm starts remain invalid after failed updates"
+  },
+  "validation": {
+    "primitive_native": "1 passed /tmp/fused-combination-native.log (before adding launch-injection case)",
+    "primitive_memcheck": "1 passed, zero errors including launch-injection/recovery /tmp/fused-combination-memcheck.log",
+    "helmholtz_native": "1 test / 18 physical-system solves passed /tmp/fused-combination-helmholtz.log",
+    "helmholtz_memcheck": "1 passed, zero errors /tmp/fused-combination-helmholtz-memcheck.log",
+    "electrostatic_native": "3 passed /tmp/fused-combination-electrostatic.log",
+    "electrostatic_memcheck": "3 passed, zero errors /tmp/fused-combination-electrostatic-memcheck.log",
+    "cpu_compute": "655 passed /tmp/fused-combination-cpu-compute.log",
+    "cpu_fem": "1964 passed, 1 ignored /tmp/fused-combination-cpu-fem.log",
+    "root_check": "passed /tmp/fused-combination-root-check.log",
+    "root_clippy": "passed with warnings /tmp/fused-combination-root-clippy.log",
+    "cuda_fem_check": "passed /tmp/fused-combination-check.log",
+    "cuda_fem_clippy": "passed with existing warnings /tmp/fused-combination-cuda-clippy.log"
+  },
+  "primitive_gates": {
+    "lengths": [
+      0,
+      1,
+      31,
+      256,
+      257,
+      100003
+    ],
+    "kernel_launches_per_nonempty_combination": 1,
+    "allocations": 0,
+    "h2d_bytes": 0,
+    "d2h_bytes": 0,
+    "d2d_bytes": 0,
+    "rejections": [
+      "length mismatch",
+      "nonfinite coefficient",
+      "foreign stream"
+    ],
+    "recovery": "injected launch error followed by successful native combination",
+    "nonfinite_input": "zero coefficient does not hide NaN input"
+  },
+  "limitations": [
+    "No isolated elapsed-time or complete-solve speedup measurement.",
+    "More-than-two-base combinations retain sequential device BLAS calls.",
+    "Native finite validation still has compact scalar transfers; this is not a zero-transfer whole-solve claim.",
+    "Broader compute/solver/BEM/FEM coverage and kernel priorities 1-4 remain active."
+  ],
+  "source_sha256": {
+    "crates/sonium-compute/src/backend/mod.rs": "358337b73d0ad51c18c5c8576fdb7350585162a7e4f81afe0521bf7efefab072",
+    "crates/sonium-compute/src/operator.rs": "7c9c7387e6bd42d3efd23ab5ed0ce8008ed3283d269f25fc93c2d5b433fb2a06",
+    "crates/sonium-compute/src/cuda/cublas.rs": "cc4c8fd5273125747b52850784c12488b28daff6b581affa22cf30ffce24b964",
+    "crates/sonium-compute/src/cuda/linear_combination.rs": "9f5711a9d8ea8c620ef1704c26c9a1fce0f08d1815a0be94b2b7f0e65c59071c",
+    "crates/sonium-compute/src/cuda/kernels/local_kernels.cu": "29a6ff97bf3bf612bf27e11781fe41fbc9fa108cd53df32039e0a94bd1bcdd65",
+    "crates/sonium-fem/src/solver/device.rs": "1b0c405a2c4bcd8459cb72ec823d895f108b0d3e3a900798ff5a0e3e6b723487",
+    "crates/sonium-fem/src/solver/device/tests/electrostatic.rs": "1303d616a0a8eca35c794a6b766a84f2c146974d72d6f907efa8f78c4269363c",
+    "crates/sonium-fem/src/solver/device/tests/public_flexible.rs": "617b76ca0e619821d77e490b3c877d8b2bf3079f1dabd6ccbef7c421a53b40ba"
+  }
+}

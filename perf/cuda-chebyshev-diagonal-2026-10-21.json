@@ -1,0 +1,197 @@
+{
+  "date": "2026-10-21",
+  "base_revision": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree": true,
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "driver": "610.57.04",
+  "profile": "test opt-level=2",
+  "change": "AMG Chebyshev first and subsequent sweeps use try_diagonal_scale_native instead of diagonal CSR action followed by scale. Checked portable fallback preserved.",
+  "method": "One warmup then five timed complete warm linear solves, alternating layout order, zero initial guess, tolerance 1e-11. Setup/assembly excluded; RHS/guess uploads, convergence and solution download included.",
+  "baseline": "cuda-pressure-only-amg-2026-10-21.json",
+  "results": [
+    {
+      "pressure_dofs": 91,
+      "velocity_dofs": 650,
+      "iterations_embedded_pressure": [
+        74,
+        76
+      ],
+      "before_seconds_embedded_pressure": [
+        0.130126366,
+        0.146315633
+      ],
+      "after_seconds_embedded_pressure": [
+        0.09041875,
+        0.100924476
+      ],
+      "speedup_embedded_pressure": [
+        1.4391524545517382,
+        1.4497537049387306
+      ],
+      "after_samples_seconds_embedded_pressure": [
+        [
+          0.090377552,
+          0.090418511,
+          0.09041875,
+          0.09051382,
+          0.090548787
+        ],
+        [
+          0.100860716,
+          0.100917272,
+          0.100924476,
+          0.100925177,
+          0.100936008
+        ]
+      ]
+    },
+    {
+      "pressure_dofs": 190,
+      "velocity_dofs": 1406,
+      "iterations_embedded_pressure": [
+        88,
+        82
+      ],
+      "before_seconds_embedded_pressure": [
+        0.170265538,
+        0.185624343
+      ],
+      "after_seconds_embedded_pressure": [
+        0.120375321,
+        0.129230901
+      ],
+      "speedup_embedded_pressure": [
+        1.414455526145596,
+        1.4363773800509212
+      ],
+      "after_samples_seconds_embedded_pressure": [
+        [
+          0.120305017,
+          0.120373899,
+          0.120375321,
+          0.120414485,
+          0.120439642
+        ],
+        [
+          0.129195384,
+          0.129201155,
+          0.129230901,
+          0.129239257,
+          0.129302587
+        ]
+      ]
+    },
+    {
+      "pressure_dofs": 325,
+      "velocity_dofs": 2450,
+      "iterations_embedded_pressure": [
+        102,
+        78
+      ],
+      "before_seconds_embedded_pressure": [
+        0.211618029,
+        0.201501741
+      ],
+      "after_seconds_embedded_pressure": [
+        0.149081253,
+        0.141252036
+      ],
+      "speedup_embedded_pressure": [
+        1.4194811536766465,
+        1.4265404358490097
+      ],
+      "after_samples_seconds_embedded_pressure": [
+        [
+          0.149055133,
+          0.149065663,
+          0.149081253,
+          0.149083487,
+          0.149154272
+        ],
+        [
+          0.141161094,
+          0.141223862,
+          0.141252036,
+          0.14125925,
+          0.141295489
+        ]
+      ]
+    },
+    {
+      "pressure_dofs": 703,
+      "velocity_dofs": 5402,
+      "iterations_embedded_pressure": [
+        135,
+        119
+      ],
+      "before_seconds_embedded_pressure": [
+        0.310764136,
+        0.350134162
+      ],
+      "after_seconds_embedded_pressure": [
+        0.213489105,
+        0.252582639
+      ],
+      "speedup_embedded_pressure": [
+        1.455644005814723,
+        1.386216263264238
+      ],
+      "after_samples_seconds_embedded_pressure": [
+        [
+          0.213431086,
+          0.213488905,
+          0.213489105,
+          0.213543999,
+          0.213568816
+        ],
+        [
+          0.252434108,
+          0.252503739,
+          0.252582639,
+          0.252627774,
+          0.252629878
+        ]
+      ]
+    }
+  ],
+  "validation": {
+    "cpu_preconditioner_tests_passed": 339,
+    "cpu_doctests_ignored": 1,
+    "native_bdf_tests_passed": 5,
+    "native_bdf_seconds": 58.74,
+    "native_refresh_tests_passed": 3,
+    "native_refresh_seconds": 2.24,
+    "memcheck_errors": 0,
+    "root_cargo_check": "pass",
+    "root_cargo_clippy": "pass",
+    "cuda_preconditioner_tests_clippy": "pass with existing warnings",
+    "warm_solve_device_allocations": 0
+  },
+  "profile_comparison": {
+    "scope": "Same 703-pressure-DOF test: two pressure-only physical steps and one embedded layout-switch solve; includes setup. Not timed benchmark data.",
+    "csr_action_kernel_instances_before": 23709,
+    "csr_action_kernel_instances_after": 13905,
+    "diagonal_scale_instances_after": 9804,
+    "scal_instances_before": 22293,
+    "scal_instances_after": 12489,
+    "cudaLaunchKernel_calls_before": 100227,
+    "cudaLaunchKernel_calls_after": 70815,
+    "baseline_report": "cuda-pressure-only-amg-profile-2026-10-21.csv",
+    "after_report": "cuda-chebyshev-diagonal-profile-2026-10-21.csv"
+  },
+  "source_sha256": {
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda.rs": "de245c2ee072c00201de5baa13410e31ca53b128465a62978b5774543076a24d",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/pressure.rs": "6efd0dce8058bb15def45cdf4b096aa2d22b24dbf2024e6be0299b8d97cb6b66",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/tests.rs": "d031f048e005f207f06abd5040d0ecd071410fafda8c184fd2ca7088e57624eb",
+    "crates/sonium-fem/src/physics/fluid/stokes/navier_stokes.rs": "e89152c2de9bd234cef549959d1668283638fcdd8c73640c16825e08d7a9588e",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/mod.rs": "51347b47793fe612cc329061039cd1a2e82189b186d617d82bdc2455966af1f8",
+    "crates/sonium-compute/src/cuda/cublas.rs": "bf33f2bf121a25c2a989d13d8b71edb8ca7ae1f6aa0b7fa6111fa10d09c65edc",
+    "crates/sonium-compute/src/cuda/kernels/local_kernels.cu": "cde14f49c28c85fb029c89031db85dba21b621bea21666069f625be25ed29570"
+  },
+  "limitations": [
+    "Four bounded 2D BDF fixtures, test profile opt-level 2; not a universal FEM speedup.",
+    "Baseline and candidate each use alternating layout ordering; candidate measured after baseline rather than interleaving binaries.",
+    "Pressure-only layout stays opt-in: it loses on three of four sizes even after optimization.",
+    "Full workflow still includes host assembly, hierarchy setup and history state."
+  ]
+}

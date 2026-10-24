@@ -1,0 +1,1712 @@
+{
+  "date": "2026-10-21",
+  "base_revision": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree": "uncommitted; hashes identify final sources only",
+  "final_source_sha256": {
+    "crates/sonium-compute/src/cuda/kernels/fem_hex.cu": "cc8993b341146b9c326a33bf0fe4c198f68ef0bdcd2b6af818fd067c20f1bbf4",
+    "crates/sonium-compute/src/cuda/fem_hex.rs": "77e0cb9d00ab91d7b94a91d012c912a0e868b7c3d03d5fe1bb44fa08a7d5f941",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_hex_solve.rs": "1a05ef20b6ad98438171b1a8e70620dbdb54256505b0a9dca202cbbb82e25707",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_hex_solve/tests.rs": "0ab736a06c6504049a248b5c4f311805138b22b46dab40769e3227d2f41ab5a7",
+    "crates/sonium-fem/examples/cuda_fem_compare.rs": "32317ba1bbfd45374a87b5891b4de3740c5cdf6da11b3ade7992dc0bd71dd7c9"
+  },
+  "hardware": "RTX PRO 6000 Blackwell Workstation Edition; driver 610.57.04",
+  "benchmark_command": "RAYON_NUM_THREADS=4 SONIUM_FEM_BENCH_PRECONDITIONER=lor target/release/examples/cuda_fem_compare 4",
+  "variants": {
+    "benchmark": {
+      "description": "Unconditional runtime coefficient scaling",
+      "raw_records": [
+        {
+          "action_repetitions": 100,
+          "action_samples": 7,
+          "boundary": "natural_neumann",
+          "context_setup_ms": 331.461054,
+          "k": 5.0,
+          "preconditioner_mass_shift": [
+            25.0,
+            25.0
+          ],
+          "scalar": "complex64",
+          "solve_initial_guess": "zero",
+          "solve_samples": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "amg_smoother": "Jacobi",
+          "hex_low_order_refined": true,
+          "max_iterations": 600,
+          "restart": 60
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.9094189034378926e-16,
+              "timing": {
+                "max_ms": 0.026496520000000003,
+                "median_ms": 0.026448830000000003,
+                "min_ms": 0.026325900000000003,
+                "samples_ms": [
+                  0.026369470000000002,
+                  0.026461449999999997,
+                  0.026325900000000003,
+                  0.02634793,
+                  0.026450340000000003,
+                  0.026496520000000003,
+                  0.026448830000000003
+                ]
+              }
+            },
+            {
+              "kernel_launches": 700,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.1783749606897993e-16,
+              "timing": {
+                "max_ms": 0.16530520999999998,
+                "median_ms": 0.16524799,
+                "min_ms": 0.16521263000000003,
+                "samples_ms": [
+                  0.16530520999999998,
+                  0.1652489,
+                  0.16521263000000003,
+                  0.1652471,
+                  0.1653015,
+                  0.16523638000000002,
+                  0.16524799
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            125,
+            72,
+            37,
+            17,
+            6
+          ],
+          "amg_level_nnz": [
+            1333,
+            1162,
+            619,
+            193,
+            27
+          ],
+          "amg_operator_complexity": 2.50112528132033,
+          "csr_setup_ms": 8.932981,
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "family": "tet",
+          "host_assembly_ms": 3.867871,
+          "nnz": 1333,
+          "preconditioner_apply_ms": 0.908061,
+          "preconditioner_setup_ms": 18.330503,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 345600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                36,
+                36,
+                36,
+                36,
+                36
+              ],
+              "operator": "cusparse",
+              "solution_error": 3.2893843863453125e-09,
+              "timing": {
+                "max_ms": 41.939499,
+                "median_ms": 40.999106,
+                "min_ms": 40.913433999999995,
+                "samples_ms": [
+                  40.999106,
+                  41.939499,
+                  41.00645,
+                  40.913433999999995,
+                  40.992153
+                ]
+              },
+              "true_relative_residual": 4.2213788153241533e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 345600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                36,
+                36,
+                36,
+                36,
+                36
+              ],
+              "operator": "specialized",
+              "solution_error": 3.2893839150269713e-09,
+              "timing": {
+                "max_ms": 46.339408,
+                "median_ms": 46.315101999999996,
+                "min_ms": 46.300234,
+                "samples_ms": [
+                  46.315101999999996,
+                  46.339408,
+                  46.3142,
+                  46.316214,
+                  46.300234
+                ]
+              },
+              "true_relative_residual": 4.221378935282529e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 16.855347,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 2.273549178818527e-16,
+              "timing": {
+                "max_ms": 0.027398029999999997,
+                "median_ms": 0.02739453,
+                "min_ms": 0.02737369,
+                "samples_ms": [
+                  0.02737369,
+                  0.02739653,
+                  0.027398029999999997,
+                  0.027385899999999998,
+                  0.02739453,
+                  0.02738761,
+                  0.027395319999999997
+                ]
+              }
+            },
+            {
+              "kernel_launches": 700,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.7928961588310865e-16,
+              "timing": {
+                "max_ms": 0.92138381,
+                "median_ms": 0.92122812,
+                "min_ms": 0.92100109,
+                "samples_ms": [
+                  0.92126989,
+                  0.92100109,
+                  0.9210604,
+                  0.92107863,
+                  0.92138381,
+                  0.92122812,
+                  0.92138131
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            729,
+            337,
+            135,
+            42,
+            7
+          ],
+          "amg_level_nnz": [
+            17025,
+            15818,
+            5484,
+            983,
+            47
+          ],
+          "amg_operator_complexity": 2.311718061674009,
+          "csr_setup_ms": 0.141589,
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "family": "tet",
+          "host_assembly_ms": 15.981349999999999,
+          "nnz": 17025,
+          "preconditioner_apply_ms": 0.963106,
+          "preconditioner_setup_ms": 23.480573,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 537600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                56,
+                56,
+                56,
+                56,
+                56
+              ],
+              "operator": "cusparse",
+              "solution_error": 1.1453901652514977e-08,
+              "timing": {
+                "max_ms": 77.449191,
+                "median_ms": 77.43258,
+                "min_ms": 77.419785,
+                "samples_ms": [
+                  77.419785,
+                  77.43258,
+                  77.425556,
+                  77.437989,
+                  77.449191
+                ]
+              },
+              "true_relative_residual": 7.450106056943589e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 537600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                56,
+                56,
+                56,
+                56,
+                56
+              ],
+              "operator": "specialized",
+              "solution_error": 1.1453901824222664e-08,
+              "timing": {
+                "max_ms": 130.341067,
+                "median_ms": 129.542503,
+                "min_ms": 129.504431,
+                "samples_ms": [
+                  129.53987899999998,
+                  129.504431,
+                  129.542503,
+                  130.341067,
+                  129.56822300000002
+                ]
+              },
+              "true_relative_residual": 7.450106004344677e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 15.614965,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.7840155827238253e-16,
+              "timing": {
+                "max_ms": 0.02746756,
+                "median_ms": 0.02745463,
+                "min_ms": 0.027444510000000002,
+                "samples_ms": [
+                  0.02746756,
+                  0.02745253,
+                  0.02746526,
+                  0.02745463,
+                  0.02745964,
+                  0.027444510000000002,
+                  0.02744772
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.520397071016613e-16,
+              "timing": {
+                "max_ms": 0.05934758,
+                "median_ms": 0.05899141,
+                "min_ms": 0.05897698,
+                "samples_ms": [
+                  0.0589883,
+                  0.05897698,
+                  0.05899372,
+                  0.05898008,
+                  0.05899141,
+                  0.05900123,
+                  0.05934758
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            729,
+            181,
+            59,
+            22,
+            10
+          ],
+          "amg_level_nnz": [
+            15625,
+            6959,
+            1175,
+            170,
+            37
+          ],
+          "amg_operator_complexity": 1.533824,
+          "csr_setup_ms": 0.22166,
+          "degree": 2,
+          "dofs": 729,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 15.592343,
+          "nnz": 35937,
+          "preconditioner_apply_ms": 0.953938,
+          "preconditioner_setup_ms": 14.505102,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 1296000,
+              "h2d_bytes": 14400,
+              "iterations": [
+                135,
+                135,
+                135,
+                135,
+                135
+              ],
+              "operator": "cusparse",
+              "solution_error": 4.718846404950152e-08,
+              "timing": {
+                "max_ms": 187.27598600000002,
+                "median_ms": 185.319689,
+                "min_ms": 185.238224,
+                "samples_ms": [
+                  185.319689,
+                  185.395492,
+                  185.238224,
+                  185.297447,
+                  187.27598600000002
+                ]
+              },
+              "true_relative_residual": 8.598256942468967e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 1296000,
+              "h2d_bytes": 14400,
+              "iterations": [
+                135,
+                135,
+                135,
+                135,
+                135
+              ],
+              "operator": "specialized",
+              "solution_error": 4.71884639670928e-08,
+              "timing": {
+                "max_ms": 191.375586,
+                "median_ms": 190.139012,
+                "min_ms": 190.094849,
+                "samples_ms": [
+                  190.120296,
+                  191.375586,
+                  190.094849,
+                  190.139012,
+                  190.973564
+                ]
+              },
+              "true_relative_residual": 8.598256883408941e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 14.601735,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.6470021345808286e-16,
+              "timing": {
+                "max_ms": 0.038844420000000005,
+                "median_ms": 0.03883279,
+                "min_ms": 0.038823590000000005,
+                "samples_ms": [
+                  0.0388294,
+                  0.038844420000000005,
+                  0.038823590000000005,
+                  0.03882508,
+                  0.03883751,
+                  0.03884091,
+                  0.03883279
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.587444458735068e-16,
+              "timing": {
+                "max_ms": 0.06756275,
+                "median_ms": 0.06754943000000001,
+                "min_ms": 0.067534,
+                "samples_ms": [
+                  0.06754030999999999,
+                  0.06754943000000001,
+                  0.06755183,
+                  0.06756275,
+                  0.067534,
+                  0.06755063,
+                  0.06754692
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            2197,
+            1479,
+            844,
+            443,
+            205,
+            62,
+            27,
+            12
+          ],
+          "amg_level_nnz": [
+            50653,
+            67057,
+            51869,
+            24508,
+            7655,
+            999,
+            200,
+            37
+          ],
+          "amg_operator_complexity": 4.007225633230016,
+          "csr_setup_ms": 1.103641,
+          "degree": 3,
+          "dofs": 2197,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 84.01987299999999,
+          "nnz": 226981,
+          "preconditioner_apply_ms": 1.6873879999999999,
+          "preconditioner_setup_ms": 77.483435,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 2035200,
+              "h2d_bytes": 19200,
+              "iterations": [
+                212,
+                212,
+                212,
+                212,
+                212
+              ],
+              "operator": "cusparse",
+              "solution_error": 5.3255313155494576e-08,
+              "timing": {
+                "max_ms": 476.137425,
+                "median_ms": 475.520216,
+                "min_ms": 475.468377,
+                "samples_ms": [
+                  475.520216,
+                  475.468377,
+                  476.137425,
+                  475.49242200000003,
+                  475.55417900000003
+                ]
+              },
+              "true_relative_residual": 9.814277783441945e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 2035200,
+              "h2d_bytes": 19200,
+              "iterations": [
+                212,
+                212,
+                212,
+                212,
+                212
+              ],
+              "operator": "specialized",
+              "solution_error": 5.3255313452048414e-08,
+              "timing": {
+                "max_ms": 483.461513,
+                "median_ms": 482.406364,
+                "min_ms": 482.034348,
+                "samples_ms": [
+                  482.967969,
+                  483.461513,
+                  482.406364,
+                  482.383309,
+                  482.034348
+                ]
+              },
+              "true_relative_residual": 9.814277807688365e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 15.826666999999999,
+          "subdivisions": 4
+        }
+      ],
+      "source_hashes_apply": false
+    },
+    "fastpath": {
+      "description": "Runtime branch skips unit coefficient multiplications",
+      "raw_records": [
+        {
+          "action_repetitions": 100,
+          "action_samples": 7,
+          "boundary": "natural_neumann",
+          "context_setup_ms": 326.784958,
+          "k": 5.0,
+          "preconditioner_mass_shift": [
+            25.0,
+            25.0
+          ],
+          "scalar": "complex64",
+          "solve_initial_guess": "zero",
+          "solve_samples": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "amg_smoother": "Jacobi",
+          "hex_low_order_refined": true,
+          "max_iterations": 600,
+          "restart": 60
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.9094189034378926e-16,
+              "timing": {
+                "max_ms": 0.026429079999999997,
+                "median_ms": 0.02636677,
+                "min_ms": 0.02628511,
+                "samples_ms": [
+                  0.026307650000000002,
+                  0.02640203,
+                  0.02636797,
+                  0.02636677,
+                  0.02628511,
+                  0.026341720000000002,
+                  0.026429079999999997
+                ]
+              }
+            },
+            {
+              "kernel_launches": 700,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.1783749606897993e-16,
+              "timing": {
+                "max_ms": 0.1652749,
+                "median_ms": 0.1652227,
+                "min_ms": 0.16520687,
+                "samples_ms": [
+                  0.16523763,
+                  0.16520997999999998,
+                  0.16521158000000002,
+                  0.16525677,
+                  0.1652749,
+                  0.1652227,
+                  0.16520687
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            125,
+            72,
+            37,
+            17,
+            6
+          ],
+          "amg_level_nnz": [
+            1333,
+            1162,
+            619,
+            193,
+            27
+          ],
+          "amg_operator_complexity": 2.50112528132033,
+          "csr_setup_ms": 8.950681,
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "family": "tet",
+          "host_assembly_ms": 3.785483,
+          "nnz": 1333,
+          "preconditioner_apply_ms": 0.908492,
+          "preconditioner_setup_ms": 18.334324,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 345600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                36,
+                36,
+                36,
+                36,
+                36
+              ],
+              "operator": "cusparse",
+              "solution_error": 3.2893843863453125e-09,
+              "timing": {
+                "max_ms": 41.00679,
+                "median_ms": 40.989126,
+                "min_ms": 40.958377,
+                "samples_ms": [
+                  41.00679,
+                  40.993474,
+                  40.958377,
+                  40.972705,
+                  40.989126
+                ]
+              },
+              "true_relative_residual": 4.2213788153241533e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 345600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                36,
+                36,
+                36,
+                36,
+                36
+              ],
+              "operator": "specialized",
+              "solution_error": 3.2893839150269713e-09,
+              "timing": {
+                "max_ms": 46.322262,
+                "median_ms": 46.313355,
+                "min_ms": 46.303827,
+                "samples_ms": [
+                  46.303827,
+                  46.315809,
+                  46.322262,
+                  46.309979,
+                  46.313355
+                ]
+              },
+              "true_relative_residual": 4.221378935282529e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 16.972363,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 2.273549178818527e-16,
+              "timing": {
+                "max_ms": 0.027403129999999998,
+                "median_ms": 0.0273894,
+                "min_ms": 0.02737958,
+                "samples_ms": [
+                  0.02739431,
+                  0.02740243,
+                  0.027403129999999998,
+                  0.0273894,
+                  0.027388410000000002,
+                  0.027384000000000002,
+                  0.02737958
+                ]
+              }
+            },
+            {
+              "kernel_launches": 700,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.7928961588310865e-16,
+              "timing": {
+                "max_ms": 0.92111765,
+                "median_ms": 0.92101716,
+                "min_ms": 0.92092408,
+                "samples_ms": [
+                  0.92096105,
+                  0.92111765,
+                  0.92107967,
+                  0.92101716,
+                  0.9210036300000001,
+                  0.92107015,
+                  0.92092408
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            729,
+            337,
+            135,
+            42,
+            7
+          ],
+          "amg_level_nnz": [
+            17025,
+            15818,
+            5484,
+            983,
+            47
+          ],
+          "amg_operator_complexity": 2.311718061674009,
+          "csr_setup_ms": 0.141318,
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "family": "tet",
+          "host_assembly_ms": 16.148973,
+          "nnz": 17025,
+          "preconditioner_apply_ms": 0.9649380000000001,
+          "preconditioner_setup_ms": 24.697523,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 537600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                56,
+                56,
+                56,
+                56,
+                56
+              ],
+              "operator": "cusparse",
+              "solution_error": 1.1453901652514977e-08,
+              "timing": {
+                "max_ms": 77.49326199999999,
+                "median_ms": 77.43193600000001,
+                "min_ms": 77.368195,
+                "samples_ms": [
+                  77.36853500000001,
+                  77.49268099999999,
+                  77.368195,
+                  77.49326199999999,
+                  77.43193600000001
+                ]
+              },
+              "true_relative_residual": 7.450106056943589e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 537600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                56,
+                56,
+                56,
+                56,
+                56
+              ],
+              "operator": "specialized",
+              "solution_error": 1.1453901824222664e-08,
+              "timing": {
+                "max_ms": 130.36994399999998,
+                "median_ms": 129.543849,
+                "min_ms": 129.530984,
+                "samples_ms": [
+                  129.543849,
+                  129.53408,
+                  129.530984,
+                  130.36994399999998,
+                  129.600817
+                ]
+              },
+              "true_relative_residual": 7.450106004344677e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 15.50351,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.7840155827238253e-16,
+              "timing": {
+                "max_ms": 0.02746965,
+                "median_ms": 0.02745222,
+                "min_ms": 0.02743068,
+                "samples_ms": [
+                  0.02744892,
+                  0.02746965,
+                  0.027453230000000002,
+                  0.027458029999999998,
+                  0.02744,
+                  0.02745222,
+                  0.02743068
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.520397071016613e-16,
+              "timing": {
+                "max_ms": 0.059230439999999995,
+                "median_ms": 0.059218919999999994,
+                "min_ms": 0.05919017,
+                "samples_ms": [
+                  0.059230239999999997,
+                  0.05919017,
+                  0.05919668,
+                  0.05919978,
+                  0.059218919999999994,
+                  0.059230439999999995,
+                  0.059223929999999994
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            729,
+            181,
+            59,
+            22,
+            10
+          ],
+          "amg_level_nnz": [
+            15625,
+            6959,
+            1175,
+            170,
+            37
+          ],
+          "amg_operator_complexity": 1.533824,
+          "csr_setup_ms": 0.224796,
+          "degree": 2,
+          "dofs": 729,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 15.942962000000001,
+          "nnz": 35937,
+          "preconditioner_apply_ms": 0.9554,
+          "preconditioner_setup_ms": 14.846734999999999,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 1296000,
+              "h2d_bytes": 14400,
+              "iterations": [
+                135,
+                135,
+                135,
+                135,
+                135
+              ],
+              "operator": "cusparse",
+              "solution_error": 4.718846404950152e-08,
+              "timing": {
+                "max_ms": 185.36921900000002,
+                "median_ms": 185.339634,
+                "min_ms": 185.326368,
+                "samples_ms": [
+                  185.331137,
+                  185.346817,
+                  185.326368,
+                  185.339634,
+                  185.36921900000002
+                ]
+              },
+              "true_relative_residual": 8.598256942468967e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 1296000,
+              "h2d_bytes": 14400,
+              "iterations": [
+                135,
+                135,
+                135,
+                135,
+                135
+              ],
+              "operator": "specialized",
+              "solution_error": 4.71884639670928e-08,
+              "timing": {
+                "max_ms": 190.17062800000002,
+                "median_ms": 190.05548,
+                "min_ms": 189.995606,
+                "samples_ms": [
+                  190.078152,
+                  190.05548,
+                  189.995606,
+                  190.17062800000002,
+                  190.05191299999998
+                ]
+              },
+              "true_relative_residual": 8.598256883408941e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 121.578534,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.6470021345808286e-16,
+              "timing": {
+                "max_ms": 0.03887617,
+                "median_ms": 0.03884121,
+                "min_ms": 0.03881846,
+                "samples_ms": [
+                  0.03887617,
+                  0.03884,
+                  0.03885243,
+                  0.03881846,
+                  0.03886806,
+                  0.03882216,
+                  0.03884121
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.587444458735068e-16,
+              "timing": {
+                "max_ms": 0.06769128,
+                "median_ms": 0.06766142,
+                "min_ms": 0.06763577,
+                "samples_ms": [
+                  0.06769128,
+                  0.06767554,
+                  0.06766142,
+                  0.06764378,
+                  0.06765802,
+                  0.06763577,
+                  0.06766433
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            2197,
+            1479,
+            844,
+            443,
+            205,
+            62,
+            27,
+            12
+          ],
+          "amg_level_nnz": [
+            50653,
+            67057,
+            51869,
+            24508,
+            7655,
+            999,
+            200,
+            37
+          ],
+          "amg_operator_complexity": 4.007225633230016,
+          "csr_setup_ms": 1.06561,
+          "degree": 3,
+          "dofs": 2197,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 82.049566,
+          "nnz": 226981,
+          "preconditioner_apply_ms": 1.689301,
+          "preconditioner_setup_ms": 78.78977900000001,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 2035200,
+              "h2d_bytes": 19200,
+              "iterations": [
+                212,
+                212,
+                212,
+                212,
+                212
+              ],
+              "operator": "cusparse",
+              "solution_error": 5.3255313995135904e-08,
+              "timing": {
+                "max_ms": 475.376708,
+                "median_ms": 475.31435,
+                "min_ms": 475.269725,
+                "samples_ms": [
+                  475.347093,
+                  475.277961,
+                  475.376708,
+                  475.31435,
+                  475.269725
+                ]
+              },
+              "true_relative_residual": 9.81427785721762e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 2035200,
+              "h2d_bytes": 19200,
+              "iterations": [
+                212,
+                212,
+                212,
+                212,
+                212
+              ],
+              "operator": "specialized",
+              "solution_error": 5.3255313452048414e-08,
+              "timing": {
+                "max_ms": 482.19921500000004,
+                "median_ms": 482.096161,
+                "min_ms": 482.047728,
+                "samples_ms": [
+                  482.096161,
+                  482.19921500000004,
+                  482.047728,
+                  482.075621,
+                  482.19637900000004
+                ]
+              },
+              "true_relative_residual": 9.814277807688365e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 15.945757000000002,
+          "subdivisions": 4
+        }
+      ],
+      "source_hashes_apply": false
+    },
+    "specialized": {
+      "description": "Final separate fixed and scaled entrypoints sharing a templated implementation",
+      "raw_records": [
+        {
+          "action_repetitions": 100,
+          "action_samples": 7,
+          "boundary": "natural_neumann",
+          "context_setup_ms": 331.282829,
+          "k": 5.0,
+          "preconditioner_mass_shift": [
+            25.0,
+            25.0
+          ],
+          "scalar": "complex64",
+          "solve_initial_guess": "zero",
+          "solve_samples": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "amg_smoother": "Jacobi",
+          "hex_low_order_refined": true,
+          "max_iterations": 600,
+          "restart": 60
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.9094189034378926e-16,
+              "timing": {
+                "max_ms": 0.02646785,
+                "median_ms": 0.026429479999999998,
+                "min_ms": 0.02624243,
+                "samples_ms": [
+                  0.026371770000000003,
+                  0.0264425,
+                  0.026429479999999998,
+                  0.02624243,
+                  0.0263889,
+                  0.02646785,
+                  0.02644852
+                ]
+              }
+            },
+            {
+              "kernel_launches": 700,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.1783749606897993e-16,
+              "timing": {
+                "max_ms": 0.1652981,
+                "median_ms": 0.16526092999999997,
+                "min_ms": 0.16517176,
+                "samples_ms": [
+                  0.16517176,
+                  0.16525893,
+                  0.16524831,
+                  0.1652981,
+                  0.16526303999999997,
+                  0.16528218,
+                  0.16526092999999997
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            125,
+            72,
+            37,
+            17,
+            6
+          ],
+          "amg_level_nnz": [
+            1333,
+            1162,
+            619,
+            193,
+            27
+          ],
+          "amg_operator_complexity": 2.50112528132033,
+          "csr_setup_ms": 8.929378999999999,
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "family": "tet",
+          "host_assembly_ms": 3.7692419999999998,
+          "nnz": 1333,
+          "preconditioner_apply_ms": 0.9081309999999999,
+          "preconditioner_setup_ms": 18.401126,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 345600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                36,
+                36,
+                36,
+                36,
+                36
+              ],
+              "operator": "cusparse",
+              "solution_error": 3.2893843863453125e-09,
+              "timing": {
+                "max_ms": 41.025023,
+                "median_ms": 40.993984999999995,
+                "min_ms": 40.972595,
+                "samples_ms": [
+                  40.992051000000004,
+                  40.993984999999995,
+                  40.996901,
+                  41.025023,
+                  40.972595
+                ]
+              },
+              "true_relative_residual": 4.2213788153241533e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 345600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                36,
+                36,
+                36,
+                36,
+                36
+              ],
+              "operator": "specialized",
+              "solution_error": 3.2893839150269713e-09,
+              "timing": {
+                "max_ms": 46.335195000000006,
+                "median_ms": 46.291112000000005,
+                "min_ms": 46.274891,
+                "samples_ms": [
+                  46.291112000000005,
+                  46.274891,
+                  46.29043,
+                  46.324776,
+                  46.335195000000006
+                ]
+              },
+              "true_relative_residual": 4.221378935282529e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 17.034627,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 2.273549178818527e-16,
+              "timing": {
+                "max_ms": 0.027419060000000002,
+                "median_ms": 0.02739741,
+                "min_ms": 0.02738048,
+                "samples_ms": [
+                  0.02740453,
+                  0.027419060000000002,
+                  0.02739581,
+                  0.02739741,
+                  0.02739591,
+                  0.02739862,
+                  0.02738048
+                ]
+              }
+            },
+            {
+              "kernel_launches": 700,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.7928961588310865e-16,
+              "timing": {
+                "max_ms": 0.9212553699999999,
+                "median_ms": 0.92112133,
+                "min_ms": 0.9208620300000001,
+                "samples_ms": [
+                  0.9212553699999999,
+                  0.92107413,
+                  0.92112133,
+                  0.92117793,
+                  0.92117052,
+                  0.92097264,
+                  0.9208620300000001
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            729,
+            337,
+            135,
+            42,
+            7
+          ],
+          "amg_level_nnz": [
+            17025,
+            15818,
+            5484,
+            983,
+            47
+          ],
+          "amg_operator_complexity": 2.311718061674009,
+          "csr_setup_ms": 0.14088699999999998,
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "family": "tet",
+          "host_assembly_ms": 14.795615,
+          "nnz": 17025,
+          "preconditioner_apply_ms": 0.964568,
+          "preconditioner_setup_ms": 24.015404,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 537600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                56,
+                56,
+                56,
+                56,
+                56
+              ],
+              "operator": "cusparse",
+              "solution_error": 1.1453901652514977e-08,
+              "timing": {
+                "max_ms": 77.39675,
+                "median_ms": 77.364359,
+                "min_ms": 77.35987,
+                "samples_ms": [
+                  77.39675,
+                  77.380289,
+                  77.364359,
+                  77.35987,
+                  77.361092
+                ]
+              },
+              "true_relative_residual": 7.450106056943589e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 537600,
+              "h2d_bytes": 4800,
+              "iterations": [
+                56,
+                56,
+                56,
+                56,
+                56
+              ],
+              "operator": "specialized",
+              "solution_error": 1.1453901824222664e-08,
+              "timing": {
+                "max_ms": 130.26334,
+                "median_ms": 129.51309899999998,
+                "min_ms": 129.412158,
+                "samples_ms": [
+                  129.51309899999998,
+                  129.412158,
+                  129.505655,
+                  130.26334,
+                  129.55059
+                ]
+              },
+              "true_relative_residual": 7.450106004344677e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 15.552659,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.7840155827238253e-16,
+              "timing": {
+                "max_ms": 0.02747596,
+                "median_ms": 0.02746374,
+                "min_ms": 0.027443799999999997,
+                "samples_ms": [
+                  0.02745181,
+                  0.027469450000000003,
+                  0.02746374,
+                  0.02747596,
+                  0.027449309999999998,
+                  0.02746705,
+                  0.027443799999999997
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.520397071016613e-16,
+              "timing": {
+                "max_ms": 0.05683319,
+                "median_ms": 0.056821170000000004,
+                "min_ms": 0.05680183,
+                "samples_ms": [
+                  0.056821170000000004,
+                  0.05682146,
+                  0.05682838,
+                  0.056806239999999994,
+                  0.05680183,
+                  0.05680774,
+                  0.05683319
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            729,
+            181,
+            59,
+            22,
+            10
+          ],
+          "amg_level_nnz": [
+            15625,
+            6959,
+            1175,
+            170,
+            37
+          ],
+          "amg_operator_complexity": 1.533824,
+          "csr_setup_ms": 0.224556,
+          "degree": 2,
+          "dofs": 729,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 14.294735,
+          "nnz": 35937,
+          "preconditioner_apply_ms": 0.956372,
+          "preconditioner_setup_ms": 16.791697000000003,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 1296000,
+              "h2d_bytes": 14400,
+              "iterations": [
+                135,
+                135,
+                135,
+                135,
+                135
+              ],
+              "operator": "cusparse",
+              "solution_error": 4.718846404950152e-08,
+              "timing": {
+                "max_ms": 185.517275,
+                "median_ms": 185.33317599999998,
+                "min_ms": 185.25127999999998,
+                "samples_ms": [
+                  185.517275,
+                  185.33463799999998,
+                  185.33317599999998,
+                  185.25127999999998,
+                  185.256731
+                ]
+              },
+              "true_relative_residual": 8.598256942468967e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 1296000,
+              "h2d_bytes": 14400,
+              "iterations": [
+                135,
+                135,
+                135,
+                135,
+                135
+              ],
+              "operator": "specialized",
+              "solution_error": 4.71884639670928e-08,
+              "timing": {
+                "max_ms": 189.703627,
+                "median_ms": 189.609918,
+                "min_ms": 189.569863,
+                "samples_ms": [
+                  189.63654899999997,
+                  189.569863,
+                  189.609918,
+                  189.703627,
+                  189.57379999999998
+                ]
+              },
+              "true_relative_residual": 8.598256883408941e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 239.664702,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.6473288059906332e-16,
+              "timing": {
+                "max_ms": 0.03886774,
+                "median_ms": 0.0388442,
+                "min_ms": 0.038833980000000004,
+                "samples_ms": [
+                  0.03886774,
+                  0.03886714,
+                  0.03884531,
+                  0.038833980000000004,
+                  0.038843699999999995,
+                  0.0388442,
+                  0.03883528
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.587444458735068e-16,
+              "timing": {
+                "max_ms": 0.06502821,
+                "median_ms": 0.06498042,
+                "min_ms": 0.06497090999999999,
+                "samples_ms": [
+                  0.06499926,
+                  0.06502821,
+                  0.06497090999999999,
+                  0.06501409,
+                  0.06498042,
+                  0.06497421,
+                  0.06497482
+                ]
+              }
+            }
+          ],
+          "amg_level_dofs": [
+            2197,
+            1479,
+            844,
+            443,
+            205,
+            62,
+            27,
+            12
+          ],
+          "amg_level_nnz": [
+            50653,
+            67057,
+            51869,
+            24508,
+            7655,
+            999,
+            200,
+            37
+          ],
+          "amg_operator_complexity": 4.007225633230016,
+          "csr_setup_ms": 1.109242,
+          "degree": 3,
+          "dofs": 2197,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 86.171987,
+          "nnz": 226981,
+          "preconditioner_apply_ms": 1.6852639999999999,
+          "preconditioner_setup_ms": 77.135084,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 2035200,
+              "h2d_bytes": 19200,
+              "iterations": [
+                212,
+                212,
+                212,
+                212,
+                212
+              ],
+              "operator": "cusparse",
+              "solution_error": 5.3255312091853e-08,
+              "timing": {
+                "max_ms": 475.493844,
+                "median_ms": 475.47350500000005,
+                "min_ms": 475.410496,
+                "samples_ms": [
+                  475.44093399999997,
+                  475.493844,
+                  475.48918499999996,
+                  475.410496,
+                  475.47350500000005
+                ]
+              },
+              "true_relative_residual": 9.814277772754923e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 2035200,
+              "h2d_bytes": 19200,
+              "iterations": [
+                212,
+                212,
+                212,
+                212,
+                212
+              ],
+              "operator": "specialized",
+              "solution_error": 5.3255313452048414e-08,
+              "timing": {
+                "max_ms": 481.65423499999997,
+                "median_ms": 481.5935,
+                "min_ms": 481.504001,
+                "samples_ms": [
+                  481.504001,
+                  481.65423499999997,
+                  481.546961,
+                  481.621933,
+                  481.5935
+                ]
+              },
+              "true_relative_residual": 9.814277807688365e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 19.731527,
+          "subdivisions": 4
+        }
+      ],
+      "source_hashes_apply": true
+    }
+  },
+  "native_validation_logs": {
+    "hex-frequency-specialized-native.log": "   Compiling sonium-compute v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-compute)\n    Finished `test` profile [optimized + debuginfo] target(s) in 8.25s\n     Running unittests src/lib.rs (target/debug/deps/sonium_compute-ca3c6de78cf09182)\n\nrunning 2 tests\ntest cuda::fem_hex::tests::hex_partial_kernel_compiles_with_nvrtc ... ok\ntest cuda::fem_hex::tests::native_hex_partial_actions ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 728 filtered out; finished in 1.32s\n\n",
+    "hex-frequency-specialized-session-native.log": "\nrunning 2 tests\ntest physics::acoustics::pressure::device_hex_solve::tests::native_frequency_and_boundary_updates_certify_changed_system ... frequency sweep P2: k=0+0i, iterations=32, residual=0.0000000000635076279553105\nfrequency sweep P2: k=4+0.2i, iterations=45, residual=0.00000000006690101000855951\nfrequency sweep P2: k=6-0.1i, iterations=47, residual=0.00000000006755840978320011\nfrequency sweep P2: k=0+0i, iterations=33, residual=0.00000000004459388096612706\nfrequency sweep P3: k=0+0i, iterations=62, residual=0.00000000008535563243142446\nfrequency sweep P3: k=4+0.2i, iterations=165, residual=0.00000000009528001886352216\nfrequency sweep P3: k=6-0.1i, iterations=183, residual=0.00000000009305795182390313\nfrequency sweep P3: k=0+0i, iterations=65, residual=0.00000000009646804642400342\nok\ntest physics::acoustics::pressure::device_hex_solve::tests::native_session_boundaries_warm_start_and_failed_publication ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1933 filtered out; finished in 3.70s\n\n",
+    "hex-frequency-specialized-memcheck.log": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest cuda::fem_hex::tests::native_hex_partial_actions ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 729 filtered out; finished in 2.92s\n\n========= ERROR SUMMARY: 0 errors\n"
+  },
+  "interpretation": [
+    "Final fixed-operator action timings recover the pre-scaling baseline; no overall advantage over cuSPARSE is established.",
+    "Benchmark measures fixed unit-scale actions and five zero-start solves, not frequency-sweep wall time.",
+    "Final Q2 specialized setup was 239.665 ms; cache/JIT state was not controlled across variants, so setup differences are not attributed to kernel arithmetic.",
+    "Warm preconditioner actions have zero allocations/transfers; full solves retain recorded Krylov control transfers.",
+    "Sweeps verify changed complex wavenumber, boundary values and explicit host-built AMG replacement on retained device sessions; they do not prove scalable preconditioner reuse.",
+    "Earlier exploratory variant source snapshots were not retained; final source hashes must not be attributed to them."
+  ]
+}

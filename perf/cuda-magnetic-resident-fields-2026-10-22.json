@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-22",
+  "head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree_required": true,
+  "public_api": "CudaMagneticCentroidField",
+  "scope": "Affine H1 P1/P2 triangle/tetrahedron centroid magnetic fields from resident f64 scalar potential",
+  "execution": "Host-prepared rectangular permeability-weighted gradient CSR; retained CUDA SpMV plus native residual update computes Br - mu*grad(phi)",
+  "layout": "Element-major, two components for triangles and three for tetrahedra",
+  "checks": {
+    "native_tests_passed": 4,
+    "solve_to_field_cases": 36,
+    "maximum_cpu_field_difference": 9.992007221626409e-16,
+    "independent_polynomial_field_cases": 12,
+    "polynomial_field_absolute_tolerance": 1e-12,
+    "repeated_update_and_evaluate_allocation_free_cases": 24,
+    "repeated_polynomial_evaluations_allocation_free": 8,
+    "field_update_and_evaluate_h2d_bytes": 0,
+    "field_update_and_evaluate_d2h_bytes": 12,
+    "evaluate_only_d2h_bytes": 8,
+    "invalid_preparation_cases_before_device_work": 7,
+    "wrong_length_or_stream_rejections_before_device_work": 2,
+    "memcheck_tests": 4,
+    "memcheck_errors": 0,
+    "cpu_fem_passed": 1964,
+    "cpu_fem_ignored": 1,
+    "root_check": "passed on final retry",
+    "root_clippy": "passed with existing warnings",
+    "cuda_fem_check": "passed",
+    "cuda_fem_clippy": "passed with existing warnings"
+  },
+  "failure_contract": [
+    "Initial output unavailable",
+    "Invalid input and failed evaluation unpublish output",
+    "Native validation launch failure recovers after backend recovery",
+    "Failed remanence copy blocks evaluation until complete replacement",
+    "NaN potential rejected without publication"
+  ],
+  "limits": [
+    "Fixed affine mesh, H1 space and positive scalar permeability; changes require new evaluator",
+    "Centroids only; no arbitrary points, coil BL integration or nonlinear/complex field coverage",
+    "Host gradient preparation and material/source input uploads remain explicit",
+    "Output download is caller-requested; validation counters exclude that output transfer",
+    "Pool quota does not cover all legacy sparse storage",
+    "No speedup claim"
+  ],
+  "workspace_validation_note": "Initial root checks encountered a concurrently introduced sonium-sim-motor missing target, then borrow-check errors. Those external changes settled without edits here; final root check followed by Clippy both passed.",
+  "source_sha256": {
+    "crates/sonium-fem/src/physics/electromagnetics/magnetostatics/device_field.rs": "5cfa91fa16e9ee5ce19c6c089defb86f97d483c0e36bac6607c2acadd543df74",
+    "crates/sonium-fem/src/physics/electromagnetics/magnetostatics/device_field/tests.rs": "8a01c940cb8e3d7a358a36740384b2798816fde42c9dc11c65daa52f503ebe8b",
+    "crates/sonium-fem/src/physics/electromagnetics/magnetostatics/mod.rs": "b5531adf2a96ffe03f46a43a55bff178949931a6dbd027f28af019bd5c133e75",
+    "crates/sonium-fem/src/solver/device/tests/magnetic.rs": "6504db3ffe687187dba5dbfd40e9230fc40cb215b0b21536260d28d530f9fab7"
+  },
+  "logs": [
+    "/tmp/magnetic-field-native-final.log",
+    "/tmp/magnetic-field-memcheck-final.log",
+    "/tmp/magnetic-field-cpu.log",
+    "/tmp/magnetic-field-focused-check.log",
+    "/tmp/magnetic-field-root-check-verified.log",
+    "/tmp/magnetic-field-root-clippy-verified.log",
+    "/tmp/magnetic-field-cuda-clippy-final.log"
+  ]
+}

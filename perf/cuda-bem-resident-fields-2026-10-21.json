@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-21",
+  "head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree_required": true,
+  "source_sha256": {
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix.rs": "7286963ca1f2f612482eb4f18a2892933c9d27035c6d58bb3a7f6422c30a70ef",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_field.rs": "1c6410384211b13672e229be189444f9a9f8b9fddb7f8d818f4bcd09d3b93fe0",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_tests.rs": "d6a1312a6647c6034322d43089858be000f39d685d13346acbc97c7578dc8912",
+    "crates/sonium-bem/src/core/postprocess/pressure.rs": "ae0e2631d36082d44f60fd1919ef522476ed71851005f0448d7bbf904cf87fef"
+  },
+  "hardware": {
+    "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+    "driver": "610.57.04",
+    "memory_mib": 97887
+  },
+  "scope": "Constant discontinuous Tri3 H-matrix scattering, fixed geometry/frequency/material, prepared off-surface total-pressure output",
+  "implementation": {
+    "surface_pressure": "retained certified GMRES solution",
+    "velocity": "native diagonal admittance scaling plus prescribed velocity",
+    "scattered_field": "existing CUDA seven-point triangle field kernel",
+    "incident_field": "existing native incident kernel with gamma=-1 and beta_tau=0",
+    "memory": "pooled field buffers retained across incidents"
+  },
+  "warm_field_evaluation": {
+    "allocations": 0,
+    "h2d_bytes": 0,
+    "d2h_validation_bytes": 16
+  },
+  "tests": {
+    "native_small_and_recovery": "\nrunning 3 tests\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_failure_recovery_and_zero_sources ... ok\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_resident_fields_follow_sources_and_recover ... resident fields: alloc=0 h2d=0 d2h=16\nresident fields: alloc=0 h2d=0 d2h=16\nresident fields: alloc=0 h2d=0 d2h=16\nok\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_small_matches_independent_dense_surface_and_fields ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 555 filtered out; finished in 3.03s\n\n",
+    "memcheck_small_and_recovery": "========= COMPUTE-SANITIZER\n\nrunning 3 tests\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_failure_recovery_and_zero_sources ... ok\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_resident_fields_follow_sources_and_recover ... resident fields: alloc=0 h2d=0 d2h=16\nresident fields: alloc=0 h2d=0 d2h=16\nresident fields: alloc=0 h2d=0 d2h=16\nok\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_small_matches_independent_dense_surface_and_fields ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 555 filtered out; finished in 14.92s\n\n========= ERROR SUMMARY: 0 errors\n"
+  },
+  "cpu_tests": {
+    "passed": 541,
+    "ignored": 3,
+    "log": "/tmp/bem-field-cpu-tests.log"
+  },
+  "checks": {
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_bem_test_clippy": "passed with existing warnings"
+  },
+  "native_large": {
+    "status": "passed",
+    "panels": 1280,
+    "low_rank_blocks": 1714,
+    "field_relative_or_absolute_tolerance": 1e-10,
+    "field_reference": "CPU field integral from independently residual-certified surface solution",
+    "log": "\nrunning 1 test\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_large_retains_compression_and_certifies_repeated_incidents ... H-matrix n=1280 blocks=1714 ratio=1.047654734332817 pass=0 iterations=19 compressed=0.00000000030502329452108935 exact=0.000000012092504659997213 alloc=41 h2d=352 d2h=47052\nH-matrix n=1280 blocks=1714 ratio=1.047654734332817 pass=1 iterations=17 compressed=0.0000000004887253746953359 exact=0.000000012114447840801581 alloc=0 h2d=320 d2h=45868\nH-matrix n=1280 blocks=1714 ratio=1.047654734332817 pass=2 iterations=17 compressed=0.00000000044297188204704255 exact=0.000000012152385432660711 alloc=0 h2d=320 d2h=45868\nH-matrix resident solve iterations=18 alloc=0 h2d=336 d2h=5484\nlarge resident fields: alloc=0 h2d=0 d2h=16\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 557 filtered out; finished in 66.29s\n\n",
+    "memcheck": "not yet verified for this large field case"
+  },
+  "limitations": [
+    "No timing claim: correctness runs overlap a separate long sanitizer context.",
+    "Original large H-matrix memcheck remains running and does not include this field extension.",
+    "Field kernel uses fixed seven-point quadrature; near-singular convergence, higher order and other producers remain open.",
+    "Optional exact solve certification still downloads surface and RHS vectors."
+  ]
+}

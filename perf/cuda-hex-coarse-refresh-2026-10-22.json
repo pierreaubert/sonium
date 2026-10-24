@@ -1,0 +1,124 @@
+{
+  "date": "2026-10-22",
+  "scope": "Q1/Q2/Q3 retained CUDA hex pressure auxiliary AMG refresh",
+  "snapshot": "Current uncommitted working tree",
+  "api": "CudaHexPressureSession::try_refresh_preconditioner",
+  "fixture": "Warped 2x2x2 hex mesh, changing frequency/material/Robin samples, prescribed pressure and boundary load lifting",
+  "refresh": [
+    {
+      "degree": "P1",
+      "allocations": 0,
+      "h2d_bytes": 7744,
+      "d2h_bytes": 4
+    },
+    {
+      "degree": "P2",
+      "allocations": 0,
+      "h2d_bytes": 57104,
+      "d2h_bytes": 4
+    },
+    {
+      "degree": "P3",
+      "allocations": 0,
+      "h2d_bytes": 221248,
+      "d2h_bytes": 4
+    }
+  ],
+  "solves": [
+    {
+      "degree": "P1",
+      "wavenumber": "0+0i",
+      "iterations": 14,
+      "relative_residual": 6.553377233060917e-11
+    },
+    {
+      "degree": "P1",
+      "wavenumber": "4+0.2i",
+      "iterations": 17,
+      "relative_residual": 7.589087609828323e-11
+    },
+    {
+      "degree": "P1",
+      "wavenumber": "6-0.1i",
+      "iterations": 19,
+      "relative_residual": 2.3150298327923268e-11
+    },
+    {
+      "degree": "P1",
+      "wavenumber": "0+0i",
+      "iterations": 15,
+      "relative_residual": 1.0416213957266586e-11
+    },
+    {
+      "degree": "P2",
+      "wavenumber": "0+0i",
+      "iterations": 32,
+      "relative_residual": 6.350763954303436e-11
+    },
+    {
+      "degree": "P2",
+      "wavenumber": "4+0.2i",
+      "iterations": 45,
+      "relative_residual": 6.690099562466365e-11
+    },
+    {
+      "degree": "P2",
+      "wavenumber": "6-0.1i",
+      "iterations": 49,
+      "relative_residual": 5.1659866234856305e-11
+    },
+    {
+      "degree": "P2",
+      "wavenumber": "0+0i",
+      "iterations": 33,
+      "relative_residual": 4.459820057241065e-11
+    },
+    {
+      "degree": "P3",
+      "wavenumber": "0+0i",
+      "iterations": 62,
+      "relative_residual": 8.535584193934624e-11
+    },
+    {
+      "degree": "P3",
+      "wavenumber": "4+0.2i",
+      "iterations": 165,
+      "relative_residual": 9.528001877140361e-11
+    },
+    {
+      "degree": "P3",
+      "wavenumber": "6-0.1i",
+      "iterations": 224,
+      "relative_residual": 9.991554491037071e-11
+    },
+    {
+      "degree": "P3",
+      "wavenumber": "0+0i",
+      "iterations": 65,
+      "relative_residual": 9.647430309886835e-11
+    }
+  ],
+  "gates": [
+    "Compatible hierarchy refresh has zero device allocations and 4-byte coarse status download",
+    "Changed hierarchy returns false without transfer or checkpoint mutation",
+    "Injected coarse failure invalidates checkpoint; complete refresh recovers",
+    "Independent host assembled-system relative residual below 1e-8",
+    "Warm repeated solves allocate no device storage"
+  ],
+  "verification": {
+    "native_test_passed": true,
+    "memcheck_errors": 0,
+    "cargo_check": "passed",
+    "cargo_clippy": "passed with existing warnings",
+    "cuda_test_clippy": "passed with existing warnings",
+    "cpu_fem_passed": 1945,
+    "cpu_fem_ignored": 1
+  },
+  "limitations": [
+    "Auxiliary matrix and hierarchy are constructed on host",
+    "Caller supplies compatible DOF ordering and constraint elimination",
+    "No elapsed-time speedup claim",
+    "Q3 reaches 224 iterations; convergence optimization remains open",
+    "Other physics and producer coverage remain incomplete"
+  ]
+}

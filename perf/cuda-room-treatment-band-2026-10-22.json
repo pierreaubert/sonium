@@ -1,0 +1,139 @@
+{
+  "date": "2026-10-22",
+  "scope": "Multi-frequency resident room-treatment production/variance objective and shared MMA",
+  "source_sha256": {
+    "crates/sonium-sim-room/Cargo.toml": "1680efb361ec49723b7b4c9d789c29b7bee1883105c1e052813f1aeb3bcbc45f",
+    "crates/sonium-sim-room/src/treatment_optimization.rs": "7eff045144e47734c44302f92a791a084b1550411bb421c56f61a2a4cb70a67f",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda.rs": "60349765b66bc2968578b3f53317c2a844f92e2734d808756d66639ec060a3dc",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda/multifrequency.rs": "5e66abe839315ca84ebdba3f2c5284637176911502bc0f52a64e0e54a7f3530f",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda/tests.rs": "fa7f79c6a38e5c156adba82c7b694e139830717c5dd358af955e67c1ec88b237",
+    "crates/sonium-fem/src/solver/device.rs": "50992559d5f56d5047e2176cdbc75ccd2d288ac2d66769719386004b978442f5",
+    "crates/sonium-fem/src/solver/device/configured.rs": "43cf2d6e9858615f5a41ef6e536394a5435c7164d1db0f45f0655288f847e93d"
+  },
+  "binary": {
+    "path": "target/debug/deps/sonium_sim_room-fe04168d8c708c2c",
+    "sha256": "92413258b40c8f4358e72a2b5c57dfbfec2a2cf734ee25b005aa486344b61e52"
+  },
+  "fixture": {
+    "mesh": "4x4 P1 triangular Helmholtz mesh with two boundary mass operators",
+    "frequency_metadata_hz": [
+      63,
+      125,
+      250
+    ],
+    "supplied_complex_wavenumbers": [
+      [
+        1.5,
+        0.2
+      ],
+      [
+        2,
+        0.2
+      ],
+      [
+        2.5,
+        0.2
+      ]
+    ],
+    "input_order": "250,63,125; constructor sorts before target indexing",
+    "weights": [
+      1,
+      2,
+      0.5
+    ],
+    "strategies": [
+      "GmresIlu",
+      "GmresSchwarz with 3 subdomains and overlap 1"
+    ],
+    "objectives": [
+      "Production: target, variance, active minimum-level penalty and treatment cost",
+      "SeatVariance with treatment cost"
+    ],
+    "production_targets_db": [
+      0,
+      -3,
+      -6
+    ],
+    "reference_pressure": 1,
+    "listeners": "complex interpolation and duplicate entries",
+    "designs": [
+      [
+        0.3,
+        0.4
+      ],
+      [
+        0.1,
+        0.7
+      ],
+      [
+        0.35,
+        0.2
+      ]
+    ],
+    "mma": "3 iterations, unequal areas, density filter, CPU two-lane reference, CUDA sorted serial frequencies",
+    "recovery": "pre-cancel before GPU work, resume, injected D2D failure and repaired full-band evaluation"
+  },
+  "assertions": {
+    "warm_backend_allocations": 0,
+    "objective_and_breakdown_scaled_error": 1e-07,
+    "gradient_scaled_error": 1e-06,
+    "finite_difference_scaled_error": 2e-05,
+    "mma_history_scaled_error": 1e-06,
+    "mma_design_absolute_error": 1e-05
+  },
+  "results": {
+    "native": "2 passed: single-frequency regression and multi-frequency fixture",
+    "memcheck": "2 passed; 0 errors",
+    "cpu": "331 passed; 1 ignored",
+    "pipeline": "12 passed",
+    "check": "passed",
+    "clippy": "passed with existing warnings",
+    "cuda_clippy": "passed with existing warnings",
+    "inventory": "22 packages; 1357 source units; freshness passed",
+    "registry": "40 retained-dispatch rows; zero complete; validator and 10 audit tests passed"
+  },
+  "logs": {
+    "build": {
+      "path": "/tmp/room-band-build-final.log",
+      "sha256": "bbde1d8f788a98b3b2ed00f5001a995f66d759ee5ac776a109700a2758fa1101"
+    },
+    "native": {
+      "path": "/tmp/room-band-native-final.log",
+      "sha256": "1772a107c8e7811dd6980e8041ab3f533ee0b64a6f252b1926d0661d3e55d382"
+    },
+    "memcheck": {
+      "path": "/tmp/room-band-memcheck.log",
+      "sha256": "f14395bbfa150f1a0086ffb8244786c0a436c9c2579c9dc12d57358b6ba0b6e5"
+    },
+    "cpu": {
+      "path": "/tmp/room-band-cpu.log",
+      "sha256": "dc89ed2a28c4d8f7adbb12ee62db589005abf676cda03aaa4033af24b6320ad4"
+    },
+    "pipeline": {
+      "path": "/tmp/room-band-pipeline.log",
+      "sha256": "4717404e4b9290c72bc077d8d5081b0d837bf43d5a1c973b649595d74fad32dd"
+    },
+    "check": {
+      "path": "/tmp/room-band-check.log",
+      "sha256": "781d5a972af48a436b503f6b0ed0e02977888273872639a5557826a7b21a9922"
+    },
+    "clippy": {
+      "path": "/tmp/room-band-clippy.log",
+      "sha256": "a45f05701234f8e9108779747a3c17aaf83dc62596cc40546c2ffbc6278f0a11"
+    },
+    "cuda_clippy": {
+      "path": "/tmp/room-band-cuda-clippy.log",
+      "sha256": "7d3dffee0420bdbf7eb45ffa8fdd471daa5eede99860ffb86ad7ea232aafcf23"
+    }
+  },
+  "limitations": [
+    "No controlled speedup measurements",
+    "Frequency execution is serial on one backend, not multi-GPU or parallel lanes",
+    "Resident basis/operator/Krylov/preconditioner memory grows with frequency count; no eviction policy",
+    "Owned sparse/preconditioner allocations use existing backend quota policy; pooled vectors enforce pool cap",
+    "Preconditioners are explicitly lagged at preparation design; no automatic refresh",
+    "Listener-sized nonlinear objective, aggregation, MMA and compact solver controls remain host work",
+    "No CLI routing yet",
+    "Bounded physical-form fixture; frequency metadata and wavenumbers supplied independently, not a full calibrated-room sweep"
+  ]
+}

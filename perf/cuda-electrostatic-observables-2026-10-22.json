@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-22",
+  "scope": "Resident uniform-permittivity capacitor observables from persistent CUDA FEM potentials",
+  "implementation": {
+    "operator": "unconstrained unit Laplacian retained as device CSR",
+    "energy": "epsilon * V^T K V / 2",
+    "capacitance": "2 * energy / voltage_difference^2",
+    "signed_charge": "capacitance * voltage_difference",
+    "setup": "host assembly, one-time CSR upload",
+    "evaluation": "native finite validation, CSR action and dot reduction; compact scalars returned"
+  },
+  "validation": {
+    "native": {
+      "result": "1 physical test passed; 36 solves",
+      "log": "/tmp/electrostatic-observables-native-final.log",
+      "cases": "triangle/tetrahedron, P1/P2, forward/transpose/Hermitian, voltages 1, 2, -0.5"
+    },
+    "memcheck": {
+      "result": "1 test passed; zero errors",
+      "log": "/tmp/electrostatic-observables-memcheck-final.log"
+    },
+    "cpu_fem": {
+      "result": "1964 passed, 1 ignored",
+      "log": "/tmp/electrostatic-observables-cpu.log"
+    },
+    "root_check": "passed /tmp/cuda-audit-current-check.log",
+    "root_clippy": "passed with existing warnings /tmp/cuda-audit-current-clippy.log",
+    "cuda_fem_clippy": "passed with warnings /tmp/electrostatic-observables-cuda-clippy.log"
+  },
+  "asserted_gates": {
+    "warm_evaluator_allocations": 0,
+    "evaluator_h2d_bytes": 0,
+    "evaluator_d2h_bytes_max": 64,
+    "analytic_capacitance_relative_error_max": 1e-07,
+    "cpu_observable_relative_error_max": 1e-10,
+    "independent_solve_relative_residual_max": 1.1e-09,
+    "failure_cases": [
+      "invalid permittivity",
+      "short buffer",
+      "zero/nonfinite/overflowed/underflowed squared voltage",
+      "nonfinite potential",
+      "overflow arithmetic",
+      "negative energy",
+      "injected launch failure and recovery"
+    ]
+  },
+  "limitations": [
+    "Uniform positive permittivity only; caller supplies unconstrained unit Laplacian and physical voltage difference.",
+    "Does not certify PDE residual or compute conductor-resolved charges.",
+    "Host assembly remains explicit setup; legacy sparse allocations retain existing accounting.",
+    "No performance speedup measured; no full CUDA coverage claim."
+  ],
+  "source_sha256": {
+    "crates/sonium-fem/src/physics/electromagnetics/electrostatic.rs": "72e36c485f4d9a0aca22c169b00b8d6257751082c8e32d37cd8daabb2eba4044",
+    "crates/sonium-fem/src/physics/electromagnetics/electrostatic_cuda.rs": "d06f76d05cbd8a4a5f43163b7623d384e9e7434c2de1ffc4b86a24e63bbd945d",
+    "crates/sonium-fem/src/solver/device/tests/electrostatic.rs": "735723ef103217243ff1c0af3e5268ea72b0d249aaa69bcd18fb24b86d7eff81"
+  }
+}

@@ -1,0 +1,1189 @@
+{
+  "date": "2026-10-21",
+  "scope": "Native first-sweep Jacobi/L1-Jacobi overwrite in persistent backend AMG; preserve W/F revisits",
+  "hardware": "RTX PRO 6000 Blackwell Workstation Edition, driver 610.57.04",
+  "profile": "optimized dev opt-level=2, not release",
+  "protocol": "Same retained FEM benchmark as baseline; three frequencies per fixture, one warmup then five zero-initial-guess complete solves; same auxiliary AMG and tolerance. Sequential before/after runs, not alternating binary trials. Setup shares caches and runs CSR first.",
+  "baseline": "cuda-tet-p2-gram-2026-10-21.json",
+  "source_sha256": {
+    "crates/sonium-compute/src/backend/mod.rs": "8e7667a45aae26ebbe77e6ea8a90932b5fac39362f3a6394a4525bd35b9924c5",
+    "crates/sonium-compute/src/cuda/cublas.rs": "bf33f2bf121a25c2a989d13d8b71edb8ca7ae1f6aa0b7fa6111fa10d09c65edc",
+    "crates/sonium-compute/src/cuda/kernels/local_kernels.cu": "cde14f49c28c85fb029c89031db85dba21b621bea21666069f625be25ed29570",
+    "crates/sonium-compute/tests/diagonal_scale.rs": "6ce9f2ac445b16b4f8614c81cc5d470d8cc45d7219b36a63a01f48a75c61b923",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/mod.rs": "e705823da9420efc776d7d2b8c778cea0bc00a7478a9f3cce16d18c0e07d8bc0",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/backend_zero_tests.rs": "cc4e083ca62ccc5d192ccbbec6afb5eae4f4909bfd411ad03740a961a8945f80",
+    "crates/sonium-fem/examples/cuda_tet_session_compare.rs": "3f45d67af306da23380418a37d0b069ec98ec99545f152db20e17ce135d295c6"
+  },
+  "benchmark_binary_sha256": "9354d8614bb213166a6f65ed4c5c60c42efe43b877037dadd728f207f113d62b",
+  "benchmark_metadata": {
+    "amg_shift": [
+      16.0,
+      16.0
+    ],
+    "benchmark": "retained_tet_session",
+    "host_preparation_and_input_uploads_timed": false,
+    "initial_guess": "zero",
+    "memory_note": "element mode omits physical CSR storage and assembly maps; auxiliary AMG remains assembled",
+    "restart": 60,
+    "samples": 5,
+    "scalar": "complex64",
+    "setup_includes": "session geometry, boundary maps, auxiliary AMG, JIT and initial numeric assembly",
+    "setup_order": "CSR before Element; context and driver caches shared",
+    "smoother": "Jacobi",
+    "tolerance": 1e-09,
+    "warmups_per_frequency": 1
+  },
+  "runs": [
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "numeric_update_ms": 0.24752,
+      "operator": "Csr",
+      "relative_residual": 7.982894810622129e-10,
+      "relative_solution_error": 1.0311826306145436e-09,
+      "setup_ms": 84.102776,
+      "solve": {
+        "max_ms": 14.736148,
+        "median_ms": 14.696002,
+        "min_ms": 14.686274,
+        "samples_ms": [
+          14.736148,
+          14.686274,
+          14.692115000000001,
+          14.708717,
+          14.696002
+        ]
+      },
+      "solve_d2h_bytes": 33600,
+      "solve_h2d_bytes": 1600,
+      "step": 0,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "numeric_update_ms": 0.24665800000000002,
+      "operator": "Csr",
+      "relative_residual": 3.812169597364197e-10,
+      "relative_solution_error": 6.364648978063452e-10,
+      "setup_ms": 84.102776,
+      "solve": {
+        "max_ms": 14.666306,
+        "median_ms": 14.65753,
+        "min_ms": 14.646699,
+        "samples_ms": [
+          14.65753,
+          14.646699,
+          14.647409999999999,
+          14.663390999999999,
+          14.666306
+        ]
+      },
+      "solve_d2h_bytes": 33600,
+      "solve_h2d_bytes": 1600,
+      "step": 1,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        19,
+        19,
+        19,
+        19,
+        19
+      ],
+      "numeric_update_ms": 0.24806999999999998,
+      "operator": "Csr",
+      "relative_residual": 8.617852463610014e-10,
+      "relative_solution_error": 1.4714013603664248e-09,
+      "setup_ms": 84.102776,
+      "solve": {
+        "max_ms": 13.974253000000001,
+        "median_ms": 13.938365,
+        "min_ms": 13.93042,
+        "samples_ms": [
+          13.938365,
+          13.937173000000001,
+          13.93042,
+          13.960968000000001,
+          13.974253000000001
+        ]
+      },
+      "solve_d2h_bytes": 30400,
+      "solve_h2d_bytes": 1520,
+      "step": 2,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "numeric_update_ms": 0.036188,
+      "operator": "Element",
+      "relative_residual": 7.982894960412484e-10,
+      "relative_solution_error": 1.0311825683202026e-09,
+      "setup_ms": 53.325242,
+      "solve": {
+        "max_ms": 18.168831,
+        "median_ms": 18.146919,
+        "min_ms": 18.135709,
+        "samples_ms": [
+          18.168831,
+          18.165295,
+          18.146919,
+          18.135709,
+          18.14189
+        ]
+      },
+      "solve_d2h_bytes": 33600,
+      "solve_h2d_bytes": 1600,
+      "step": 0,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "numeric_update_ms": 0.032301,
+      "operator": "Element",
+      "relative_residual": 3.8121697918574666e-10,
+      "relative_solution_error": 6.364649994263396e-10,
+      "setup_ms": 53.325242,
+      "solve": {
+        "max_ms": 18.202425,
+        "median_ms": 18.172919,
+        "min_ms": 18.150056000000003,
+        "samples_ms": [
+          18.177538,
+          18.150056000000003,
+          18.202425,
+          18.172919,
+          18.160235
+        ]
+      },
+      "solve_d2h_bytes": 33600,
+      "solve_h2d_bytes": 1600,
+      "step": 1,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "elements": 384,
+      "iterations": [
+        19,
+        19,
+        19,
+        19,
+        19
+      ],
+      "numeric_update_ms": 0.032131,
+      "operator": "Element",
+      "relative_residual": 8.617851659062247e-10,
+      "relative_solution_error": 1.471401336401576e-09,
+      "setup_ms": 53.325242,
+      "solve": {
+        "max_ms": 17.349957999999997,
+        "median_ms": 17.292088,
+        "min_ms": 17.280566,
+        "samples_ms": [
+          17.280566,
+          17.292088,
+          17.311635,
+          17.349957999999997,
+          17.280816
+        ]
+      },
+      "solve_d2h_bytes": 30400,
+      "solve_h2d_bytes": 1520,
+      "step": 2,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        35,
+        35,
+        35,
+        35,
+        35
+      ],
+      "numeric_update_ms": 0.308766,
+      "operator": "Csr",
+      "relative_residual": 4.17595149181168e-10,
+      "relative_solution_error": 2.1704173934837065e-09,
+      "setup_ms": 75.843405,
+      "solve": {
+        "max_ms": 38.255772,
+        "median_ms": 38.224913,
+        "min_ms": 38.197671,
+        "samples_ms": [
+          38.255772,
+          38.224913,
+          38.235593,
+          38.197671,
+          38.210626
+        ]
+      },
+      "solve_d2h_bytes": 100800,
+      "solve_h2d_bytes": 2800,
+      "step": 0,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        34,
+        34,
+        34,
+        34,
+        34
+      ],
+      "numeric_update_ms": 0.31736200000000003,
+      "operator": "Csr",
+      "relative_residual": 6.620902320626019e-10,
+      "relative_solution_error": 4.584420292734219e-09,
+      "setup_ms": 75.843405,
+      "solve": {
+        "max_ms": 36.993507,
+        "median_ms": 36.972116,
+        "min_ms": 36.955956,
+        "samples_ms": [
+          36.979870999999996,
+          36.972116,
+          36.993507,
+          36.957958999999995,
+          36.955956
+        ]
+      },
+      "solve_d2h_bytes": 95200,
+      "solve_h2d_bytes": 2720,
+      "step": 1,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        34,
+        34,
+        34,
+        34,
+        34
+      ],
+      "numeric_update_ms": 0.30583,
+      "operator": "Csr",
+      "relative_residual": 5.278172093716178e-10,
+      "relative_solution_error": 3.6376777745881277e-09,
+      "setup_ms": 75.843405,
+      "solve": {
+        "max_ms": 37.025957999999996,
+        "median_ms": 36.991693,
+        "min_ms": 36.971204,
+        "samples_ms": [
+          36.990511,
+          36.991693,
+          37.019145,
+          36.971204,
+          37.025957999999996
+        ]
+      },
+      "solve_d2h_bytes": 95200,
+      "solve_h2d_bytes": 2720,
+      "step": 2,
+      "subdivisions": 4,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        35,
+        35,
+        35,
+        35,
+        35
+      ],
+      "numeric_update_ms": 0.112513,
+      "operator": "Element",
+      "relative_residual": 4.1759517267875584e-10,
+      "relative_solution_error": 2.170419430635707e-09,
+      "setup_ms": 68.80516200000001,
+      "solve": {
+        "max_ms": 56.613641,
+        "median_ms": 56.390077,
+        "min_ms": 56.361352000000004,
+        "samples_ms": [
+          56.381952,
+          56.361352000000004,
+          56.390077,
+          56.613641,
+          56.582922
+        ]
+      },
+      "solve_d2h_bytes": 100800,
+      "solve_h2d_bytes": 2800,
+      "step": 0,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        34,
+        34,
+        34,
+        34,
+        34
+      ],
+      "numeric_update_ms": 0.11253300000000001,
+      "operator": "Element",
+      "relative_residual": 6.620902385613393e-10,
+      "relative_solution_error": 4.584421026244274e-09,
+      "setup_ms": 68.80516200000001,
+      "solve": {
+        "max_ms": 55.031268000000004,
+        "median_ms": 54.950205000000004,
+        "min_ms": 54.665535,
+        "samples_ms": [
+          54.753913000000004,
+          54.665535,
+          54.950205000000004,
+          54.96301,
+          55.031268000000004
+        ]
+      },
+      "solve_d2h_bytes": 95200,
+      "solve_h2d_bytes": 2720,
+      "step": 1,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "elements": 384,
+      "iterations": [
+        34,
+        34,
+        34,
+        34,
+        34
+      ],
+      "numeric_update_ms": 0.112744,
+      "operator": "Element",
+      "relative_residual": 5.278172105897178e-10,
+      "relative_solution_error": 3.637677395422e-09,
+      "setup_ms": 68.80516200000001,
+      "solve": {
+        "max_ms": 54.967578,
+        "median_ms": 54.660064,
+        "min_ms": 54.649013000000004,
+        "samples_ms": [
+          54.660064,
+          54.659653000000006,
+          54.759783999999996,
+          54.649013000000004,
+          54.967578
+        ]
+      },
+      "solve_d2h_bytes": 95200,
+      "solve_h2d_bytes": 2720,
+      "step": 2,
+      "subdivisions": 4,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.325437,
+      "operator": "Csr",
+      "relative_residual": 7.151877499230196e-10,
+      "relative_solution_error": 3.303190309470426e-09,
+      "setup_ms": 70.45387,
+      "solve": {
+        "max_ms": 26.539933,
+        "median_ms": 26.495749,
+        "min_ms": 26.444172,
+        "samples_ms": [
+          26.539933,
+          26.444172,
+          26.516138,
+          26.495749,
+          26.494517
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 0,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.326189,
+      "operator": "Csr",
+      "relative_residual": 3.833452927391165e-10,
+      "relative_solution_error": 2.164724020131264e-09,
+      "setup_ms": 70.45387,
+      "solve": {
+        "max_ms": 26.614274,
+        "median_ms": 26.488636,
+        "min_ms": 26.461805000000002,
+        "samples_ms": [
+          26.461805000000002,
+          26.462847,
+          26.490399,
+          26.614274,
+          26.488636
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 1,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.328533,
+      "operator": "Csr",
+      "relative_residual": 2.635873567402881e-10,
+      "relative_solution_error": 1.7255410302984452e-09,
+      "setup_ms": 70.45387,
+      "solve": {
+        "max_ms": 26.491471,
+        "median_ms": 26.474088,
+        "min_ms": 26.465642000000003,
+        "samples_ms": [
+          26.465642000000003,
+          26.479118,
+          26.474088,
+          26.472185,
+          26.491471
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 2,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.045075,
+      "operator": "Element",
+      "relative_residual": 7.15187757994472e-10,
+      "relative_solution_error": 3.3031912761749696e-09,
+      "setup_ms": 64.788881,
+      "solve": {
+        "max_ms": 43.625017,
+        "median_ms": 43.564273,
+        "min_ms": 43.539716,
+        "samples_ms": [
+          43.564273,
+          43.539716,
+          43.558512,
+          43.571796000000006,
+          43.625017
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 0,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.041649,
+      "operator": "Element",
+      "relative_residual": 3.833452911406732e-10,
+      "relative_solution_error": 2.1647236113377683e-09,
+      "setup_ms": 64.788881,
+      "solve": {
+        "max_ms": 43.578409,
+        "median_ms": 43.57362,
+        "min_ms": 43.549785,
+        "samples_ms": [
+          43.57362,
+          43.578409,
+          43.549785,
+          43.577638,
+          43.571677
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 1,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "elements": 3072,
+      "iterations": [
+        22,
+        22,
+        22,
+        22,
+        22
+      ],
+      "numeric_update_ms": 0.043302,
+      "operator": "Element",
+      "relative_residual": 2.635873474146313e-10,
+      "relative_solution_error": 1.7255415578896746e-09,
+      "setup_ms": 64.788881,
+      "solve": {
+        "max_ms": 43.589169,
+        "median_ms": 43.580793,
+        "min_ms": 43.560886,
+        "samples_ms": [
+          43.586855,
+          43.580793,
+          43.589169,
+          43.563361,
+          43.560886
+        ]
+      },
+      "solve_d2h_bytes": 40480,
+      "solve_h2d_bytes": 1760,
+      "step": 2,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ],
+      "numeric_update_ms": 0.465974,
+      "operator": "Csr",
+      "relative_residual": 8.736447516665072e-10,
+      "relative_solution_error": 1.7775278365382145e-08,
+      "setup_ms": 313.668146,
+      "solve": {
+        "max_ms": 113.215428,
+        "median_ms": 113.078227,
+        "min_ms": 113.03183999999999,
+        "samples_ms": [
+          113.03183999999999,
+          113.047459,
+          113.089268,
+          113.215428,
+          113.078227
+        ]
+      },
+      "solve_d2h_bytes": 255360,
+      "solve_h2d_bytes": 4480,
+      "step": 0,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        55,
+        55,
+        55,
+        55,
+        55
+      ],
+      "numeric_update_ms": 0.46718600000000005,
+      "operator": "Csr",
+      "relative_residual": 6.50841150149788e-10,
+      "relative_solution_error": 1.906284212670768e-08,
+      "setup_ms": 313.668146,
+      "solve": {
+        "max_ms": 110.832676,
+        "median_ms": 110.818259,
+        "min_ms": 110.74463,
+        "samples_ms": [
+          110.74463,
+          110.821765,
+          110.791317,
+          110.818259,
+          110.832676
+        ]
+      },
+      "solve_d2h_bytes": 246400,
+      "solve_h2d_bytes": 4400,
+      "step": 1,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        55,
+        55,
+        55,
+        55,
+        55
+      ],
+      "numeric_update_ms": 0.46631500000000004,
+      "operator": "Csr",
+      "relative_residual": 8.388634719707964e-10,
+      "relative_solution_error": 4.0103478721861315e-08,
+      "setup_ms": 313.668146,
+      "solve": {
+        "max_ms": 110.843426,
+        "median_ms": 110.760439,
+        "min_ms": 110.736834,
+        "samples_ms": [
+          110.736834,
+          110.843426,
+          110.758996,
+          110.778183,
+          110.760439
+        ]
+      },
+      "solve_d2h_bytes": 246400,
+      "solve_h2d_bytes": 4400,
+      "step": 2,
+      "subdivisions": 8,
+      "update_launches": 4,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        56,
+        56,
+        56,
+        56,
+        56
+      ],
+      "numeric_update_ms": 0.150887,
+      "operator": "Element",
+      "relative_residual": 8.736447630335985e-10,
+      "relative_solution_error": 1.77752783948285e-08,
+      "setup_ms": 268.167095,
+      "solve": {
+        "max_ms": 164.783804,
+        "median_ms": 164.74033,
+        "min_ms": 164.67190000000002,
+        "samples_ms": [
+          164.783804,
+          164.74033,
+          164.74220400000002,
+          164.67190000000002,
+          164.67193999999998
+        ]
+      },
+      "solve_d2h_bytes": 255360,
+      "solve_h2d_bytes": 4480,
+      "step": 0,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        55,
+        55,
+        55,
+        55,
+        55
+      ],
+      "numeric_update_ms": 0.151667,
+      "operator": "Element",
+      "relative_residual": 6.508411397668626e-10,
+      "relative_solution_error": 1.9062841741506376e-08,
+      "setup_ms": 268.167095,
+      "solve": {
+        "max_ms": 161.580223,
+        "median_ms": 161.552932,
+        "min_ms": 161.49532299999998,
+        "samples_ms": [
+          161.580223,
+          161.56772,
+          161.552932,
+          161.49532299999998,
+          161.511944
+        ]
+      },
+      "solve_d2h_bytes": 246400,
+      "solve_h2d_bytes": 4400,
+      "step": 1,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "elements": 3072,
+      "iterations": [
+        55,
+        55,
+        55,
+        55,
+        55
+      ],
+      "numeric_update_ms": 0.14990399999999998,
+      "operator": "Element",
+      "relative_residual": 8.388634704496211e-10,
+      "relative_solution_error": 4.010347913007679e-08,
+      "setup_ms": 268.167095,
+      "solve": {
+        "max_ms": 161.59897800000002,
+        "median_ms": 161.57601499999998,
+        "min_ms": 161.569302,
+        "samples_ms": [
+          161.569302,
+          161.57601499999998,
+          161.59897800000002,
+          161.592656,
+          161.573249
+        ]
+      },
+      "solve_d2h_bytes": 246400,
+      "solve_h2d_bytes": 4400,
+      "step": 2,
+      "subdivisions": 8,
+      "update_launches": 3,
+      "update_library_operations": 0,
+      "warm_allocations": 0
+    }
+  ],
+  "comparisons": [
+    {
+      "degree": 1,
+      "dofs": 125,
+      "subdivisions": 4,
+      "operator": "Csr",
+      "step": 0,
+      "baseline_ms": 16.468318999999997,
+      "current_ms": 14.696002,
+      "speedup": 1.120598581845593,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "subdivisions": 4,
+      "operator": "Csr",
+      "step": 1,
+      "baseline_ms": 16.41111,
+      "current_ms": 14.65753,
+      "speedup": 1.1196368010162696,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "subdivisions": 4,
+      "operator": "Csr",
+      "step": 2,
+      "baseline_ms": 15.597029000000001,
+      "current_ms": 13.938365,
+      "speedup": 1.1189998970467485,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "subdivisions": 4,
+      "operator": "Element",
+      "step": 0,
+      "baseline_ms": 19.97611,
+      "current_ms": 18.146919,
+      "speedup": 1.1007989841140526,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "subdivisions": 4,
+      "operator": "Element",
+      "step": 1,
+      "baseline_ms": 19.95519,
+      "current_ms": 18.172919,
+      "speedup": 1.0980729072748303,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 125,
+      "subdivisions": 4,
+      "operator": "Element",
+      "step": 2,
+      "baseline_ms": 19.015371,
+      "current_ms": 17.292088,
+      "speedup": 1.0996573114825692,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "subdivisions": 4,
+      "operator": "Csr",
+      "step": 0,
+      "baseline_ms": 41.542961000000005,
+      "current_ms": 38.224913,
+      "speedup": 1.086803284549006,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "subdivisions": 4,
+      "operator": "Csr",
+      "step": 1,
+      "baseline_ms": 40.263719,
+      "current_ms": 36.972116,
+      "speedup": 1.0890293376770754,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "subdivisions": 4,
+      "operator": "Csr",
+      "step": 2,
+      "baseline_ms": 40.251806,
+      "current_ms": 36.991693,
+      "speedup": 1.0881309487511157,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "subdivisions": 4,
+      "operator": "Element",
+      "step": 0,
+      "baseline_ms": 59.716308000000005,
+      "current_ms": 56.390077,
+      "speedup": 1.0589861049489258,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "subdivisions": 4,
+      "operator": "Element",
+      "step": 1,
+      "baseline_ms": 58.131628,
+      "current_ms": 54.950205000000004,
+      "speedup": 1.0578964719057917,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 729,
+      "subdivisions": 4,
+      "operator": "Element",
+      "step": 2,
+      "baseline_ms": 57.960334,
+      "current_ms": 54.660064,
+      "speedup": 1.0603780851775073,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "subdivisions": 8,
+      "operator": "Csr",
+      "step": 0,
+      "baseline_ms": 29.198781,
+      "current_ms": 26.495749,
+      "speedup": 1.1020175727057198,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "subdivisions": 8,
+      "operator": "Csr",
+      "step": 1,
+      "baseline_ms": 29.195635,
+      "current_ms": 26.488636,
+      "speedup": 1.1021947298456591,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "subdivisions": 8,
+      "operator": "Csr",
+      "step": 2,
+      "baseline_ms": 29.209852,
+      "current_ms": 26.474088,
+      "speedup": 1.1033374218594425,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "subdivisions": 8,
+      "operator": "Element",
+      "step": 0,
+      "baseline_ms": 46.340895,
+      "current_ms": 43.564273,
+      "speedup": 1.063736217978434,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "subdivisions": 8,
+      "operator": "Element",
+      "step": 1,
+      "baseline_ms": 46.338401000000005,
+      "current_ms": 43.57362,
+      "speedup": 1.063450798900803,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 1,
+      "dofs": 729,
+      "subdivisions": 8,
+      "operator": "Element",
+      "step": 2,
+      "baseline_ms": 46.344692,
+      "current_ms": 43.580793,
+      "speedup": 1.0634201172062199,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "subdivisions": 8,
+      "operator": "Csr",
+      "step": 0,
+      "baseline_ms": 120.999593,
+      "current_ms": 113.078227,
+      "speedup": 1.070052088807512,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "subdivisions": 8,
+      "operator": "Csr",
+      "step": 1,
+      "baseline_ms": 118.69152299999999,
+      "current_ms": 110.818259,
+      "speedup": 1.0710466314039457,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "subdivisions": 8,
+      "operator": "Csr",
+      "step": 2,
+      "baseline_ms": 118.578408,
+      "current_ms": 110.760439,
+      "speedup": 1.0705844891062593,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "subdivisions": 8,
+      "operator": "Element",
+      "step": 0,
+      "baseline_ms": 172.623509,
+      "current_ms": 164.74033,
+      "speedup": 1.0478521501079912,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "subdivisions": 8,
+      "operator": "Element",
+      "step": 1,
+      "baseline_ms": 169.307682,
+      "current_ms": 161.552932,
+      "speedup": 1.0480012953277753,
+      "iterations_unchanged": true
+    },
+    {
+      "degree": 2,
+      "dofs": 4913,
+      "subdivisions": 8,
+      "operator": "Element",
+      "step": 2,
+      "baseline_ms": 169.35070399999998,
+      "current_ms": 161.57601499999998,
+      "speedup": 1.0481178410050527,
+      "iterations_unchanged": true
+    }
+  ],
+  "native_memcheck": {
+    "compute": "========= COMPUTE-SANITIZER\n\nrunning 3 tests\ntest native_diagonal_scale_all_scalars_and_tails ... ok\ntest native_diagonal_scale_rejections_and_launch_failure_preserve_output ... ok\ntest unsupported_native_update_preserves_output ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.20s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "preconditioners": "========= COMPUTE-SANITIZER\n\nrunning 4 tests\ntest amg::backend_l1_tests::native_l1_scaling_matches_row_norms_at_every_level_and_after_restore ... ok\ntest amg::backend_pcg_tests::native_backend_pcg_cycle_is_hpd_and_resident ... ok\ntest amg::backend_zero_tests::native_zero_start_matches_independent_cycles ... ok\ntest amg::cuda_c64::tests::native_c64_coarse_checkpoint_and_repeated_action ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 238 filtered out; finished in 11.51s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "tet_sessions": "========= COMPUTE-SANITIZER\n\nrunning 6 tests\ntest physics::acoustics::pressure::device_tet::tests::native_tet_p2_persistent_solve ... ok\ntest physics::acoustics::pressure::device_tet::tests::native_tet_volume_persistent_solve ... ok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_element_storage_omits_physical_csr ... tet physical P2 dofs=729 element_bytes=82636 csr_bytes=1056435\nok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_p1_robin_session_frequency_lifting_and_reuse ... tet Robin scale=0 mode=Csr pass=0 iterations=23 allocations=131 error=0.0000000012467711273273427\ntet Robin scale=0 mode=Csr pass=1 iterations=22 allocations=0 error=0.0000000021255556075617693\ntet Robin scale=0 mode=Csr pass=2 iterations=23 allocations=0 error=0.0000000007810934562375693\ntet Robin scale=0 mode=Element pass=0 iterations=23 allocations=128 error=0.0000000012467657694080243\ntet Robin scale=0 mode=Element pass=1 iterations=22 allocations=0 error=0.00000000212555803965221\ntet Robin scale=0 mode=Element pass=2 iterations=23 allocations=0 error=0.0000000007810929502924731\ntet Robin scale=1 mode=Csr pass=0 iterations=20 allocations=128 error=0.00000000027522144540066895\ntet Robin scale=1 mode=Csr pass=1 iterations=20 allocations=0 error=0.0000000001761992278484205\ntet Robin scale=1 mode=Csr pass=2 iterations=20 allocations=0 error=0.00000000040915834056848335\ntet Robin scale=1 mode=Element pass=0 iterations=20 allocations=128 error=0.00000000027521946014043157\ntet Robin scale=1 mode=Element pass=1 iterations=20 allocations=0 error=0.00000000017619926163931223\ntet Robin scale=1 mode=Element pass=2 iterations=20 allocations=0 error=0.00000000040915782455269727\nok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_p2_robin_session_shared_edges_and_reuse ... tet P2 Robin mode=Csr pass=0 iterations=34 allocations=131 error=0.0000000029930334357646057\ntet P2 Robin mode=Csr pass=1 iterations=24 allocations=0 error=0.000000003243133408629619\ntet P2 Robin mode=Csr pass=2 iterations=22 allocations=0 error=0.0000000014237979672712774\ntet P2 Robin mode=Element pass=0 iterations=34 allocations=128 error=0.0000000029930306359112643\ntet P2 Robin mode=Element pass=1 iterations=24 allocations=0 error=0.000000003243137113283419\ntet P2 Robin mode=Element pass=2 iterations=22 allocations=0 error=0.0000000014237979093309583\nok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_sessions_p1_p2_csr_element_frequency_and_failure ... tet session N=4 mode=Csr pass=0 iterations=23 allocations=131 error=0.00000000026076641491530717\ntet session N=4 mode=Csr pass=1 iterations=22 allocations=0 error=0.0000000014009125664836973\ntet session N=4 mode=Csr pass=2 iterations=22 allocations=0 error=0.0000000015032014355511933\ntet session N=10 mode=Csr pass=0 iterations=37 allocations=128 error=0.0000000011844466551748208\ntet session N=10 mode=Csr pass=1 iterations=36 allocations=0 error=0.0000000060581069962861424\ntet session N=10 mode=Csr pass=2 iterations=36 allocations=0 error=0.000000005620843417820665\ntet session N=4 mode=Element pass=0 iterations=23 allocations=128 error=0.0000000002607683527854677\ntet session N=4 mode=Element pass=1 iterations=22 allocations=0 error=0.0000000014009118655701529\ntet session N=4 mode=Element pass=2 iterations=22 allocations=0 error=0.000000001503202763305535\ntet session N=10 mode=Element pass=0 iterations=37 allocations=128 error=0.0000000011844389190888838\ntet session N=10 mode=Element pass=1 iterations=36 allocations=0 error=0.000000006058104711427189\ntet session N=10 mode=Element pass=2 iterations=36 allocations=0 error=0.000000005620842744310221\nok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1935 filtered out; finished in 26.52s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "hex_sessions": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest physics::acoustics::pressure::device_hex_solve::tests::native_frequency_and_boundary_updates_certify_changed_system ... frequency sweep P2: k=0+0i, iterations=32, residual=0.00000000006350763954303436\nfrequency sweep P2: k=4+0.2i, iterations=45, residual=0.00000000006690099562466365\nfrequency sweep P2: k=6-0.1i, iterations=49, residual=0.00000000005165534927841286\nfrequency sweep P2: k=0+0i, iterations=33, residual=0.000000000044593875132935155\nfrequency sweep P3: k=0+0i, iterations=62, residual=0.00000000008535584193934624\nfrequency sweep P3: k=4+0.2i, iterations=165, residual=0.00000000009528001877140361\nfrequency sweep P3: k=6-0.1i, iterations=224, residual=0.00000000009989701221036712\nfrequency sweep P3: k=0+0i, iterations=65, residual=0.00000000009646804091749524\nok\ntest physics::acoustics::pressure::device_hex_solve::tests::native_session_boundaries_warm_start_and_failed_publication ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1939 filtered out; finished in 48.19s\n\n========= ERROR SUMMARY: 0 errors\n"
+  },
+  "checks": {
+    "cargo check": "passed",
+    "cargo clippy": "passed with existing warnings",
+    "cargo clippy -p sonium-compute -p sonium-solvers-preconditioners --features cuda --lib --tests": "passed with existing warnings",
+    "cargo test -p sonium-solvers-preconditioners": "337 passed, one ignored doc test",
+    "git diff --check": "passed for modified tracked sources"
+  },
+  "limitations": [
+    "CUDA coverage remains bounded to recorded production fixtures.",
+    "Host AMG hierarchy setup and numeric hierarchy rebuilds remain.",
+    "This does not improve hierarchy quality or outer iteration counts.",
+    "CSR remains faster than element mode on recorded complete solves.",
+    "AMG block application still cycles through columns.",
+    "Default backends retain a diagonal CSR plus scale fallback when the native hook is unavailable."
+  ]
+}

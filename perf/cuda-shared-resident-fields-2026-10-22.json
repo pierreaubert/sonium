@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-22",
+  "scope": "Shared resident exterior field workspace for H-matrix and TBEM sweeps",
+  "sources_sha256": {
+    "crates/sonium-bem/src/core/postprocess/pressure_cuda_device.rs": "6e355608de41572d814d4407776e24c79b50e80fadf817cb26746be65691df27",
+    "crates/sonium-bem/src/core/postprocess/pressure.rs": "fc125f1f47591a611f0b168d058c21df5006b56bf1b25163c9b6019567d44f55",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_field.rs": "68e3e349b66aaa8d0269d419639870da0ee4fc1d22cf63409667d952093119dd"
+  },
+  "native": {
+    "passed": 2,
+    "log": "/tmp/field-workspace-native-final.log"
+  },
+  "cpu_bem": {
+    "passed": 541,
+    "ignored": 3,
+    "log": "/tmp/field-workspace-cpu.log"
+  },
+  "checks": [
+    "root check and Clippy passed",
+    "CUDA BEM Clippy passed with no modified-file warnings"
+  ],
+  "coverage": [
+    "20-panel impedance sphere: 10,12,40,42 Hz and three off-surface points",
+    "CPU total-field relative agreement 1e-7",
+    "zero field allocations and H2D transfers after preparation",
+    "existing H-matrix <=16-byte D2H gate unchanged",
+    "injected launch failures recover",
+    "bad connectivity and on-surface points reject before allocation"
+  ],
+  "limitations": [
+    "fixed velocity/impedance coefficients",
+    "constant surface Tri3 and exterior physics",
+    "seven-point quadrature; no near-surface convergence claim",
+    "NumCalc has not selected this workspace yet",
+    "no new speedup claim"
+  ],
+  "memcheck": {
+    "passed": 2,
+    "errors": 0,
+    "log": "/tmp/field-workspace-memcheck-final.log"
+  }
+}

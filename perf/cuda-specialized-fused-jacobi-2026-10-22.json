@@ -1,0 +1,1999 @@
+{
+  "date": "2026-10-22",
+  "scope": "Fused CSR Jacobi option exposed through persistent Tet P1/P2 and Hex pressure sessions; retained across refresh/rebuild.",
+  "default_enabled": false,
+  "gpu": {
+    "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+    "driver": "610.57.04",
+    "memory_mib": 97887
+  },
+  "validation": {
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_fem_tests_and_example_clippy": "passed with existing warnings",
+    "cpu_fem": {
+      "passed": 1964,
+      "ignored": 1
+    },
+    "native_tet_tests": 1,
+    "native_hex_tests": 2,
+    "memcheck_tet": {
+      "passed": 1,
+      "errors": 0
+    },
+    "memcheck_hex": {
+      "passed": 2,
+      "errors": 0
+    },
+    "invalid_benchmark_env": "rejected before CUDA creation",
+    "git_diff_check": "passed"
+  },
+  "methodology": {
+    "order": "baseline, fused, fused, baseline; independent processes",
+    "subdivisions": 4,
+    "csr_preprocessing": "enabled in both modes",
+    "samples_per_frequency": 5,
+    "warmups_per_frequency": 1,
+    "frequencies_per_case": 3,
+    "timing": "synchronized warm zero-start solve only; setup, update, host reference and output download excluded",
+    "contention": "old BEM sanitizer temporarily stopped with EXIT-trap resume; Sl state verified afterward",
+    "iteration_counts": "identical for every matched case",
+    "independent_gates": "relative residual <2e-9 and relative solution error <1e-6",
+    "warm_allocations": 0
+  },
+  "comparisons": [
+    {
+      "degree": 1,
+      "operator": "Csr",
+      "dofs": 125,
+      "speedup_ratios": [
+        1.0438476621542685,
+        1.044438686151603,
+        1.0479350216982113,
+        1.0391753295503385,
+        1.0414956786729797,
+        1.0406909770620607
+      ],
+      "median_speedup": 1.042671670413624
+    },
+    {
+      "degree": 1,
+      "operator": "Element",
+      "dofs": 125,
+      "speedup_ratios": [
+        1.0337344267886075,
+        1.0334668860345484,
+        1.032282906510825,
+        1.032681582799177,
+        1.033000454207314,
+        1.0331759488661423
+      ],
+      "median_speedup": 1.033088201536728
+    },
+    {
+      "degree": 2,
+      "operator": "Csr",
+      "dofs": 729,
+      "speedup_ratios": [
+        0.9764938006946476,
+        0.9764012451265193,
+        0.9761169617743823,
+        0.9755640606767282,
+        0.9768889119075012,
+        0.9758783413374793
+      ],
+      "median_speedup": 0.9762591034504509
+    },
+    {
+      "degree": 2,
+      "operator": "Element",
+      "dofs": 729,
+      "speedup_ratios": [
+        0.9854677074161854,
+        0.984132462469692,
+        0.9852806673759923,
+        0.9842047992598315,
+        0.9847476089120655,
+        0.9846921800634474
+      ],
+      "median_speedup": 0.9847198944877564
+    }
+  ],
+  "runs": [
+    {
+      "sequence": 0,
+      "header": {
+        "amg_shift": [
+          16.0,
+          16.0
+        ],
+        "benchmark": "retained_tet_session",
+        "csr_preprocessing": true,
+        "fused_jacobi": false,
+        "host_preparation_and_input_uploads_timed": false,
+        "initial_guess": "zero",
+        "memory_note": "element mode omits physical CSR storage and assembly maps; auxiliary AMG remains assembled",
+        "restart": 60,
+        "samples": 5,
+        "scalar": "complex64",
+        "setup_includes": "session geometry, boundary maps, auxiliary AMG, JIT and initial numeric assembly",
+        "setup_order": "CSR before Element; context and driver caches shared",
+        "smoother": "Jacobi",
+        "tolerance": 1e-09,
+        "warmups_per_frequency": 1
+      },
+      "results": [
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.250244,
+          "operator": "Csr",
+          "relative_residual": 7.982894810622129e-10,
+          "relative_solution_error": 1.0311826306145436e-09,
+          "setup_ms": 51.120923,
+          "solve": {
+            "max_ms": 13.377574999999998,
+            "median_ms": 13.363247999999999,
+            "min_ms": 13.346136,
+            "samples_ms": [
+              13.370270999999999,
+              13.346136,
+              13.377574999999998,
+              13.350434,
+              13.363247999999999
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.24972299999999997,
+          "operator": "Csr",
+          "relative_residual": 3.812169597364197e-10,
+          "relative_solution_error": 6.364648978063452e-10,
+          "setup_ms": 51.120923,
+          "solve": {
+            "max_ms": 13.399717,
+            "median_ms": 13.349562,
+            "min_ms": 13.322982000000001,
+            "samples_ms": [
+              13.322982000000001,
+              13.339393,
+              13.349562,
+              13.399717,
+              13.365062
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.24822,
+          "operator": "Csr",
+          "relative_residual": 8.617852463610014e-10,
+          "relative_solution_error": 1.4714013603664248e-09,
+          "setup_ms": 51.120923,
+          "solve": {
+            "max_ms": 12.755556,
+            "median_ms": 12.7465,
+            "min_ms": 12.718677,
+            "samples_ms": [
+              12.7465,
+              12.718677,
+              12.727323,
+              12.755556,
+              12.750548
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.03134,
+          "operator": "Element",
+          "relative_residual": 7.982894960412484e-10,
+          "relative_solution_error": 1.0311825683202026e-09,
+          "setup_ms": 3.0355909999999997,
+          "solve": {
+            "max_ms": 17.008294,
+            "median_ms": 16.985892,
+            "min_ms": 16.972445999999998,
+            "samples_ms": [
+              16.998976,
+              16.972445999999998,
+              17.008294,
+              16.981553,
+              16.985892
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.032111,
+          "operator": "Element",
+          "relative_residual": 3.8121697918574666e-10,
+          "relative_solution_error": 6.364649994263396e-10,
+          "setup_ms": 3.0355909999999997,
+          "solve": {
+            "max_ms": 17.044132,
+            "median_ms": 16.985761,
+            "min_ms": 16.962187,
+            "samples_ms": [
+              16.985761,
+              16.962187,
+              17.003134,
+              16.972767,
+              17.044132
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.031951,
+          "operator": "Element",
+          "relative_residual": 8.617851659062247e-10,
+          "relative_solution_error": 1.471401336401576e-09,
+          "setup_ms": 3.0355909999999997,
+          "solve": {
+            "max_ms": 16.18821,
+            "median_ms": 16.164485,
+            "min_ms": 16.160257,
+            "samples_ms": [
+              16.164485,
+              16.160257,
+              16.18821,
+              16.1667,
+              16.162441
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.308975,
+          "operator": "Csr",
+          "relative_residual": 4.17595149181168e-10,
+          "relative_solution_error": 2.1704173934837065e-09,
+          "setup_ms": 43.948094,
+          "solve": {
+            "max_ms": 35.452398,
+            "median_ms": 35.449673000000004,
+            "min_ms": 35.439984,
+            "samples_ms": [
+              35.450283999999996,
+              35.44291,
+              35.452398,
+              35.449673000000004,
+              35.439984
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.309126,
+          "operator": "Csr",
+          "relative_residual": 6.620902320626019e-10,
+          "relative_solution_error": 4.584420292734219e-09,
+          "setup_ms": 43.948094,
+          "solve": {
+            "max_ms": 34.37132,
+            "median_ms": 34.331955,
+            "min_ms": 34.321916,
+            "samples_ms": [
+              34.329159999999995,
+              34.342045,
+              34.331955,
+              34.37132,
+              34.321916
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.306991,
+          "operator": "Csr",
+          "relative_residual": 5.278172093716178e-10,
+          "relative_solution_error": 3.6376777745881277e-09,
+          "setup_ms": 43.948094,
+          "solve": {
+            "max_ms": 34.375278,
+            "median_ms": 34.341704,
+            "min_ms": 34.31326,
+            "samples_ms": [
+              34.342575000000004,
+              34.31326,
+              34.375278,
+              34.341704,
+              34.31878
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.112233,
+          "operator": "Element",
+          "relative_residual": 4.1759517267875584e-10,
+          "relative_solution_error": 2.170419430635707e-09,
+          "setup_ms": 22.176997,
+          "solve": {
+            "max_ms": 54.218182,
+            "median_ms": 53.938352,
+            "min_ms": 53.888828,
+            "samples_ms": [
+              53.938352,
+              53.888828,
+              53.921119000000004,
+              54.202861999999996,
+              54.218182
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.11186199999999999,
+          "operator": "Element",
+          "relative_residual": 6.620902385613393e-10,
+          "relative_solution_error": 4.584421026244274e-09,
+          "setup_ms": 22.176997,
+          "solve": {
+            "max_ms": 52.564598999999994,
+            "median_ms": 52.489256,
+            "min_ms": 52.310487,
+            "samples_ms": [
+              52.310487,
+              52.320136000000005,
+              52.564598999999994,
+              52.489256,
+              52.498103
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.11089,
+          "operator": "Element",
+          "relative_residual": 5.278172105897178e-10,
+          "relative_solution_error": 3.637677395422e-09,
+          "setup_ms": 22.176997,
+          "solve": {
+            "max_ms": 52.539010999999995,
+            "median_ms": 52.321378,
+            "min_ms": 52.311139,
+            "samples_ms": [
+              52.311139,
+              52.325776999999995,
+              52.317681,
+              52.321378,
+              52.539010999999995
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        }
+      ]
+    },
+    {
+      "sequence": 1,
+      "header": {
+        "amg_shift": [
+          16.0,
+          16.0
+        ],
+        "benchmark": "retained_tet_session",
+        "csr_preprocessing": true,
+        "fused_jacobi": true,
+        "host_preparation_and_input_uploads_timed": false,
+        "initial_guess": "zero",
+        "memory_note": "element mode omits physical CSR storage and assembly maps; auxiliary AMG remains assembled",
+        "restart": 60,
+        "samples": 5,
+        "scalar": "complex64",
+        "setup_includes": "session geometry, boundary maps, auxiliary AMG, JIT and initial numeric assembly",
+        "setup_order": "CSR before Element; context and driver caches shared",
+        "smoother": "Jacobi",
+        "tolerance": 1e-09,
+        "warmups_per_frequency": 1
+      },
+      "results": [
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.249283,
+          "operator": "Csr",
+          "relative_residual": 7.982895465875952e-10,
+          "relative_solution_error": 1.0311825605509786e-09,
+          "setup_ms": 51.198591,
+          "solve": {
+            "max_ms": 12.858191,
+            "median_ms": 12.801914,
+            "min_ms": 12.784542,
+            "samples_ms": [
+              12.801914,
+              12.858191,
+              12.784542,
+              12.798718000000001,
+              12.817333999999999
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.250815,
+          "operator": "Csr",
+          "relative_residual": 3.8121699342387957e-10,
+          "relative_solution_error": 6.364649268291939e-10,
+          "setup_ms": 51.198591,
+          "solve": {
+            "max_ms": 12.791425,
+            "median_ms": 12.781566,
+            "min_ms": 12.769022,
+            "samples_ms": [
+              12.769022,
+              12.789131000000001,
+              12.781566,
+              12.770234,
+              12.791425
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.247028,
+          "operator": "Csr",
+          "relative_residual": 8.617851801730638e-10,
+          "relative_solution_error": 1.4714013873333485e-09,
+          "setup_ms": 51.198591,
+          "solve": {
+            "max_ms": 12.204882999999999,
+            "median_ms": 12.163445,
+            "min_ms": 12.135652,
+            "samples_ms": [
+              12.163445,
+              12.135652,
+              12.159578000000002,
+              12.164938,
+              12.204882999999999
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.03199,
+          "operator": "Element",
+          "relative_residual": 7.982895090302816e-10,
+          "relative_solution_error": 1.0311826417252685e-09,
+          "setup_ms": 3.134078,
+          "solve": {
+            "max_ms": 16.454594999999998,
+            "median_ms": 16.431582,
+            "min_ms": 16.416333,
+            "samples_ms": [
+              16.416333,
+              16.429797999999998,
+              16.454594999999998,
+              16.443183,
+              16.431582
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.032171,
+          "operator": "Element",
+          "relative_residual": 3.812169758450615e-10,
+          "relative_solution_error": 6.364649761897509e-10,
+          "setup_ms": 3.134078,
+          "solve": {
+            "max_ms": 16.447191,
+            "median_ms": 16.435709,
+            "min_ms": 16.410681999999998,
+            "samples_ms": [
+              16.435709,
+              16.447191,
+              16.42565,
+              16.410681999999998,
+              16.437703000000003
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.032051,
+          "operator": "Element",
+          "relative_residual": 8.617851747673659e-10,
+          "relative_solution_error": 1.4714013250444993e-09,
+          "setup_ms": 3.134078,
+          "solve": {
+            "max_ms": 15.688593000000001,
+            "median_ms": 15.658967999999998,
+            "min_ms": 15.653467000000001,
+            "samples_ms": [
+              15.675158000000001,
+              15.658967999999998,
+              15.657304,
+              15.688593000000001,
+              15.653467000000001
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.309005,
+          "operator": "Csr",
+          "relative_residual": 4.175951625333868e-10,
+          "relative_solution_error": 2.1704170986912373e-09,
+          "setup_ms": 44.518665,
+          "solve": {
+            "max_ms": 36.382830999999996,
+            "median_ms": 36.303019,
+            "min_ms": 36.268424,
+            "samples_ms": [
+              36.303019,
+              36.382830999999996,
+              36.268424,
+              36.278033,
+              36.322857
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.317722,
+          "operator": "Csr",
+          "relative_residual": 6.620902561584365e-10,
+          "relative_solution_error": 4.584420301989769e-09,
+          "setup_ms": 44.518665,
+          "solve": {
+            "max_ms": 35.185733,
+            "median_ms": 35.161728000000004,
+            "min_ms": 35.127922999999996,
+            "samples_ms": [
+              35.185733,
+              35.161868,
+              35.161728000000004,
+              35.127922999999996,
+              35.137071
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.31030800000000003,
+          "operator": "Csr",
+          "relative_residual": 5.278172050515872e-10,
+          "relative_solution_error": 3.6376776569865853e-09,
+          "setup_ms": 44.518665,
+          "solve": {
+            "max_ms": 35.199358,
+            "median_ms": 35.181956,
+            "min_ms": 35.155575,
+            "samples_ms": [
+              35.177397,
+              35.181956,
+              35.18937,
+              35.155575,
+              35.199358
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.109757,
+          "operator": "Element",
+          "relative_residual": 4.1759519049064183e-10,
+          "relative_solution_error": 2.1704192568215114e-09,
+          "setup_ms": 22.676313,
+          "solve": {
+            "max_ms": 55.058925,
+            "median_ms": 54.733759,
+            "min_ms": 54.701738,
+            "samples_ms": [
+              54.733759,
+              54.701738,
+              54.730743,
+              55.058925,
+              55.021484
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.11244299999999999,
+          "operator": "Element",
+          "relative_residual": 6.620902337783481e-10,
+          "relative_solution_error": 4.584420989737113e-09,
+          "setup_ms": 22.676313,
+          "solve": {
+            "max_ms": 53.415420999999995,
+            "median_ms": 53.335559999999994,
+            "min_ms": 53.06148,
+            "samples_ms": [
+              53.06148,
+              53.063895,
+              53.372189,
+              53.415420999999995,
+              53.335559999999994
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.111381,
+          "operator": "Element",
+          "relative_residual": 5.278172021016546e-10,
+          "relative_solution_error": 3.6376773498895066e-09,
+          "setup_ms": 22.676313,
+          "solve": {
+            "max_ms": 53.311414,
+            "median_ms": 53.103019,
+            "min_ms": 53.088291000000005,
+            "samples_ms": [
+              53.095183999999996,
+              53.088291000000005,
+              53.103019,
+              53.305182,
+              53.311414
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        }
+      ]
+    },
+    {
+      "sequence": 2,
+      "header": {
+        "amg_shift": [
+          16.0,
+          16.0
+        ],
+        "benchmark": "retained_tet_session",
+        "csr_preprocessing": true,
+        "fused_jacobi": true,
+        "host_preparation_and_input_uploads_timed": false,
+        "initial_guess": "zero",
+        "memory_note": "element mode omits physical CSR storage and assembly maps; auxiliary AMG remains assembled",
+        "restart": 60,
+        "samples": 5,
+        "scalar": "complex64",
+        "setup_includes": "session geometry, boundary maps, auxiliary AMG, JIT and initial numeric assembly",
+        "setup_order": "CSR before Element; context and driver caches shared",
+        "smoother": "Jacobi",
+        "tolerance": 1e-09,
+        "warmups_per_frequency": 1
+      },
+      "results": [
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.24844100000000002,
+          "operator": "Csr",
+          "relative_residual": 7.982895465875952e-10,
+          "relative_solution_error": 1.0311825605509786e-09,
+          "setup_ms": 50.999373,
+          "solve": {
+            "max_ms": 12.883709999999999,
+            "median_ms": 12.861768000000001,
+            "min_ms": 12.818406,
+            "samples_ms": [
+              12.883609,
+              12.861768000000001,
+              12.883709999999999,
+              12.818406,
+              12.823996000000001
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.24797000000000002,
+          "operator": "Csr",
+          "relative_residual": 3.8121699342387957e-10,
+          "relative_solution_error": 6.364649268291939e-10,
+          "setup_ms": 50.999373,
+          "solve": {
+            "max_ms": 12.828314,
+            "median_ms": 12.816202,
+            "min_ms": 12.810781,
+            "samples_ms": [
+              12.824297,
+              12.828314,
+              12.811273,
+              12.810781,
+              12.816202
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.249002,
+          "operator": "Csr",
+          "relative_residual": 8.617851801730638e-10,
+          "relative_solution_error": 1.4714013873333485e-09,
+          "setup_ms": 50.999373,
+          "solve": {
+            "max_ms": 12.21384,
+            "median_ms": 12.201968,
+            "min_ms": 12.192319999999999,
+            "samples_ms": [
+              12.202698999999999,
+              12.192319999999999,
+              12.199964000000001,
+              12.21384,
+              12.201968
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.03161,
+          "operator": "Element",
+          "relative_residual": 7.982895090302816e-10,
+          "relative_solution_error": 1.0311826417252685e-09,
+          "setup_ms": 3.1349199999999997,
+          "solve": {
+            "max_ms": 16.513487,
+            "median_ms": 16.500792,
+            "min_ms": 16.476968000000003,
+            "samples_ms": [
+              16.513487,
+              16.476968000000003,
+              16.49414,
+              16.500792,
+              16.511443
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.030337,
+          "operator": "Element",
+          "relative_residual": 3.812169758450615e-10,
+          "relative_solution_error": 6.364649761897509e-10,
+          "setup_ms": 3.1349199999999997,
+          "solve": {
+            "max_ms": 16.50997,
+            "median_ms": 16.485864,
+            "min_ms": 16.459985,
+            "samples_ms": [
+              16.468011,
+              16.459985,
+              16.490562999999998,
+              16.485864,
+              16.50997
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.03202,
+          "operator": "Element",
+          "relative_residual": 8.617851747673659e-10,
+          "relative_solution_error": 1.4714013250444993e-09,
+          "setup_ms": 3.1349199999999997,
+          "solve": {
+            "max_ms": 15.722488,
+            "median_ms": 15.709513000000001,
+            "min_ms": 15.690316999999999,
+            "samples_ms": [
+              15.693762999999999,
+              15.709513000000001,
+              15.713972,
+              15.722488,
+              15.690316999999999
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.30842499999999995,
+          "operator": "Csr",
+          "relative_residual": 4.175951625333868e-10,
+          "relative_solution_error": 2.1704170986912373e-09,
+          "setup_ms": 44.131943,
+          "solve": {
+            "max_ms": 36.387019,
+            "median_ms": 36.347774,
+            "min_ms": 36.331373,
+            "samples_ms": [
+              36.347774,
+              36.343026,
+              36.331373,
+              36.387019,
+              36.365759
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.308525,
+          "operator": "Csr",
+          "relative_residual": 6.620902561584365e-10,
+          "relative_solution_error": 4.584420301989769e-09,
+          "setup_ms": 44.131943,
+          "solve": {
+            "max_ms": 35.208866,
+            "median_ms": 35.179261000000004,
+            "min_ms": 35.153462000000005,
+            "samples_ms": [
+              35.20552,
+              35.153462000000005,
+              35.208866,
+              35.157188999999995,
+              35.179261000000004
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.30651,
+          "operator": "Csr",
+          "relative_residual": 5.278172050515872e-10,
+          "relative_solution_error": 3.6376776569865853e-09,
+          "setup_ms": 44.131943,
+          "solve": {
+            "max_ms": 35.1996,
+            "median_ms": 35.185723,
+            "min_ms": 35.169112000000005,
+            "samples_ms": [
+              35.1996,
+              35.185723,
+              35.169112000000005,
+              35.173719999999996,
+              35.190381
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.10958799999999999,
+          "operator": "Element",
+          "relative_residual": 4.1759519049064183e-10,
+          "relative_solution_error": 2.1704192568215114e-09,
+          "setup_ms": 23.289825,
+          "solve": {
+            "max_ms": 54.973732999999996,
+            "median_ms": 54.802659,
+            "min_ms": 54.777402,
+            "samples_ms": [
+              54.798320999999994,
+              54.777402,
+              54.802659,
+              54.944027,
+              54.973732999999996
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.11109,
+          "operator": "Element",
+          "relative_residual": 6.620902337783481e-10,
+          "relative_solution_error": 4.584420989737113e-09,
+          "setup_ms": 23.289825,
+          "solve": {
+            "max_ms": 53.306656000000004,
+            "median_ms": 53.286727,
+            "min_ms": 53.131664,
+            "samples_ms": [
+              53.131664,
+              53.155168,
+              53.306656000000004,
+              53.299862000000005,
+              53.286727
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": true,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.108806,
+          "operator": "Element",
+          "relative_residual": 5.278172021016546e-10,
+          "relative_solution_error": 3.6376773498895066e-09,
+          "setup_ms": 23.289825,
+          "solve": {
+            "max_ms": 53.290524,
+            "median_ms": 53.178833000000004,
+            "min_ms": 53.160247,
+            "samples_ms": [
+              53.178833000000004,
+              53.160247,
+              53.20406,
+              53.177501,
+              53.290524
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        }
+      ]
+    },
+    {
+      "sequence": 3,
+      "header": {
+        "amg_shift": [
+          16.0,
+          16.0
+        ],
+        "benchmark": "retained_tet_session",
+        "csr_preprocessing": true,
+        "fused_jacobi": false,
+        "host_preparation_and_input_uploads_timed": false,
+        "initial_guess": "zero",
+        "memory_note": "element mode omits physical CSR storage and assembly maps; auxiliary AMG remains assembled",
+        "restart": 60,
+        "samples": 5,
+        "scalar": "complex64",
+        "setup_includes": "session geometry, boundary maps, auxiliary AMG, JIT and initial numeric assembly",
+        "setup_order": "CSR before Element; context and driver caches shared",
+        "smoother": "Jacobi",
+        "tolerance": 1e-09,
+        "warmups_per_frequency": 1
+      },
+      "results": [
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.24814999999999998,
+          "operator": "Csr",
+          "relative_residual": 7.982894810622129e-10,
+          "relative_solution_error": 1.0311826306145436e-09,
+          "setup_ms": 51.922733,
+          "solve": {
+            "max_ms": 13.417801,
+            "median_ms": 13.365632,
+            "min_ms": 13.352388,
+            "samples_ms": [
+              13.378467,
+              13.417801,
+              13.361845,
+              13.352388,
+              13.365632
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.24983299999999997,
+          "operator": "Csr",
+          "relative_residual": 3.812169597364197e-10,
+          "relative_solution_error": 6.364648978063452e-10,
+          "setup_ms": 51.922733,
+          "solve": {
+            "max_ms": 13.366415,
+            "median_ms": 13.348018999999999,
+            "min_ms": 13.32716,
+            "samples_ms": [
+              13.366415,
+              13.348018999999999,
+              13.32716,
+              13.338752000000001,
+              13.352588
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.24842100000000003,
+          "operator": "Csr",
+          "relative_residual": 8.617852463610014e-10,
+          "relative_solution_error": 1.4714013603664248e-09,
+          "setup_ms": 51.922733,
+          "solve": {
+            "max_ms": 12.737062,
+            "median_ms": 12.698478,
+            "min_ms": 12.694321,
+            "samples_ms": [
+              12.694321,
+              12.737062,
+              12.697407,
+              12.698478,
+              12.710671999999999
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.032201,
+          "operator": "Element",
+          "relative_residual": 7.982894960412484e-10,
+          "relative_solution_error": 1.0311825683202026e-09,
+          "setup_ms": 3.110954,
+          "solve": {
+            "max_ms": 17.062676999999997,
+            "median_ms": 17.040064,
+            "min_ms": 17.025737,
+            "samples_ms": [
+              17.025737,
+              17.040064,
+              17.050234,
+              17.062676999999997,
+              17.030356
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            20,
+            20,
+            20,
+            20,
+            20
+          ],
+          "numeric_update_ms": 0.032382,
+          "operator": "Element",
+          "relative_residual": 3.8121697918574666e-10,
+          "relative_solution_error": 6.364649994263396e-10,
+          "setup_ms": 3.110954,
+          "solve": {
+            "max_ms": 17.069129,
+            "median_ms": 17.029905000000003,
+            "min_ms": 17.015749,
+            "samples_ms": [
+              17.069129,
+              17.020096,
+              17.015749,
+              17.049061000000002,
+              17.029905000000003
+            ]
+          },
+          "solve_d2h_bytes": 33600,
+          "solve_h2d_bytes": 1600,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 1,
+          "dofs": 125,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            19,
+            19,
+            19,
+            19,
+            19
+          ],
+          "numeric_update_ms": 0.031779999999999996,
+          "operator": "Element",
+          "relative_residual": 8.617851659062247e-10,
+          "relative_solution_error": 1.471401336401576e-09,
+          "setup_ms": 3.110954,
+          "solve": {
+            "max_ms": 16.236943,
+            "median_ms": 16.230691,
+            "min_ms": 16.19309,
+            "samples_ms": [
+              16.232043,
+              16.19309,
+              16.230691,
+              16.21463,
+              16.236943
+            ]
+          },
+          "solve_d2h_bytes": 30400,
+          "solve_h2d_bytes": 1520,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.30845500000000003,
+          "operator": "Csr",
+          "relative_residual": 4.17595149181168e-10,
+          "relative_solution_error": 2.1704173934837065e-09,
+          "setup_ms": 44.031953,
+          "solve": {
+            "max_ms": 35.486854,
+            "median_ms": 35.459582000000005,
+            "min_ms": 35.424786,
+            "samples_ms": [
+              35.486854,
+              35.485962,
+              35.456336,
+              35.459582000000005,
+              35.424786
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.307162,
+          "operator": "Csr",
+          "relative_residual": 6.620902320626019e-10,
+          "relative_solution_error": 4.584420292734219e-09,
+          "setup_ms": 44.031953,
+          "solve": {
+            "max_ms": 34.547974,
+            "median_ms": 34.366229999999995,
+            "min_ms": 34.3182,
+            "samples_ms": [
+              34.33424,
+              34.388382,
+              34.547974,
+              34.366229999999995,
+              34.3182
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.309066,
+          "operator": "Csr",
+          "relative_residual": 5.278172093716178e-10,
+          "relative_solution_error": 3.6376777745881277e-09,
+          "setup_ms": 44.031953,
+          "solve": {
+            "max_ms": 34.358586,
+            "median_ms": 34.336985,
+            "min_ms": 34.316846999999996,
+            "samples_ms": [
+              34.316846999999996,
+              34.358586,
+              34.326364,
+              34.336985,
+              34.348647
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 4,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            35,
+            35,
+            35,
+            35,
+            35
+          ],
+          "numeric_update_ms": 0.11078,
+          "operator": "Element",
+          "relative_residual": 4.1759517267875584e-10,
+          "relative_solution_error": 2.170419430635707e-09,
+          "setup_ms": 22.209258,
+          "solve": {
+            "max_ms": 54.170171,
+            "median_ms": 53.937039999999996,
+            "min_ms": 53.889079,
+            "samples_ms": [
+              53.937039999999996,
+              53.889079,
+              53.917913,
+              54.170171,
+              54.151616
+            ]
+          },
+          "solve_d2h_bytes": 100800,
+          "solve_h2d_bytes": 2800,
+          "step": 0,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.109788,
+          "operator": "Element",
+          "relative_residual": 6.620902385613393e-10,
+          "relative_solution_error": 4.584421026244274e-09,
+          "setup_ms": 22.209258,
+          "solve": {
+            "max_ms": 52.637578,
+            "median_ms": 52.473977,
+            "min_ms": 52.32727,
+            "samples_ms": [
+              52.330917,
+              52.32727,
+              52.637578,
+              52.473977,
+              52.500789
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 1,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        },
+        {
+          "degree": 2,
+          "dofs": 729,
+          "elements": 384,
+          "fused_jacobi": false,
+          "iterations": [
+            34,
+            34,
+            34,
+            34,
+            34
+          ],
+          "numeric_update_ms": 0.109918,
+          "operator": "Element",
+          "relative_residual": 5.278172105897178e-10,
+          "relative_solution_error": 3.637677395422e-09,
+          "setup_ms": 22.209258,
+          "solve": {
+            "max_ms": 52.525505,
+            "median_ms": 52.364781,
+            "min_ms": 52.331457,
+            "samples_ms": [
+              52.386833,
+              52.364781,
+              52.336096,
+              52.331457,
+              52.525505
+            ]
+          },
+          "solve_d2h_bytes": 95200,
+          "solve_h2d_bytes": 2720,
+          "step": 2,
+          "subdivisions": 4,
+          "update_launches": 3,
+          "update_library_operations": 0,
+          "warm_allocations": 0
+        }
+      ]
+    }
+  ],
+  "source_sha256": {
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_tet_solve.rs": "b36799e93d84b6ae877dac0379f2a977c764fbca8a9f331ba842e5a70a7808e7",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_tet_solve_tests.rs": "9ee3177b15bcaa02817f5cac7ada4e40538c17cc21a30b87e03b9e62e6e9d705",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_hex_solve.rs": "815929483f8e97a21a71008bf3fdb72e2c8f2eb37ada348136781c69a233db15",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_hex_solve/tests.rs": "36311592b63094ea0dcc42717c5a6264b4b8c2576a37be43be3034168a78f3c9",
+    "crates/sonium-fem/examples/cuda_tet_session_compare.rs": "2fc450063e8532358ddae7ea7eee58235347169401b88cfd73dde46c716f3be4",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/backend_profile.rs": "8b88ea71d85522e4a920035eb7c1d0203bc6658c4c3a4b30d06a31d2491c9abb",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/mod.rs": "0e088eb46403560bc4a40ffef7a3b2bdd1beb99e3817677f02f13967ed760b97",
+    "crates/sonium-compute/src/cuda/kernels/local_kernels.cu": "0361ff9045cea74829e53bfe3c162a748394786cd554f1a2e6476f373beaf703"
+  },
+  "limitations": [
+    "Bounded size: 125 P1 and 729 P2 DOFs; no general FEM performance conclusion.",
+    "P1 improves; P2 regresses consistently, so option remains disabled by default.",
+    "Hex correctness and memory safety validated, but no Hex performance measurement in this increment.",
+    "GPU setup and AMG hierarchy construction still include explicit host work.",
+    "Solver control scalar transfers remain; zero bulk-transfer claims do not mean zero scalar traffic.",
+    "Separate long-running BEM scattering sanitizer remains unresolved; not counted as passed.",
+    "Full CUDA public workflow coverage remains incomplete."
+  ]
+}

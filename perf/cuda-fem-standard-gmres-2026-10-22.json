@@ -1,0 +1,92 @@
+{
+  "date": "2026-10-22",
+  "scope": "Retained generic FEM standard GMRES, host-assembled complex Helmholtz P1/P2",
+  "source_sha256": {
+    "crates/sonium-fem/src/solver/device.rs": "df2d783f5d5454084a922bf317971385761b894fbf4a55d9bb3e83b1604029c5",
+    "crates/sonium-fem/src/solver/device/tests.rs": "d7af6321f65da240e58edfb518cf5da0761652ef8f249a4eadcb8549a423e544",
+    "crates/sonium-fem/src/solver/device/tests/public_flexible.rs": "c6c7687c3f5f26b5fa743c8d91263552113a525067480de8e153cf0a0e41c351"
+  },
+  "binary": {
+    "path": "target/debug/deps/sonium_fem-234ee27f8433be93",
+    "sha256": "62900e0fbfffb30c8ae35c9e103a76e972b3a21532afe0b5ec8ac16f94e826bb"
+  },
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "driver": "610.57.04",
+  "fixture": "solver::device::tests::public_flexible::native_standard_gmres_helmholtz_ilu_and_configured_schwarz",
+  "cases": {
+    "degrees": [
+      "P1",
+      "P2"
+    ],
+    "scalar": "Complex64",
+    "actions": [
+      "Forward",
+      "Transpose",
+      "Hermitian"
+    ],
+    "preconditioners": [
+      "ILU(0)",
+      "Schwarz: 8 subdomains, overlap 2"
+    ],
+    "updates": "Three scaled matrix and changed-RHS solves per combination; lagged fixed preconditioner; warm starts after first solve",
+    "failure_recovery": "Injected matrix/RHS D2D failures, repair, invalid controls and nonconvergence invalidate publication"
+  },
+  "assertions": {
+    "independent_relative_residual_less_than": 1.1e-09,
+    "solution_error_l2_less_than": "2e-6 * sqrt(n)",
+    "warm_backend_allocations": 0,
+    "device_update_h2d_bytes": 0,
+    "device_update_d2h_bytes": 8,
+    "note": "Two finite-status words; Krylov compact control transfers remain. Initial host assembly and setup explicit."
+  },
+  "results": {
+    "native": "1 passed",
+    "memcheck": "1 passed, 0 errors",
+    "native_regression": "22 passed, 3 performance experiments ignored",
+    "cpu": "1964 passed, 1 ignored",
+    "check": "passed",
+    "clippy": "passed with existing warnings",
+    "cuda_clippy": "passed with existing warnings",
+    "registry_tests": "10 passed",
+    "registry_validator": "40 retained-dispatch rows; zero complete",
+    "inventory": "22 packages, 1352 unclassified source units; refreshed after unrelated concurrent rotating_machine/az.rs edit"
+  },
+  "logs": {
+    "native": {
+      "path": "/tmp/fem-gmres-native.log",
+      "sha256": "86cdee957a26ceb1d4f9a484021a83d6e5a6b5db2a2381506c2ea969a9222ab5"
+    },
+    "memcheck": {
+      "path": "/tmp/fem-gmres-memcheck.log",
+      "sha256": "050203d7d9e9c67fb77fae3ba08eeef8122e259ad63d4c5bf2a30df5ada2d442"
+    },
+    "native_regression": {
+      "path": "/tmp/fem-gmres-device-regression.log",
+      "sha256": "8f86f4a62c0405d4623a28b616417959834fdf0b9dcc87e06b59a8b53cba746e"
+    },
+    "cpu": {
+      "path": "/tmp/fem-gmres-cpu-tests.log",
+      "sha256": "f162442eca22a64540747a8ec2ca4ea4357e337f5d33ad2b5e6e41b00a2a890b"
+    },
+    "check": {
+      "path": "/tmp/fem-gmres-check.log",
+      "sha256": "61b1bc23837d97da9d8edbd0b0c96c01161d3fa00756d494be0bfcd85676998d"
+    },
+    "clippy": {
+      "path": "/tmp/fem-gmres-clippy.log",
+      "sha256": "d0ffba6a444333105d88063242c9686b707bf4bc8ee1f65538bc53047190e74a"
+    },
+    "cuda_clippy": {
+      "path": "/tmp/fem-gmres-cuda-clippy.log",
+      "sha256": "ae751f4d18e43f70ce2f0f3b5460c41080d10c940d9e1e1746a9aa6859af9d79"
+    }
+  },
+  "limitations": [
+    "No performance measurement; other GPU processes were active",
+    "Legacy FEM CSR producer remains CPU-only",
+    "No pipelined GMRES coverage",
+    "No f32/Complex32 generic FEM admission extension",
+    "No host assembly or Schwarz/ILU setup acceleration",
+    "Physical errors here are manufactured discrete-solution checks, not continuum mesh convergence"
+  ]
+}

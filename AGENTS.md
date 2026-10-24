@@ -100,6 +100,9 @@ Layer 3 - Applications
   sonium-sim-speaker   Loudspeaker BEM simulation, CEA-2034 output, and optimisation
   sonium-sim-speaker-modeling
                        Driver, enclosure, and resolved nonlinear port-flow models
+  sonium-sim-motor     Showcase mini-app for the rotating-machine stack
+                       (GEO_30MM operating points, gamma sweep/MTPA,
+                       thermal and rotor-stress checks; `motor-sim` CLI)
 
 Layer 4 - Quality Assurance (sibling `sonium-accuracy` workspace)
   sonium-qa            Standalone validation binaries (qa-bem-*, qa-fem-*, qa-solvers-*).

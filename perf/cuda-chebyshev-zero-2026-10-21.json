@@ -1,0 +1,210 @@
+{
+  "date": "2026-10-21",
+  "base_revision": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree": true,
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "driver": "610.57.04",
+  "profile": "test opt-level=2",
+  "change": "Fresh AMG corrections start Chebyshev with d=D_inverse*b/theta and x=d, skipping A*0, residual construction and zero initialization. Subsequent recurrence steps, post-smoothing and W/F revisits retain their previous semantics.",
+  "baseline": "cuda-chebyshev-diagonal-2026-10-21.json",
+  "method": "One warmup then five timed complete warm linear solves, alternating layout order, zero initial guess, tolerance 1e-11. Setup/assembly excluded; RHS/guess uploads, convergence and solution download included.",
+  "results": [
+    {
+      "nx": 12,
+      "ny": 6,
+      "pressure_dofs": 91,
+      "velocity_dofs": 650,
+      "iterations_embedded_pressure": [
+        74,
+        76
+      ],
+      "before_seconds_embedded_pressure": [
+        0.09041875,
+        0.100924476
+      ],
+      "after_seconds_embedded_pressure": [
+        0.087721734,
+        0.095987187
+      ],
+      "speedup_embedded_pressure": [
+        1.030745128681565,
+        1.0514369589766184
+      ],
+      "after_samples_seconds_embedded_pressure": [
+        [
+          0.087625792,
+          0.087702077,
+          0.087721734,
+          0.087722806,
+          0.08778822
+        ],
+        [
+          0.09593604,
+          0.095968261,
+          0.095987187,
+          0.096083319,
+          0.096118595
+        ]
+      ]
+    },
+    {
+      "nx": 18,
+      "ny": 9,
+      "pressure_dofs": 190,
+      "velocity_dofs": 1406,
+      "iterations_embedded_pressure": [
+        88,
+        82
+      ],
+      "before_seconds_embedded_pressure": [
+        0.120375321,
+        0.129230901
+      ],
+      "after_seconds_embedded_pressure": [
+        0.11672531,
+        0.120974086
+      ],
+      "speedup_embedded_pressure": [
+        1.0312700904371126,
+        1.0682527578674992
+      ],
+      "after_samples_seconds_embedded_pressure": [
+        [
+          0.116633987,
+          0.116652863,
+          0.11672531,
+          0.116781406,
+          0.116787317
+        ],
+        [
+          0.120898673,
+          0.1209338,
+          0.120974086,
+          0.120974737,
+          0.121022748
+        ]
+      ]
+    },
+    {
+      "nx": 24,
+      "ny": 12,
+      "pressure_dofs": 325,
+      "velocity_dofs": 2450,
+      "iterations_embedded_pressure": [
+        102,
+        78
+      ],
+      "before_seconds_embedded_pressure": [
+        0.149081253,
+        0.141252036
+      ],
+      "after_seconds_embedded_pressure": [
+        0.144603214,
+        0.130564358
+      ],
+      "speedup_embedded_pressure": [
+        1.0309677694992312,
+        1.0818575464523021
+      ],
+      "after_samples_seconds_embedded_pressure": [
+        [
+          0.144490191,
+          0.144523894,
+          0.144603214,
+          0.14463805,
+          0.144688225
+        ],
+        [
+          0.130408363,
+          0.130441946,
+          0.130564358,
+          0.130586319,
+          0.130589706
+        ]
+      ]
+    },
+    {
+      "nx": 36,
+      "ny": 18,
+      "pressure_dofs": 703,
+      "velocity_dofs": 5402,
+      "iterations_embedded_pressure": [
+        135,
+        119
+      ],
+      "before_seconds_embedded_pressure": [
+        0.213489105,
+        0.252582639
+      ],
+      "after_seconds_embedded_pressure": [
+        0.206854874,
+        0.231212972
+      ],
+      "speedup_embedded_pressure": [
+        1.0320719104738136,
+        1.0924241698688082
+      ],
+      "after_samples_seconds_embedded_pressure": [
+        [
+          0.206781945,
+          0.206813676,
+          0.206854874,
+          0.206872287,
+          0.206896313
+        ],
+        [
+          0.231167777,
+          0.2311689,
+          0.231212972,
+          0.231249381,
+          0.23128552
+        ]
+      ]
+    }
+  ],
+  "validation": {
+    "cpu_preconditioner_tests_passed": 339,
+    "cpu_doctests_ignored": 1,
+    "bdf_native_tests_passed": 5,
+    "bdf_native_seconds": 57.67,
+    "independent_cycle_suite_tests_passed": 2,
+    "independent_cycle_suite_seconds": 12.46,
+    "memcheck_errors": 0,
+    "independent_reference": "Complex64 scalar recurrence and full V/W/F cycles, Jacobi/L1Jacobi/Chebyshev, pre-sweeps 0/1/3, post-sweeps 2, three changed RHS passes with two columns, NaN output sentinel. At least three hierarchy levels; no attached coarse direct factor.",
+    "independent_reference_tolerance": "3e-12 * (1 + abs(reference))",
+    "warm_cycle_host_transfer_bytes": 0,
+    "warm_cycle_memory_stats_unchanged": true,
+    "warm_bdf_device_allocations": 0,
+    "root_cargo_check": "pass",
+    "root_cargo_clippy": "pass",
+    "cuda_preconditioner_tests_clippy": "pass with existing warnings"
+  },
+  "profile_comparison": {
+    "scope": "Same 703-pressure-DOF test: two pressure-only physical steps and one embedded layout-switch solve, including setup. Profile timings excluded from benchmark.",
+    "csr_action_kernel_instances_before": 13905,
+    "csr_action_kernel_instances_after": 12660,
+    "axpy_instances_before": 29778,
+    "axpy_instances_after": 27288,
+    "scal_instances_before": 12489,
+    "scal_instances_after": 11244,
+    "cudaLaunchKernel_calls_before": 70815,
+    "cudaLaunchKernel_calls_after": 64590,
+    "report": "cuda-chebyshev-zero-profile-2026-10-21.csv"
+  },
+  "source_sha256": {
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda.rs": "de245c2ee072c00201de5baa13410e31ca53b128465a62978b5774543076a24d",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/pressure.rs": "6efd0dce8058bb15def45cdf4b096aa2d22b24dbf2024e6be0299b8d97cb6b66",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/tests.rs": "d031f048e005f207f06abd5040d0ecd071410fafda8c184fd2ca7088e57624eb",
+    "crates/sonium-fem/src/physics/fluid/stokes/navier_stokes.rs": "e89152c2de9bd234cef549959d1668283638fcdd8c73640c16825e08d7a9588e",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/mod.rs": "5d2adaa10d50de7d928ee095966a0caee2581e2786ec1067b5d3f3b4073e9998",
+    "crates/sonium-compute/src/cuda/cublas.rs": "bf33f2bf121a25c2a989d13d8b71edb8ca7ae1f6aa0b7fa6111fa10d09c65edc",
+    "crates/sonium-compute/src/cuda/kernels/local_kernels.cu": "cde14f49c28c85fb029c89031db85dba21b621bea21666069f625be25ed29570",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/backend_zero_tests.rs": "4b0d560bd277201ab91bdc0e76e2ad07566b69ccb8aaa664955ea4477e099875"
+  },
+  "limitations": [
+    "Four bounded 2D BDF fixtures, test profile opt-level 2; not a universal FEM speedup.",
+    "Baseline and candidate each use alternating layout ordering; candidate measured after baseline rather than interleaving binaries.",
+    "Pressure-only layout stays opt-in: it loses on three of four sizes even after optimization.",
+    "Full workflow still includes host assembly, hierarchy setup and history state."
+  ]
+}

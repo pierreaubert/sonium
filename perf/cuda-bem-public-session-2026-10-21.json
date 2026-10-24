@@ -1,0 +1,162 @@
+{
+  "date": "2026-10-21",
+  "scope": "Explicit BemSolver::prepare_cuda public producer integration for small constant Tri3 scattering",
+  "working_tree": true,
+  "source_sha256": {
+    "crates/sonium-bem/src/core/bem_solver.rs": "c49b5ce833c365dbbd08b2aee22ae07ef63a107e6966191e4e5e06dfe164aac8",
+    "crates/sonium-bem/src/core/bem_solver_cuda.rs": "ace9bf2de673841f0268009e5032f73268f620d4d3d3153a7e74dd240e9962f7",
+    "crates/sonium-bem/src/core/bem_solver_cuda_tests.rs": "adc0d59d2da6954e07837984d891711447dafdf3ced718204570d93c08c01d98",
+    "crates/sonium-bem/src/core/assembly/tbem_device.rs": "ba9e0f6b48f928cc09f10894869ee3a17ea3dab8ecbbaa696ea1dc17bf874a5b"
+  },
+  "fixture_panels": 80,
+  "runs": [
+    {
+      "boundary": "Rigid",
+      "burton_miller": false,
+      "pass_index": 0,
+      "relative_residual": 3.7050298560945906e-16,
+      "surface_relative_error": 7.548538502381361e-16,
+      "allocations": 9,
+      "h2d_bytes": 39680,
+      "tracked_d2h_bytes": 20
+    },
+    {
+      "boundary": "Rigid",
+      "burton_miller": false,
+      "pass_index": 1,
+      "relative_residual": 3.4876639007370545e-16,
+      "surface_relative_error": 6.6113447180577365e-16,
+      "allocations": 0,
+      "h2d_bytes": 14080,
+      "tracked_d2h_bytes": 20
+    },
+    {
+      "boundary": "Rigid",
+      "burton_miller": false,
+      "pass_index": 2,
+      "relative_residual": 3.743229524853852e-16,
+      "surface_relative_error": 7.328917231872083e-16,
+      "allocations": 0,
+      "h2d_bytes": 14080,
+      "tracked_d2h_bytes": 12
+    },
+    {
+      "boundary": "Rigid",
+      "burton_miller": true,
+      "pass_index": 0,
+      "relative_residual": 4.998050336460995e-16,
+      "surface_relative_error": 7.696454621582085e-16,
+      "allocations": 8,
+      "h2d_bytes": 39680,
+      "tracked_d2h_bytes": 20
+    },
+    {
+      "boundary": "Rigid",
+      "burton_miller": true,
+      "pass_index": 1,
+      "relative_residual": 5.502693725384549e-16,
+      "surface_relative_error": 8.840279114775344e-16,
+      "allocations": 0,
+      "h2d_bytes": 14080,
+      "tracked_d2h_bytes": 20
+    },
+    {
+      "boundary": "Rigid",
+      "burton_miller": true,
+      "pass_index": 2,
+      "relative_residual": 5.483947710342806e-16,
+      "surface_relative_error": 8.588298478921337e-16,
+      "allocations": 0,
+      "h2d_bytes": 14080,
+      "tracked_d2h_bytes": 12
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": false,
+      "pass_index": 0,
+      "relative_residual": 4.253307075617029e-16,
+      "surface_relative_error": 6.412905087189817e-16,
+      "allocations": 8,
+      "h2d_bytes": 39680,
+      "tracked_d2h_bytes": 20
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": false,
+      "pass_index": 1,
+      "relative_residual": 4.183299923794795e-16,
+      "surface_relative_error": 6.935482564154756e-16,
+      "allocations": 0,
+      "h2d_bytes": 14080,
+      "tracked_d2h_bytes": 20
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": false,
+      "pass_index": 2,
+      "relative_residual": 4.490015602389068e-16,
+      "surface_relative_error": 7.601743980371145e-16,
+      "allocations": 0,
+      "h2d_bytes": 14080,
+      "tracked_d2h_bytes": 12
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": true,
+      "pass_index": 0,
+      "relative_residual": 5.847230709812438e-16,
+      "surface_relative_error": 7.927794327522621e-16,
+      "allocations": 8,
+      "h2d_bytes": 39680,
+      "tracked_d2h_bytes": 20
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": true,
+      "pass_index": 1,
+      "relative_residual": 7.52129025827301e-16,
+      "surface_relative_error": 8.932416118386936e-16,
+      "allocations": 0,
+      "h2d_bytes": 14080,
+      "tracked_d2h_bytes": 20
+    },
+    {
+      "boundary": "Impedance",
+      "burton_miller": true,
+      "pass_index": 2,
+      "relative_residual": 7.041207168152675e-16,
+      "surface_relative_error": 9.366986815467167e-16,
+      "allocations": 0,
+      "h2d_bytes": 14080,
+      "tracked_d2h_bytes": 12
+    }
+  ],
+  "native_memcheck_output": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest core::bem_solver::cuda::tests::native_public_cuda_session_matches_cpu_fields_and_reuses_factors ... public CUDA BEM boundary=Rigid BM=false pass=0 residual=0.00000000000000037050298560945906 surface_error=0.0000000000000007548538502381361 allocations=9 h2d=39680 d2h=20\npublic CUDA BEM boundary=Rigid BM=false pass=1 residual=0.00000000000000034876639007370545 surface_error=0.00000000000000066113447180577365 allocations=0 h2d=14080 d2h=20\npublic CUDA BEM boundary=Rigid BM=false pass=2 residual=0.0000000000000003743229524853852 surface_error=0.0000000000000007328917231872083 allocations=0 h2d=14080 d2h=12\npublic CUDA BEM boundary=Rigid BM=true pass=0 residual=0.0000000000000004998050336460995 surface_error=0.0000000000000007696454621582085 allocations=8 h2d=39680 d2h=20\npublic CUDA BEM boundary=Rigid BM=true pass=1 residual=0.0000000000000005502693725384549 surface_error=0.0000000000000008840279114775344 allocations=0 h2d=14080 d2h=20\npublic CUDA BEM boundary=Rigid BM=true pass=2 residual=0.0000000000000005483947710342806 surface_error=0.0000000000000008588298478921337 allocations=0 h2d=14080 d2h=12\npublic CUDA BEM boundary=Impedance BM=false pass=0 residual=0.0000000000000004253307075617029 surface_error=0.0000000000000006412905087189817 allocations=8 h2d=39680 d2h=20\npublic CUDA BEM boundary=Impedance BM=false pass=1 residual=0.0000000000000004183299923794795 surface_error=0.0000000000000006935482564154756 allocations=0 h2d=14080 d2h=20\npublic CUDA BEM boundary=Impedance BM=false pass=2 residual=0.0000000000000004490015602389068 surface_error=0.0000000000000007601743980371145 allocations=0 h2d=14080 d2h=12\npublic CUDA BEM boundary=Impedance BM=true pass=0 residual=0.0000000000000005847230709812438 surface_error=0.0000000000000007927794327522621 allocations=8 h2d=39680 d2h=20\npublic CUDA BEM boundary=Impedance BM=true pass=1 residual=0.000000000000000752129025827301 surface_error=0.0000000000000008932416118386936 allocations=0 h2d=14080 d2h=20\npublic CUDA BEM boundary=Impedance BM=true pass=2 residual=0.0000000000000007041207168152675 surface_error=0.0000000000000009366986815467167 allocations=0 h2d=14080 d2h=12\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 551 filtered out; finished in 3.46s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "lower_level_regression_output": "\nrunning 1 test\ntest core::assembly::tbem::cuda_path::device::tests::native_device_tbem_mixed_boundaries_and_reuse ... BEM resident solve pass=0 residual=0.0000000000000012516297963438634 allocations=8 h2d=38400 d2h=20\nBEM resident solve pass=1 residual=0.0000000000000013237492663647552 allocations=0 h2d=12800 d2h=20\nBEM resident solve pass=2 residual=0.000000000000001168433991514559 allocations=0 h2d=12800 d2h=20\nBEM resident solve pass=3 residual=0.0000000000000011805745583690245 allocations=0 h2d=12800 d2h=12\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 551 filtered out; finished in 1.03s\n\n",
+  "coverage": [
+    "Rigid and impedance boundaries",
+    "Burton-Miller enabled and disabled",
+    "Frequency changes with retained numeric workspace",
+    "Incident-only LU factor reuse",
+    "Surface solution and three field points compared to CPU at 1e-9 tolerance",
+    "Changed geometry/quadrature rejection, unpublication and recovery",
+    "Compressed and higher-order requests rejected without dense substitution"
+  ],
+  "host_boundaries": [
+    "Incident field sampling and one n-vector upload each call",
+    "Boundary/material preparation and coefficient upload each call",
+    "Explicit solution download for existing host postprocessing",
+    "cuBLAS host-result norm scalars are additional to tracked explicit D2H bytes"
+  ],
+  "limitations": [
+    "Only small constant discontinuous Tri3 direct TBEM; other paths remain open",
+    "Per-session resource budgets explicitly rejected pending CUDA estimates; backend quota remains available",
+    "No whole-workflow GPU residency or elapsed-time speedup claim"
+  ],
+  "validation": {
+    "cpu_bem": "541 passed, 3 ignored",
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_bem_clippy": "passed with existing warnings"
+  }
+}

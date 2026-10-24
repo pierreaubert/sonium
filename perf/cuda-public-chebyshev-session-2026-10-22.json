@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-22",
+  "scope": "Persistent high-level GMRES+Chebyshev and one-shot facade dispatch with CPU-compatible real-SPD coefficient admission.",
+  "source_sha256": {
+    "crates/sonium-solvers/src/solve.rs": "b47a4cd90ae9b3cbf88e8fcbef1416217f0e867a0559df9d2f58fe465d55db51",
+    "crates/sonium-solvers/src/solve/cuda_session.rs": "3e5019e6f807a8963bd601822544ec44ec1924652de15b410a84366331f4c8c8",
+    "crates/sonium-solvers/src/solve/cuda_session/preconditioner.rs": "29484353d662fb5c6550ed008023edbcf033bcf56f69a60064eeca28c4aa16e6",
+    "crates/sonium-solvers/src/solve/cuda_session/update.rs": "74c904a937d2a833a7a7a3352d72185fc941709b14ac29f172ee5579f96f118a",
+    "crates/sonium-solvers/src/solve/cuda_session/prepared.rs": "2aacc73df11db14b488cde7dbff5c689345fba936a0eb6c76591ceb580568630",
+    "crates/sonium-solvers/src/solve/cuda_session_tests.rs": "1914191f78d179423626d421314aabf7e52b5557a0560129631ed3ebb27480f3",
+    "crates/sonium-solvers/src/solve/cuda_session_refresh_tests.rs": "bcd90e1646c103ebb520e9a51bb16c31fd1b7029ab9922275acae4a3de3b89d3",
+    "crates/sonium-compute/src/preconditioner/chebyshev.rs": "3a47b8f8032034920d6b1f3a8e520e3f80fbe009f56a4f66daeac42a50a04330",
+    "crates/sonium-compute/src/preconditioner/matrix.rs": "ed07c433c26e1831186744a01554dc1db9b9cceca5079effa50d4fe0e3c6a627",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/chebyshev.rs": "1b89fb8ecc211b66d276f61ea096abad7b6755e45014d275e81654dfd3618007"
+  },
+  "binary_sha256": "b483a8e5060124343e5188a4c0301b5f7d581647e5410ab2e0249fb0f07e36b5",
+  "result": "\nrunning 7 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_chebyshev_rejects_nonreal_coefficients_before_upload ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 2.70s\n\n",
+  "memcheck": "========= COMPUTE-SANITIZER\n\nrunning 7 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_chebyshev_rejects_nonreal_coefficients_before_upload ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 22.50s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "contract": {
+    "scalars": [
+      "f32",
+      "f64",
+      "Complex32",
+      "Complex64"
+    ],
+    "coefficients": "real SPD (complex scalar storage and complex RHS allowed); non-real Hermitian coefficients remain rejected like CPU Chebyshev",
+    "polynomial": "same default degree 5, eigenvalue ratio 30 and checked host spectral estimate as CPU facade",
+    "retention": "owns preconditioner CSR and reusable polynomial/Krylov scratch",
+    "numeric_refresh": "fixed canonical sparsity; validate/reestimate bound before upload; copy updated physical device values to retained preconditioner and refresh diagonal; no temporary GPU allocation",
+    "failures": "failed validation hides output and warm start; interrupted upload blocks solves until repaired",
+    "extra_storage": "preconditioner owns an additional CSR copy; no physical/preconditioner aliasing"
+  },
+  "validation": {
+    "cpu_facade_tests": 117,
+    "native_tests": 7,
+    "memcheck_errors": 0,
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_tests_clippy": "passed with existing warnings",
+    "warm_solve_allocations": 0,
+    "numeric_refresh_allocations": 0,
+    "numeric_refresh_d2h_bytes": 0
+  },
+  "limitations": [
+    "No speedup claim or comparison benchmark in this increment.",
+    "Host coefficient assembly, validation and spectral estimation remain setup/update work.",
+    "Only single forward facade solves; block/adjoint and producer migration remain open.",
+    "Full workflow coverage is incomplete.",
+    "Separate older BEM scattering sanitizer remains live and pending."
+  ]
+}

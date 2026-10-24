@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-22",
+  "scope": "Retained native dense point-Jacobi preconditioning",
+  "working_tree_required": true,
+  "public_api": "CudaDenseJacobi::try_new / try_update with DevicePreconditioner scalar and block application",
+  "scalars": [
+    "f32",
+    "f64",
+    "Complex32",
+    "Complex64"
+  ],
+  "validation": {
+    "native_tests_passed": 2,
+    "memcheck_tests_passed": 2,
+    "memcheck_errors": 0,
+    "cpu_compute_passed": 655,
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_compute_clippy": "passed with existing warnings; none in dense_diagonal"
+  },
+  "assertions": [
+    "Three successive numeric states match host division for two RHS columns in each scalar type",
+    "Every measured refresh plus block apply has zero device allocations and zero H2D bytes",
+    "Zero-diagonal update disables application",
+    "Injected launch failure disables application after backend recovery until a successful refresh",
+    "Successful refresh repairs failed state"
+  ],
+  "limits": [
+    "Point Jacobi only; no claim that it is sufficient for arbitrary indefinite problems",
+    "Integration with the retained BEM GMRES sweep remains open",
+    "No performance speedup claimed",
+    "The independent BEM scattering sanitizer run is still pending"
+  ],
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/dense_diagonal.rs": "54f7c9135cd01c4047932850391a1e7349cddfc703d591be867c167e10fe8e5c",
+    "crates/sonium-compute/src/cuda/cublas.rs": "3fde82c4b47ab0324218485e428fd91d17f1ad39aeb677504d0e2f2c9419af93",
+    "crates/sonium-compute/src/cuda/mod.rs": "47731681c5218df015215a827f1d66f16ce8cb768feef97f30665a255f53e55c",
+    "crates/sonium-compute/src/lib.rs": "9d0ff3d237e53089393ac07c29a3e0e091573563c925b97155d34f4bd9a6fe8b"
+  },
+  "logs": [
+    "/tmp/dense-jacobi-native.log",
+    "/tmp/dense-jacobi-memcheck.log",
+    "/tmp/dense-jacobi-cpu.log",
+    "/tmp/dense-jacobi-check.log",
+    "/tmp/dense-jacobi-clippy.log",
+    "/tmp/dense-jacobi-cuda-clippy.log"
+  ]
+}

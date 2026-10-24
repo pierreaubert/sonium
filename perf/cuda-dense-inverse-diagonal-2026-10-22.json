@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-22",
+  "scope": "Native dense inverse-diagonal extraction for retained preconditioner refresh",
+  "working_tree_required": true,
+  "scalars": [
+    "f32",
+    "f64",
+    "Complex32",
+    "Complex64"
+  ],
+  "validation": {
+    "native_tests_passed": 1,
+    "memcheck_tests_passed": 1,
+    "memcheck_errors": 0,
+    "cpu_compute_tests_passed": 655,
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_compute_clippy": "passed with existing warnings; no dense_diagonal warnings"
+  },
+  "assertions": [
+    "Padded square dense layout produces correct inverse for all four scalar types",
+    "Repeated calls allocate no device memory and transfer zero H2D bytes",
+    "Zero and epsilon-small diagonals reject",
+    "NaN and infinite complex diagonal reject",
+    "Scaled complex reciprocal handles components of magnitude 1e300",
+    "Inconsistent leading dimension rejects"
+  ],
+  "limits": [
+    "Only diagonal values validated; output unspecified after errors",
+    "Runtime local and validation kernels required; no host fallback",
+    "Caller owns output storage",
+    "Not yet connected to a persistent iterative BEM sweep",
+    "No speedup claim"
+  ],
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/dense_diagonal.rs": "76a01a9db8fb62f259bc42d6e3efd35020130c7b10ed22e100fd7ae2e42a0c0d",
+    "crates/sonium-compute/src/cuda/cublas.rs": "f189759659ac878c6ed54903b2cbc25bc7f010740798dc873184e0dc8cb17a7d",
+    "crates/sonium-compute/src/cuda/kernels/local_kernels.cu": "95a502429f1b8db17e6ceabe511bb876a325e10fe3853cb79212df71a0c8b3d8"
+  },
+  "logs": [
+    "/tmp/dense-diagonal-native-final.log",
+    "/tmp/dense-diagonal-memcheck.log",
+    "/tmp/dense-diagonal-cpu.log",
+    "/tmp/dense-diagonal-check-final.log",
+    "/tmp/dense-diagonal-clippy-final.log",
+    "/tmp/dense-diagonal-cuda-clippy-final.log"
+  ]
+}

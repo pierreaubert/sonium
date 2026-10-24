@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-22",
+  "scope": "Device-output callback for retained CUDA TBEM frequency sweeps",
+  "sources_sha256": {
+    "crates/sonium-bem/src/core/solver/frequency_sweep_cuda.rs": "2b6c23582bc73b6c7e3f1db466e09e6cf9aa373c58b1fce0a5b4887d27da2f72",
+    "crates/sonium-bem/src/core/solver/frequency_sweep.rs": "9ab624f9e1724b06ebb6434af5d1da756bb02994535739af2cf3c0e2870d8293"
+  },
+  "native": {
+    "passed": 1,
+    "log": "/tmp/cuda-sweep-device-native.log",
+    "checks": [
+      "28 exported and 28 device-output physical frequency solves",
+      "callback current frequency and admittance metadata",
+      "device copies match exports within relative 1e-10",
+      "callback copies have zero H2D/D2H and allocations",
+      "no returned surface vectors or download time in device-output mode",
+      "callback error stops after first call"
+    ]
+  },
+  "memcheck": {
+    "errors": 0,
+    "log": "/tmp/cuda-sweep-device-memcheck.log"
+  },
+  "cpu_bem": {
+    "passed": 541,
+    "ignored": 3,
+    "log": "/tmp/cuda-sweep-device-cpu.log"
+  },
+  "checks": [
+    "root cargo check passed",
+    "root cargo clippy passed with warnings",
+    "CUDA BEM clippy passed without modified-file warnings"
+  ],
+  "limitations": [
+    "No new field evaluator integration in this increment",
+    "Callbacks may choose to stage data; residency is their responsibility",
+    "Native solver still transfers compact convergence/control data",
+    "NumCalc continues using host export and CPU fields",
+    "No new speedup claim"
+  ]
+}

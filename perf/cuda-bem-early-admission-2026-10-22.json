@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-22",
+  "scope": "Early common GMRES runtime admission for retained BEM sessions",
+  "implementation": {
+    "public_producers": [
+      "dense point-Jacobi GMRES",
+      "Hmatrix scalar/action preparation",
+      "MLFMM scattering preparation"
+    ],
+    "lower_level": [
+      "CudaTbemGmresSession::try_new",
+      "MlfmmSystem::try_prepare_cuda_solve"
+    ],
+    "checks": "preserve pending context error, then validate_backend_krylov<Complex64>(Gmres, require_native=true) before expensive preparation",
+    "representation_dependencies": "existing FMM/incident and representation-specific validators remain required"
+  },
+  "native_preflight": {
+    "result": "passed for dense GMRES, Hmatrix and MLFMM terminal poisoned contexts",
+    "allocation_operations": 0,
+    "kernel_launches": 0,
+    "library_operations": 0,
+    "transfer_bytes": 0,
+    "error": "original synchronization error preserved; recovery correctly rejects terminal context"
+  },
+  "validation": {
+    "preflight": "1 passed /tmp/bem-preflight-native.log",
+    "healthy_dispatch_parity_retention_recovery": "1 passed /tmp/bem-preflight-parity.log",
+    "healthy_dense_gmres": "1 passed /tmp/bem-preflight-dense-gmres.log",
+    "preflight_memcheck": "1 passed, zero errors /tmp/bem-preflight-memcheck.log",
+    "cpu_bem": "541 passed, 3 ignored /tmp/bem-preflight-cpu.log",
+    "root_check": "passed /tmp/bem-preflight-root-check.log",
+    "root_clippy": "passed with existing warnings /tmp/bem-preflight-root-clippy.log",
+    "cuda_check": "passed /tmp/bem-preflight-check.log",
+    "cuda_clippy": "passed with existing warnings /tmp/bem-preflight-cuda-clippy.log"
+  },
+  "limitations": [
+    "Checks shared scalar GMRES dependency contract; not a proof of every arbitrary operator, preconditioner or block dependency.",
+    "Native regression exercises terminal context admission, not dynamically missing CUDA modules.",
+    "The separate 1000-panel Auto memcheck remains running in session 1162 and is not covered by this result.",
+    "No measured speedup."
+  ],
+  "source_sha256": {
+    "crates/sonium-bem/src/core/bem_solver_cuda.rs": "cd0c9b3956279ef70a3336fec8442028d636f333e75bf2f5e406915bfcaab660",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix.rs": "82531e271859237980239862ace5dccbb071e187a1b356ef27ac2b43a8af8928",
+    "crates/sonium-bem/src/core/bem_solver_cuda_mlfmm.rs": "2eb27f25d56c18ca2c2c8b5707739c937378f9ade1780455b7b8bdfbfa68d450",
+    "crates/sonium-bem/src/core/bem_solver_cuda_gmres.rs": "ee59c33dc61c3d379c498e7461b25e3e9204de83be8d431e0ab0d5df5dd0022a",
+    "crates/sonium-bem/src/core/assembly/mlfmm_cuda.rs": "422cfabd7c64bb1202271e16423a9055d43e356dab18f5e001980da4a5eb11bb",
+    "crates/sonium-bem/src/core/assembly/tbem_gmres.rs": "ff796e58d35770c17b58579bd9fe2867c13df7f02ba2e19813170137da0c2a56",
+    "crates/sonium-bem/src/core/bem_solver_cuda_scattering_tests.rs": "e5c3d1ca96eaea5578664831aac0744f9b0a2ef2e9309a61d88129a286047759"
+  }
+}

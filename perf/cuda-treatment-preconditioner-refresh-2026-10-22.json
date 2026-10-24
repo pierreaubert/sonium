@@ -1,0 +1,90 @@
+{
+  "date": "2026-10-22",
+  "scope": "Explicit configured FEM preconditioner replacement and staged room-treatment refresh",
+  "source_sha256": {
+    "crates/sonium-fem/src/solver/device/configured.rs": "105217003dfa8f291af56f3b3c7bca5db1d665903df0bfa9d6254dec6f540a2f",
+    "crates/sonium-fem/src/solver/device/tests/configured.rs": "31ffcd59538f571f69b4f46e15f2f8bf81e26922475458fd1557399366a94b07",
+    "crates/sonium-fem/src/solver/device.rs": "50992559d5f56d5047e2176cdbc75ccd2d288ac2d66769719386004b978442f5",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda.rs": "1d941119f4a9896e9415e5afc1c62af6bdcd8e9625f50ed44271c3cc69c5eb07",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda/multifrequency.rs": "4f996e5e2e78f366a6683c144264a36a8df8206375a59e5ea921b271ffb4ff9c",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda/tests.rs": "1e5e89579bb44d9b6f755747ed49a144cbf0edb1a8cef7e7fccd20ecbeeb312f"
+  },
+  "binaries": {
+    "target/debug/deps/sonium_fem-29b7e38cb22668e9": "4922fdf7f375025404274626400c927634f3f0d95f905696117601a24ca6368d",
+    "target/debug/deps/sonium_sim_room-e8de7d292c6c8339": "3e28ab948e12701d61d854dfbd9845384ca495c48771f4495abbdf88f25def19"
+  },
+  "contract": {
+    "candidate": "Canonical finite CSR pattern validation; host setup and new GPU action allocation; synchronize before return; installed state unchanged",
+    "commit": "Configured FEM replacement unpublishes output and retains warm-start eligibility; physical operator/RHS/Krylov state unchanged",
+    "room": "Prepare forward and Hermitian candidates before either installation",
+    "band": "Prepare every frequency pair before committing any; failed candidate construction drops staged replacements",
+    "policy": "Explicit requested-design refresh; no automatic heuristic or in-place factor update"
+  },
+  "validation": {
+    "configured_fem": "All five strategies on P1/P2; dimension/value-count/NaN candidates reject without upload/allocation and preserve publication; refresh and previous-solution solve preserve solution-buffer object identity",
+    "room": "ILU and configured Schwarz on single and three-frequency problems; injected setup H2D failure retains installed state; successful refresh at [0.6,0.1] unpublishes fields, preserves solution-buffer objects and restores CPU objective/gradient parity with zero subsequent backend allocations",
+    "failure_injection_scope": "First candidate upload; all-or-none commit ordering additionally verified by source inspection, not an injected late-frequency failure"
+  },
+  "results": {
+    "fem_native": "2 passed",
+    "room_native": "2 passed",
+    "fem_memcheck": "2 passed, 0 errors",
+    "room_memcheck": "2 passed, 0 errors",
+    "cpu": "FEM 1964 passed, 1 ignored; room 331 passed, 1 ignored",
+    "pipeline": "12 passed",
+    "check": "passed",
+    "clippy": "passed with existing warnings",
+    "cuda_clippy": "passed with existing warnings",
+    "inventory": "22 packages; 1357 source units; freshness passed",
+    "registry": "40 retained-dispatch rows, zero complete; validator and 10 tests passed"
+  },
+  "logs": {
+    "build": {
+      "path": "/tmp/room-refresh-build.log",
+      "sha256": "fa293c9eb7d76ca202adaeea604a7b183cf8c17e4fe21767a85c76ac80c52a2d"
+    },
+    "fem_native": {
+      "path": "/tmp/room-refresh-fem-native.log",
+      "sha256": "8543d8f465818a8626136a0d18c77aad6b0c60ef33d82a2ebf15135e7227ac2f"
+    },
+    "room_native": {
+      "path": "/tmp/room-refresh-room-native.log",
+      "sha256": "8a64d4beeac23f61aa27049c5eef4dd31e0f0810bff3701da944c2e3ac14cbf4"
+    },
+    "fem_memcheck": {
+      "path": "/tmp/room-refresh-fem-memcheck.log",
+      "sha256": "7f568d99114941be2189f01c8d2dfa93180c2f548cb5776812a8dc15a6eb7cc1"
+    },
+    "room_memcheck": {
+      "path": "/tmp/room-refresh-room-memcheck.log",
+      "sha256": "6da1da1540ab165082c0911435aa2b4d5785b872572843d276fbd74bd30e8857"
+    },
+    "cpu": {
+      "path": "/tmp/room-refresh-cpu.log",
+      "sha256": "5f7f29509166c46c1a3298d5d4ea64da36fea36f02ca2f824dd348bda4443a8d"
+    },
+    "pipeline": {
+      "path": "/tmp/room-refresh-pipeline.log",
+      "sha256": "94229a75795006ccd0a285669efcaef174ca04714b7af64e1ebef2dda5ab0ef0"
+    },
+    "check": {
+      "path": "/tmp/room-refresh-check.log",
+      "sha256": "ef01c97c27b28c34254b1c772dd25cfd9b130179674f025d465decbf2f01ca09"
+    },
+    "clippy": {
+      "path": "/tmp/room-refresh-clippy.log",
+      "sha256": "9e80c05e6541d96fb8c37b17643d311510dbc5748873786f8fea7650acbe9b04"
+    },
+    "cuda_clippy": {
+      "path": "/tmp/room-refresh-cuda-clippy.log",
+      "sha256": "56d0a7fb25d67035dc7b1e9a304917e7e112d00c157c9b04f03b1e0f74b54482"
+    }
+  },
+  "limitations": [
+    "Refresh performs host factor/hierarchy preparation and allocates new preconditioners",
+    "Peak memory includes old and all staged new preconditioners",
+    "Existing backend quota policy for owned sparse/preconditioner allocations remains",
+    "No automatic refresh heuristic, timing comparison or speedup claim",
+    "No CLI routing or project-wide CUDA completion"
+  ]
+}

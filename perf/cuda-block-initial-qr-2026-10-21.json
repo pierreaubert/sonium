@@ -1,0 +1,380 @@
+{
+  "schema_version": 1,
+  "scope": "Device initial residual, norms, active-column extraction and QR",
+  "source_sha256": {
+    "crates/sonium-compute/src/block_krylov.rs": "1b8db447f5df67c51cbf8caa0cba98c966b5df4655e4d3e53e359da8cc9eb821",
+    "crates/sonium-compute/src/block_krylov/initial_qr_tests.rs": "20e2e00532c395d292178510cad8068ffe4fafce5106078c43f608306320d986",
+    "crates/sonium-compute/tests/block_fallback_workspace.rs": "72d7072197889d3f7275d88a5df65431579d641e656d89d05a6b3f18879f294d"
+  },
+  "before": {
+    "artifact": "sonium-sim-room.sr1-cuda",
+    "backend": {
+      "actual": "cuda",
+      "fallback_status": "none",
+      "host_architecture": "x86_64",
+      "precision": "f32-pure",
+      "requested": "cuda"
+    },
+    "cancellation": {
+      "mid_frequency_interrupt": "not-exercised",
+      "pre_setup_test": "cuda_cancellation_rejects_before_device_setup",
+      "status": "frequency-boundary cooperative"
+    },
+    "frequency_stats": [
+      {
+        "allocation_high_water_bytes": 363167,
+        "allocation_operations": 247,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 80.0,
+        "inner_iterations": 0,
+        "iterations": 112,
+        "max_residual": 2.4991725488069387e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 189808,
+          "d2d_operations": 523,
+          "d2h_bytes": 125740,
+          "d2h_operations": 246,
+          "h2d_bytes": 10412,
+          "h2d_operations": 21
+        }
+      },
+      {
+        "allocation_high_water_bytes": 364191,
+        "allocation_operations": 5,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 100.0,
+        "inner_iterations": 0,
+        "iterations": 114,
+        "max_residual": 2.284326154688888e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 191296,
+          "d2d_operations": 527,
+          "d2h_bytes": 126440,
+          "d2h_operations": 247,
+          "h2d_bytes": 9064,
+          "h2d_operations": 14
+        }
+      },
+      {
+        "allocation_high_water_bytes": 365246,
+        "allocation_operations": 8,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 120.0,
+        "inner_iterations": 0,
+        "iterations": 116,
+        "max_residual": 1.9403449649604e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 192784,
+          "d2d_operations": 531,
+          "d2h_bytes": 127660,
+          "d2h_operations": 250,
+          "h2d_bytes": 10092,
+          "h2d_operations": 17
+        }
+      },
+      {
+        "allocation_high_water_bytes": 365246,
+        "allocation_operations": 5,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 140.0,
+        "inner_iterations": 0,
+        "iterations": 120,
+        "max_residual": 1.654564053433542e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 198768,
+          "d2d_operations": 547,
+          "d2h_bytes": 131240,
+          "d2h_operations": 257,
+          "h2d_bytes": 9064,
+          "h2d_operations": 14
+        }
+      }
+    ],
+    "memory": {
+      "device_free_bytes": 100485300224,
+      "device_total_bytes": 102014189568,
+      "estimated_peak_bytes": 222536
+    },
+    "parity": {
+      "candidate_backend": "cuda-f32-block-rhs",
+      "max_relative_error": 1.5678062945050825e-05,
+      "reference_backend": "cpu-f64",
+      "rms_relative_error": 4.459545058328167e-06,
+      "sample_count": 16
+    },
+    "schema_version": 1,
+    "setup_transfer": {
+      "d2d_bytes": 0,
+      "d2d_operations": 0,
+      "d2h_bytes": 1556,
+      "d2h_operations": 5,
+      "h2d_bytes": 46692,
+      "h2d_operations": 25
+    },
+    "status": "passed",
+    "total_transfer": {
+      "d2d_bytes": 772656,
+      "d2d_operations": 2128,
+      "d2h_bytes": 511080,
+      "d2h_operations": 1000,
+      "h2d_bytes": 38632,
+      "h2d_operations": 66
+    },
+    "workload": "f32-pure-block-rhs"
+  },
+  "after": {
+    "artifact": "sonium-sim-room.sr1-cuda",
+    "backend": {
+      "actual": "cuda",
+      "fallback_status": "none",
+      "host_architecture": "x86_64",
+      "precision": "f32-pure",
+      "requested": "cuda"
+    },
+    "cancellation": {
+      "mid_frequency_interrupt": "not-exercised",
+      "pre_setup_test": "cuda_cancellation_rejects_before_device_setup",
+      "status": "frequency-boundary cooperative"
+    },
+    "frequency_stats": [
+      {
+        "allocation_high_water_bytes": 363175,
+        "allocation_operations": 249,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 80.0,
+        "inner_iterations": 0,
+        "iterations": 112,
+        "max_residual": 2.4991725488069387e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 205168,
+          "d2d_operations": 552,
+          "d2h_bytes": 123692,
+          "d2h_operations": 244,
+          "h2d_bytes": 7340,
+          "h2d_operations": 18
+        }
+      },
+      {
+        "allocation_high_water_bytes": 364199,
+        "allocation_operations": 5,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 100.0,
+        "inner_iterations": 0,
+        "iterations": 114,
+        "max_residual": 2.284326154688888e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 206656,
+          "d2d_operations": 556,
+          "d2h_bytes": 124392,
+          "d2h_operations": 245,
+          "h2d_bytes": 5992,
+          "h2d_operations": 11
+        }
+      },
+      {
+        "allocation_high_water_bytes": 365254,
+        "allocation_operations": 8,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 120.0,
+        "inner_iterations": 0,
+        "iterations": 116,
+        "max_residual": 1.9403449649604e-07,
+        "preconditioner_age": 0,
+        "preconditioner_rebuild_reason": "scheduled",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 208144,
+          "d2d_operations": 560,
+          "d2h_bytes": 125612,
+          "d2h_operations": 248,
+          "h2d_bytes": 7020,
+          "h2d_operations": 14
+        }
+      },
+      {
+        "allocation_high_water_bytes": 365254,
+        "allocation_operations": 5,
+        "block_solve": {
+          "correction_steps": 1,
+          "status": "accepted"
+        },
+        "converged": true,
+        "fallback_stage": 0,
+        "frequency_hz": 140.0,
+        "inner_iterations": 0,
+        "iterations": 120,
+        "max_residual": 1.654564053433542e-07,
+        "preconditioner_age": 1,
+        "preconditioner_rebuild_reason": "cached",
+        "retries": 0,
+        "synchronization_calls": 1,
+        "transfer": {
+          "d2d_bytes": 214128,
+          "d2d_operations": 576,
+          "d2h_bytes": 129192,
+          "d2h_operations": 255,
+          "h2d_bytes": 5992,
+          "h2d_operations": 11
+        }
+      }
+    ],
+    "memory": {
+      "device_free_bytes": 100485300224,
+      "device_total_bytes": 102014189568,
+      "estimated_peak_bytes": 222536
+    },
+    "parity": {
+      "candidate_backend": "cuda-f32-block-rhs",
+      "max_relative_error": 1.5678062945050825e-05,
+      "reference_backend": "cpu-f64",
+      "rms_relative_error": 4.459545058328167e-06,
+      "sample_count": 16
+    },
+    "schema_version": 1,
+    "setup_transfer": {
+      "d2d_bytes": 0,
+      "d2d_operations": 0,
+      "d2h_bytes": 1556,
+      "d2h_operations": 5,
+      "h2d_bytes": 46692,
+      "h2d_operations": 25
+    },
+    "status": "passed",
+    "total_transfer": {
+      "d2d_bytes": 834096,
+      "d2d_operations": 2244,
+      "d2h_bytes": 502888,
+      "d2h_operations": 992,
+      "h2d_bytes": 26344,
+      "h2d_operations": 54
+    },
+    "workload": "f32-pure-block-rhs"
+  },
+  "qr_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest block_krylov::initial_qr_tests::cpu_initial_qr_reconstructs_and_clears_all_scalars ... ok\ntest block_krylov::initial_qr_tests::cuda_initial_qr_reconstructs_and_clears_all_scalars ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 731 filtered out; finished in 0.51s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "fallback_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 3 tests\ntest fallback_pool_rejects_wrong_backend_and_reports_quota_failure ... ok\ntest cpu_dependent_blocks_reuse_scalar_workspace_all_scalars ... ok\ntest cuda_dependent_blocks_reuse_scalar_workspace_all_scalars ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "production_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest cuda_fem_block_rhs_publishes_physical_ledgers ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 2.69s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "limitations": [
+    "Validating input finiteness still downloads full RHS and supplied initial guess",
+    "A zero initial guess is still uploaded",
+    "Small QR and Krylov coefficient data remain on the host",
+    "No matched wall-clock timing claim"
+  ],
+  "native_lanes": [
+    {
+      "test_filter": "cuda_fem_",
+      "environment": {
+        "SONIUM_SIM_ROOM_F32_RESIDENT_ARTIFACT": "/tmp/f32-certified-room.json"
+      },
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-0.log",
+      "output": "\nrunning 4 tests\ntest cuda_fem_block_rhs_publishes_physical_ledgers ... ok\ntest cuda_fem_f32_scalar_four_frequency_reuses_krylov_workspace ... ok\ntest cuda_fem_four_frequency_resident_state_reuses_preconditioner ... ok\ntest cuda_fem_matches_cpu_backend_with_checked_parity_budget ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 1.43s\n\n"
+    },
+    {
+      "test_filter": "cuda_cancellation_rejects_before_device_setup",
+      "environment": {},
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-1.log",
+      "output": "\nrunning 1 test\ntest cuda_cancellation_rejects_before_device_setup ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s\n\n"
+    },
+    {
+      "test_filter": "cuda_mid_frequency_cancellation_is_typed_and_does_not_publish_partial_result",
+      "environment": {
+        "SONIUM_SIM_ROOM_SR1_CANCEL_FREQUENCY": "0"
+      },
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-2.log",
+      "output": "\nrunning 1 test\ntest cuda_mid_frequency_cancellation_is_typed_and_does_not_publish_partial_result ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.53s\n\n"
+    },
+    {
+      "test_filter": "cuda_resident_mid_frequency_cancellation_retries_after_warm_state",
+      "environment": {
+        "SONIUM_SIM_ROOM_SR1_RESIDENT_CANCEL_FREQUENCY": "2"
+      },
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-3.log",
+      "output": "\nrunning 1 test\ntest cuda_resident_mid_frequency_cancellation_retries_after_warm_state ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.71s\n\n"
+    },
+    {
+      "test_filter": "cuda_injected_launch_failure_is_typed_unwound_and_retryable",
+      "environment": {
+        "SONIUM_SIM_ROOM_SR1_FAILURE_POINT": "launch",
+        "SONIUM_SIM_ROOM_SR1_FAILURE_ARTIFACT": "/tmp/f32-certified-launch-failure.json",
+        "SONIUM_SIM_ROOM_SR1_FAILURE_RETRY_ARTIFACT": "/tmp/f32-certified-launch-retry.json"
+      },
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-4.log",
+      "output": "\nrunning 1 test\ntest cuda_injected_launch_failure_is_typed_unwound_and_retryable ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.65s\n\n"
+    },
+    {
+      "test_filter": "cuda_injected_device_loss_requires_recreated_context_and_retries",
+      "environment": {
+        "SONIUM_SIM_ROOM_SR1_FAILURE_POINT": "device-loss",
+        "SONIUM_SIM_ROOM_SR1_FAILURE_ARTIFACT": "/tmp/f32-certified-device-loss-failure.json",
+        "SONIUM_SIM_ROOM_SR1_FAILURE_RETRY_ARTIFACT": "/tmp/f32-certified-device-loss-retry.json"
+      },
+      "exit_code": 0,
+      "log": "/tmp/f32-certified-lane-5.log",
+      "output": "\nrunning 1 test\ntest cuda_injected_device_loss_requires_recreated_context_and_retries ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.65s\n\n"
+    }
+  ]
+}

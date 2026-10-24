@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-22",
+  "scope": "Retained dense CUDA TBEM GMRES quadrature schedule refresh",
+  "sources_sha256": {
+    "crates/sonium-bem/src/core/assembly/tbem_gmres.rs": "55e92972ec16ccc001cdf8a65315eb8a00f395681859fe1493222e78f8460739",
+    "crates/sonium-bem/src/core/bem_solver_cuda_gmres.rs": "00df7e4c714e2d746841abe8421f214f90666b6cd79b9b86e46eb1270173203e"
+  },
+  "native": {
+    "tests_passed": 2,
+    "log": "/tmp/tbem-schedule-native.log"
+  },
+  "memcheck": {
+    "tests_passed": 2,
+    "errors": 0,
+    "log": "/tmp/tbem-schedule-memcheck.log"
+  },
+  "cpu_bem": {
+    "passed": 541,
+    "ignored": 3,
+    "log": "/tmp/tbem-schedule-cpu.log"
+  },
+  "checks": {
+    "root_check": "passed",
+    "root_clippy": "passed with warnings",
+    "cuda_bem_clippy": "passed; no modified-file warnings"
+  },
+  "coverage": {
+    "mesh": "20-panel unit icosphere",
+    "ka": [
+      0.1,
+      0.11,
+      0.5,
+      0.51,
+      1.2,
+      1.21,
+      2.2,
+      2.21,
+      0.1,
+      0.11
+    ],
+    "cpu_relative_residual_gate": 1e-07,
+    "same_schedule_warm_allocations": 0,
+    "rebuilds_before_failure_test": 4,
+    "rebuilds_after_recovery": 5,
+    "failure": "injected launch during schedule replacement; output and previous-solution access invalidated; zero-start recovery succeeds"
+  },
+  "limitations": [
+    "dense constant Tri3 only, fewer than 1000 DOFs",
+    "point Jacobi convergence is problem dependent",
+    "replacement temporarily retains old and new assembly workspaces",
+    "legacy assembly allocations remain outside pool quotas",
+    "host boundary coefficient uploads remain",
+    "does not yet connect NumCalc or GCRO-DR",
+    "no performance speedup claim"
+  ]
+}

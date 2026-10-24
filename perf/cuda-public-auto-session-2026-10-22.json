@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-22",
+  "scope": "Auto resolves to retained facade strategies using the existing CPU size/scalar selection rule.",
+  "source_sha256": {
+    "crates/sonium-solvers/src/solve.rs": "4ad541d17c6398fe658008646d6e062912c282b324e1a7e786ad8d0f8a9e357f",
+    "crates/sonium-solvers/src/solve/cuda_session.rs": "9ca050e5d547a48bc6002be50b6f84673e65d9b222c6a086609d5deeb09c6b19",
+    "crates/sonium-solvers/src/solve/cuda_session/preconditioner.rs": "d3c1c2eaf1bbd98b586a61a8af13ffed2fb5f74c84f044d9cbcbfbe450d08dcd",
+    "crates/sonium-solvers/src/solve/cuda_session/update.rs": "78f3ff9a1a786eb64f7e98af416401a010576c5ef89381ff9cc1e2db1bb00f90",
+    "crates/sonium-solvers/src/solve/cuda_session/prepared.rs": "2aacc73df11db14b488cde7dbff5c689345fba936a0eb6c76591ceb580568630",
+    "crates/sonium-solvers/src/solve/cuda_session_tests.rs": "ca50cbb7fdc9d887f22da17f42844c1fcf341d9d758e59261a9b50c17fc4c7df",
+    "crates/sonium-solvers/src/solve/cuda_session_refresh_tests.rs": "5b0635c9631ce49473a3b6deca1751d6f463bb152f8d49710e32bd1e577cec41",
+    "crates/sonium-compute/src/preconditioner/chebyshev.rs": "3a47b8f8032034920d6b1f3a8e520e3f80fbe009f56a4f66daeac42a50a04330",
+    "crates/sonium-compute/src/preconditioner/matrix.rs": "ed07c433c26e1831186744a01554dc1db9b9cceca5079effa50d4fe0e3c6a627",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/chebyshev.rs": "1b89fb8ecc211b66d276f61ea096abad7b6755e45014d275e81654dfd3618007",
+    "crates/sonium-compute/src/cuda/cublas.rs": "53e30ccbbb9fcd6b15927cf67a596610dc818b7da3f129165b4694078cfa337f",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/cuda_ilu.rs": "227e4de67573595567ee711daf446d308789a37357ace799626657dd197fa1c2",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/ilu.rs": "d021f2abc4c0fe5f00d8e6bd5d2ccc71123019b6256240c5de0c5710438a00ce",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/lib.rs": "b92b6be33d5d32bf2f9974e6dc58f8287663eb7d3b270f107f182b3a89a3beb9",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/cuda_schwarz.rs": "15cb2ec4ad9a6a9d7000975667c66fc4942957aabeffdf5822caee2c0926da6b",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/schwarz.rs": "961a1a96eccc8699888a7d9f05a89ab491645fea66a100e45f2b5d0df55688ad",
+    "crates/sonium-solvers/src/solve/cuda_prepared_tests.rs": "9475b174e70327e4d6817d4d1fa39598067028bdccd0e31cacd56e0ff9ed8b9c"
+  },
+  "binary_sha256": "73e698eec2a5a9cca036c2d58b5457e2595b287a2e824dfa2c931b8e5893f3a6",
+  "result": "\nrunning 8 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_chebyshev_rejects_nonreal_coefficients_before_upload ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_auto_large_real_and_complex_selection ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 123 filtered out; finished in 4.34s\n\n",
+  "prepared_native": "\nrunning 2 tests\ntest solve::cuda_prepared_tests::native_cuda_prepared_fgmres_variable_action_all_scalars ... ok\ntest solve::cuda_prepared_tests::native_cuda_prepared_policy_rejection_and_recovery ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 129 filtered out; finished in 0.54s\n\n",
+  "memcheck": "========= COMPUTE-SANITIZER\n\nrunning 8 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_chebyshev_rejects_nonreal_coefficients_before_upload ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_auto_large_real_and_complex_selection ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 123 filtered out; finished in 39.46s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "contract": {
+    "selection": "small systems and large real systems use GMRES+ILU; large complex scalar storage uses FGMRES+Schwarz, including real-valued coefficients",
+    "thresholds": "existing SONIUM_LARGE_PROBLEM_ROWS/NNZ settings; absent in native validation environment (defaults 50000 rows, 500000 nnz)",
+    "lifetime": "resolve once at construction, retain selected strategy through numeric updates; create a new session to re-evaluate policy",
+    "provenance": "requested_strategy/selected_strategy return named choices; caller-prepared FGMRES returns None for both",
+    "algorithm_variant": "CUDA resident standard/flexible Krylov; CPU optional pipelined-GMRES variant remains unimplemented on CUDA"
+  },
+  "validation": {
+    "cpu_facade_tests": 117,
+    "native_public_tests": 8,
+    "native_prepared_tests": 2,
+    "memcheck_public_tests": 8,
+    "memcheck_errors": 0,
+    "large_fixture": "50000-row signed diagonal real coefficients in all four scalar representations; no SPD assertion, complex RHS supported",
+    "reuse": "large and small Auto compatible refresh and warm solves allocate zero device buffers; selected strategy retained",
+    "one_shot": "Auto with CPU fallback forbidden executes CUDA for all four scalar types",
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_tests_clippy": "passed with existing warnings"
+  },
+  "limitations": [
+    "No speedup claim.",
+    "Native large-system fixture crosses the row threshold; an independent nnz-only crossover fixture remains to be added.",
+    "CPU optional pipelined-GMRES variant remains a separate CUDA gap.",
+    "Block/adjoint, broader physics/application producers and full coverage remain open.",
+    "Separate older BEM scattering sanitizer remains pending."
+  ]
+}

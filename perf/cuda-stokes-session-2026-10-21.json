@@ -1,0 +1,275 @@
+{
+  "date": "2026-10-21",
+  "scope": "Owned host-CSR Schur preconditioner connected to retained generic FEM sessions using production Taylor-Hood assembly",
+  "hardware": "RTX PRO 6000 Blackwell Workstation Edition, driver 610.57.04",
+  "source_sha256": {
+    "crates/sonium-compute/src/preconditioner/saddle_point.rs": "cb87e915fc045c2235d8bdd3fddaf77b6f6fbee20b7ef6a7ad2746ce503a2463",
+    "crates/sonium-compute/tests/saddle_owned.rs": "1d90001a537ba226442596ea10157d4f025bd356333a16fba96e13f159977793",
+    "crates/sonium-fem/src/solver/device.rs": "a22784f523ee9946f98c0375090509df48848cdbbe2349b4e5e3243368e5d646",
+    "crates/sonium-fem/src/solver/device/tests.rs": "4a6ff39abb441fa3b48c891be7539ca60c1f3e32b888965267c2b3c5f51c9ca3",
+    "crates/sonium-fem/src/solver/device/tests/stokes.rs": "eb3b32c2662a44cbb0567ea2843b8ea94d3ebb657f290435cbaf399af61f88d8"
+  },
+  "problem": {
+    "velocity": "P2, u=(y*(1-y),0)",
+    "pressure": "P1, p=1-x with first pressure DOF pinned",
+    "viscosity": 1.0,
+    "body_force": [
+      1.0,
+      0.0
+    ],
+    "rhs": "Independent production body-force integration plus nonzero Dirichlet lifting",
+    "subdivisions": [
+      3,
+      6
+    ],
+    "rhs_amplitudes": [
+      1.0,
+      -0.5,
+      1.5
+    ]
+  },
+  "solver": {
+    "method": "FGMRES",
+    "restart": 60,
+    "max_iterations": 800,
+    "tolerance": 1e-11,
+    "preconditioner": "Owned upper-triangular velocity Jacobi / negative pressure-mass Schur",
+    "velocity_degree": 4,
+    "pressure_degree": 4,
+    "damping": 0.6
+  },
+  "cases": [
+    {
+      "dofs": 114,
+      "action": "Forward",
+      "pass": 0,
+      "iterations": 32,
+      "allocations": 131,
+      "relative_residual": 2.1483131632006555e-12,
+      "velocity_max_error": 5.263955937806486e-12,
+      "pressure_max_error": 4.624480626998774e-10,
+      "weak_divergence_max_error": 1.1330172910994918e-12
+    },
+    {
+      "dofs": 114,
+      "action": "Forward",
+      "pass": 1,
+      "iterations": 32,
+      "allocations": 0,
+      "relative_residual": 6.445197860035321e-12,
+      "velocity_max_error": 7.895822884407266e-12,
+      "pressure_max_error": 6.936696899477902e-10,
+      "weak_divergence_max_error": 1.6995224672022857e-12
+    },
+    {
+      "dofs": 114,
+      "action": "Forward",
+      "pass": 2,
+      "iterations": 32,
+      "allocations": 0,
+      "relative_residual": 2.8645275261962852e-12,
+      "velocity_max_error": 1.0528217186944744e-11,
+      "pressure_max_error": 9.249181406230001e-10,
+      "weak_divergence_max_error": 2.266145604501446e-12
+    },
+    {
+      "dofs": 114,
+      "action": "Transpose",
+      "pass": 0,
+      "iterations": 32,
+      "allocations": 128,
+      "relative_residual": 2.1483131632006555e-12,
+      "velocity_max_error": 5.263955937806486e-12,
+      "pressure_max_error": 4.624480626998774e-10,
+      "weak_divergence_max_error": 1.1330172910994918e-12
+    },
+    {
+      "dofs": 114,
+      "action": "Transpose",
+      "pass": 1,
+      "iterations": 32,
+      "allocations": 0,
+      "relative_residual": 6.445197860035321e-12,
+      "velocity_max_error": 7.895822884407266e-12,
+      "pressure_max_error": 6.936696899477902e-10,
+      "weak_divergence_max_error": 1.6995224672022857e-12
+    },
+    {
+      "dofs": 114,
+      "action": "Transpose",
+      "pass": 2,
+      "iterations": 32,
+      "allocations": 0,
+      "relative_residual": 2.8645275261962852e-12,
+      "velocity_max_error": 1.0528217186944744e-11,
+      "pressure_max_error": 9.249181406230001e-10,
+      "weak_divergence_max_error": 2.266145604501446e-12
+    },
+    {
+      "dofs": 114,
+      "action": "Hermitian",
+      "pass": 0,
+      "iterations": 32,
+      "allocations": 128,
+      "relative_residual": 2.1483131632006555e-12,
+      "velocity_max_error": 5.263955937806486e-12,
+      "pressure_max_error": 4.624480626998774e-10,
+      "weak_divergence_max_error": 1.1330172910994918e-12
+    },
+    {
+      "dofs": 114,
+      "action": "Hermitian",
+      "pass": 1,
+      "iterations": 32,
+      "allocations": 0,
+      "relative_residual": 6.445197860035321e-12,
+      "velocity_max_error": 7.895822884407266e-12,
+      "pressure_max_error": 6.936696899477902e-10,
+      "weak_divergence_max_error": 1.6995224672022857e-12
+    },
+    {
+      "dofs": 114,
+      "action": "Hermitian",
+      "pass": 2,
+      "iterations": 32,
+      "allocations": 0,
+      "relative_residual": 2.8645275261962852e-12,
+      "velocity_max_error": 1.0528217186944744e-11,
+      "pressure_max_error": 9.249181406230001e-10,
+      "weak_divergence_max_error": 2.266145604501446e-12
+    },
+    {
+      "dofs": 387,
+      "action": "Forward",
+      "pass": 0,
+      "iterations": 115,
+      "allocations": 129,
+      "relative_residual": 5.8970171743063394e-12,
+      "velocity_max_error": 2.4719231339932892e-11,
+      "pressure_max_error": 4.104152844154217e-09,
+      "weak_divergence_max_error": 2.4619984870244416e-12
+    },
+    {
+      "dofs": 387,
+      "action": "Forward",
+      "pass": 1,
+      "iterations": 116,
+      "allocations": 0,
+      "relative_residual": 7.61223636988427e-12,
+      "velocity_max_error": 1.3726866423306216e-11,
+      "pressure_max_error": 2.912998897652841e-09,
+      "weak_divergence_max_error": 1.883608862609857e-12
+    },
+    {
+      "dofs": 387,
+      "action": "Forward",
+      "pass": 2,
+      "iterations": 115,
+      "allocations": 0,
+      "relative_residual": 7.862668751717697e-12,
+      "velocity_max_error": 4.9438045543244316e-11,
+      "pressure_max_error": 8.208253534009759e-09,
+      "weak_divergence_max_error": 4.923950136515032e-12
+    },
+    {
+      "dofs": 387,
+      "action": "Transpose",
+      "pass": 0,
+      "iterations": 115,
+      "allocations": 129,
+      "relative_residual": 5.8970171743063394e-12,
+      "velocity_max_error": 2.4719231339932892e-11,
+      "pressure_max_error": 4.104152844154217e-09,
+      "weak_divergence_max_error": 2.4619984870244416e-12
+    },
+    {
+      "dofs": 387,
+      "action": "Transpose",
+      "pass": 1,
+      "iterations": 116,
+      "allocations": 0,
+      "relative_residual": 7.61223636988427e-12,
+      "velocity_max_error": 1.3726866423306216e-11,
+      "pressure_max_error": 2.912998897652841e-09,
+      "weak_divergence_max_error": 1.883608862609857e-12
+    },
+    {
+      "dofs": 387,
+      "action": "Transpose",
+      "pass": 2,
+      "iterations": 115,
+      "allocations": 0,
+      "relative_residual": 7.862668751717697e-12,
+      "velocity_max_error": 4.9438045543244316e-11,
+      "pressure_max_error": 8.208253534009759e-09,
+      "weak_divergence_max_error": 4.923950136515032e-12
+    },
+    {
+      "dofs": 387,
+      "action": "Hermitian",
+      "pass": 0,
+      "iterations": 115,
+      "allocations": 129,
+      "relative_residual": 5.8970171743063394e-12,
+      "velocity_max_error": 2.4719231339932892e-11,
+      "pressure_max_error": 4.104152844154217e-09,
+      "weak_divergence_max_error": 2.4619984870244416e-12
+    },
+    {
+      "dofs": 387,
+      "action": "Hermitian",
+      "pass": 1,
+      "iterations": 116,
+      "allocations": 0,
+      "relative_residual": 7.61223636988427e-12,
+      "velocity_max_error": 1.3726866423306216e-11,
+      "pressure_max_error": 2.912998897652841e-09,
+      "weak_divergence_max_error": 1.883608862609857e-12
+    },
+    {
+      "dofs": 387,
+      "action": "Hermitian",
+      "pass": 2,
+      "iterations": 115,
+      "allocations": 0,
+      "relative_residual": 7.862668751717697e-12,
+      "velocity_max_error": 4.9438045543244316e-11,
+      "pressure_max_error": 8.208253534009759e-09,
+      "weak_divergence_max_error": 4.923950136515032e-12
+    }
+  ],
+  "residency_assertions": {
+    "warm_preconditioner_allocations": 0,
+    "warm_preconditioner_h2d_bytes": 0,
+    "warm_preconditioner_d2h_bytes": 0,
+    "warm_rhs_update_allocations": 0,
+    "rhs_update_h2d_bytes": 0,
+    "rhs_update_d2h_bytes": 4,
+    "warm_solve_allocations": 0,
+    "note": "Input uploads and explicit output downloads are outside measured update/action intervals. Krylov control transfers remain; total session quota coverage is not claimed."
+  },
+  "validation": {
+    "owned_constructor_tests": "2 passed",
+    "compute_saddle_unit_tests": "9 passed",
+    "CPU_FEM_Stokes": "103 passed, 1 ignored",
+    "native_f32_f64_preconditioner": "2 passed, memcheck 0 errors",
+    "native_shared_FEM_suite": "6 passed, memcheck 0 errors",
+    "final_Stokes_with_preconditioner_residency_assertions": "1 passed / 18 solves, memcheck 0 errors",
+    "cargo_check": "passed",
+    "cargo_clippy": "passed with existing warnings",
+    "CUDA_compute_FEM_test_clippy": "passed with existing warnings; final FEM check repeated after test addition"
+  },
+  "logs": {
+    "final_stokes": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest solver::device::tests::stokes::native_generic_stokes_poiseuille_schur_reuses_rhs ... Stokes n=114 action=Forward pass=0 iterations=32 allocations=131 residual=0.0000000000021483131632006555 velocity=0.000000000005263955937806486 pressure=0.0000000004624480626998774 divergence=0.0000000000011330172910994918\nStokes n=114 action=Forward pass=1 iterations=32 allocations=0 residual=0.000000000006445197860035321 velocity=0.000000000007895822884407266 pressure=0.0000000006936696899477902 divergence=0.0000000000016995224672022857\nStokes n=114 action=Forward pass=2 iterations=32 allocations=0 residual=0.0000000000028645275261962852 velocity=0.000000000010528217186944744 pressure=0.0000000009249181406230001 divergence=0.000000000002266145604501446\nStokes n=114 action=Transpose pass=0 iterations=32 allocations=128 residual=0.0000000000021483131632006555 velocity=0.000000000005263955937806486 pressure=0.0000000004624480626998774 divergence=0.0000000000011330172910994918\nStokes n=114 action=Transpose pass=1 iterations=32 allocations=0 residual=0.000000000006445197860035321 velocity=0.000000000007895822884407266 pressure=0.0000000006936696899477902 divergence=0.0000000000016995224672022857\nStokes n=114 action=Transpose pass=2 iterations=32 allocations=0 residual=0.0000000000028645275261962852 velocity=0.000000000010528217186944744 pressure=0.0000000009249181406230001 divergence=0.000000000002266145604501446\nStokes n=114 action=Hermitian pass=0 iterations=32 allocations=128 residual=0.0000000000021483131632006555 velocity=0.000000000005263955937806486 pressure=0.0000000004624480626998774 divergence=0.0000000000011330172910994918\nStokes n=114 action=Hermitian pass=1 iterations=32 allocations=0 residual=0.000000000006445197860035321 velocity=0.000000000007895822884407266 pressure=0.0000000006936696899477902 divergence=0.0000000000016995224672022857\nStokes n=114 action=Hermitian pass=2 iterations=32 allocations=0 residual=0.0000000000028645275261962852 velocity=0.000000000010528217186944744 pressure=0.0000000009249181406230001 divergence=0.000000000002266145604501446\nStokes n=387 action=Forward pass=0 iterations=115 allocations=129 residual=0.0000000000058970171743063394 velocity=0.000000000024719231339932892 pressure=0.000000004104152844154217 divergence=0.0000000000024619984870244416\nStokes n=387 action=Forward pass=1 iterations=116 allocations=0 residual=0.00000000000761223636988427 velocity=0.000000000013726866423306216 pressure=0.000000002912998897652841 divergence=0.000000000001883608862609857\nStokes n=387 action=Forward pass=2 iterations=115 allocations=0 residual=0.000000000007862668751717697 velocity=0.000000000049438045543244316 pressure=0.000000008208253534009759 divergence=0.000000000004923950136515032\nStokes n=387 action=Transpose pass=0 iterations=115 allocations=129 residual=0.0000000000058970171743063394 velocity=0.000000000024719231339932892 pressure=0.000000004104152844154217 divergence=0.0000000000024619984870244416\nStokes n=387 action=Transpose pass=1 iterations=116 allocations=0 residual=0.00000000000761223636988427 velocity=0.000000000013726866423306216 pressure=0.000000002912998897652841 divergence=0.000000000001883608862609857\nStokes n=387 action=Transpose pass=2 iterations=115 allocations=0 residual=0.000000000007862668751717697 velocity=0.000000000049438045543244316 pressure=0.000000008208253534009759 divergence=0.000000000004923950136515032\nStokes n=387 action=Hermitian pass=0 iterations=115 allocations=129 residual=0.0000000000058970171743063394 velocity=0.000000000024719231339932892 pressure=0.000000004104152844154217 divergence=0.0000000000024619984870244416\nStokes n=387 action=Hermitian pass=1 iterations=116 allocations=0 residual=0.00000000000761223636988427 velocity=0.000000000013726866423306216 pressure=0.000000002912998897652841 divergence=0.000000000001883608862609857\nStokes n=387 action=Hermitian pass=2 iterations=115 allocations=0 residual=0.000000000007862668751717697 velocity=0.000000000049438045543244316 pressure=0.000000008208253534009759 divergence=0.000000000004923950136515032\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1946 filtered out; finished in 25.55s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "shared_FEM": "========= COMPUTE-SANITIZER\n\nrunning 6 tests\ntest solver::device::tests::native_generic_admission_precedes_assembly ... ok\ntest solver::device::tests::native_generic_elasticity_pcg_amg_reuses_system ... generic FEM LinearElasticity action=Forward pass=0 iterations=42 allocations=4 residual=0.0000000004182984751400384\ngeneric FEM LinearElasticity action=Forward pass=1 iterations=40 allocations=0 residual=0.0000000009681733165240556\ngeneric FEM LinearElasticity action=Forward pass=2 iterations=41 allocations=0 residual=0.0000000008786846237591757\ngeneric FEM LinearElasticity action=Transpose pass=0 iterations=42 allocations=4 residual=0.0000000004182986487101373\ngeneric FEM LinearElasticity action=Transpose pass=1 iterations=40 allocations=0 residual=0.0000000009681732822941798\ngeneric FEM LinearElasticity action=Transpose pass=2 iterations=41 allocations=0 residual=0.0000000008786847069928625\ngeneric FEM LinearElasticity action=Hermitian pass=0 iterations=42 allocations=4 residual=0.0000000004182986487101373\ngeneric FEM LinearElasticity action=Hermitian pass=1 iterations=40 allocations=0 residual=0.0000000009681732822941798\ngeneric FEM LinearElasticity action=Hermitian pass=2 iterations=41 allocations=0 residual=0.0000000008786847069928625\nok\ntest solver::device::tests::native_generic_helmholtz_fgmres_shifted_amg_reuses_system ... generic FEM Helmholtz action=Forward pass=0 iterations=19 allocations=131 residual=0.00000000010753278376175532\ngeneric FEM Helmholtz action=Forward pass=1 iterations=18 allocations=0 residual=0.0000000007167020833747367\ngeneric FEM Helmholtz action=Forward pass=2 iterations=18 allocations=0 residual=0.00000000093304654111305\ngeneric FEM Helmholtz action=Hermitian pass=0 iterations=19 allocations=128 residual=0.00000000010753278376175532\ngeneric FEM Helmholtz action=Hermitian pass=1 iterations=18 allocations=0 residual=0.0000000007167020833747367\ngeneric FEM Helmholtz action=Hermitian pass=2 iterations=18 allocations=0 residual=0.00000000093304654111305\ngeneric FEM Helmholtz action=Forward pass=0 iterations=21 allocations=128 residual=0.00000000029151334462243255\ngeneric FEM Helmholtz action=Forward pass=1 iterations=21 allocations=0 residual=0.00000000038404834192129187\ngeneric FEM Helmholtz action=Forward pass=2 iterations=20 allocations=0 residual=0.0000000008062182718508296\ngeneric FEM Helmholtz action=Hermitian pass=0 iterations=21 allocations=128 residual=0.00000000029151334462243255\ngeneric FEM Helmholtz action=Hermitian pass=1 iterations=21 allocations=0 residual=0.00000000038404834192129187\ngeneric FEM Helmholtz action=Hermitian pass=2 iterations=20 allocations=0 residual=0.0000000008062182718508296\nok\ntest solver::device::tests::native_generic_malformed_system_rejected_before_upload ... ok\ntest solver::device::tests::native_generic_nonsymmetric_action_contract ... generic FEM Maxwell action=Forward pass=0 iterations=2 allocations=0 residual=0.00000000000000027781317796657784\ngeneric FEM Maxwell action=Forward pass=1 iterations=2 allocations=0 residual=0.00000000000000027497116097897406\ngeneric FEM Maxwell action=Forward pass=2 iterations=2 allocations=0 residual=0.0000000000000001178499294185919\ngeneric FEM Maxwell action=Transpose pass=0 iterations=2 allocations=0 residual=0.00000000000000005585328120300579\ngeneric FEM Maxwell action=Transpose pass=1 iterations=2 allocations=0 residual=0.000000000000000010773989224278287\ngeneric FEM Maxwell action=Transpose pass=2 iterations=2 allocations=0 residual=0.0000000000000000097740819511255\ngeneric FEM Maxwell action=Hermitian pass=0 iterations=2 allocations=0 residual=0.00000000000000005585328120300579\ngeneric FEM Maxwell action=Hermitian pass=1 iterations=2 allocations=0 residual=0.000000000000000010773989224278287\ngeneric FEM Maxwell action=Hermitian pass=2 iterations=2 allocations=0 residual=0.0000000000000000097740819511255\nok\ntest solver::device::tests::stokes::native_generic_stokes_poiseuille_schur_reuses_rhs ... Stokes n=114 action=Forward pass=0 iterations=32 allocations=131 residual=0.0000000000021483131632006555 velocity=0.000000000005263955937806486 pressure=0.0000000004624480626998774 divergence=0.0000000000011330172910994918\nStokes n=114 action=Forward pass=1 iterations=32 allocations=0 residual=0.000000000006445197860035321 velocity=0.000000000007895822884407266 pressure=0.0000000006936696899477902 divergence=0.0000000000016995224672022857\nStokes n=114 action=Forward pass=2 iterations=32 allocations=0 residual=0.0000000000028645275261962852 velocity=0.000000000010528217186944744 pressure=0.0000000009249181406230001 divergence=0.000000000002266145604501446\nStokes n=114 action=Transpose pass=0 iterations=32 allocations=128 residual=0.0000000000021483131632006555 velocity=0.000000000005263955937806486 pressure=0.0000000004624480626998774 divergence=0.0000000000011330172910994918\nStokes n=114 action=Transpose pass=1 iterations=32 allocations=0 residual=0.000000000006445197860035321 velocity=0.000000000007895822884407266 pressure=0.0000000006936696899477902 divergence=0.0000000000016995224672022857\nStokes n=114 action=Transpose pass=2 iterations=32 allocations=0 residual=0.0000000000028645275261962852 velocity=0.000000000010528217186944744 pressure=0.0000000009249181406230001 divergence=0.000000000002266145604501446\nStokes n=114 action=Hermitian pass=0 iterations=32 allocations=128 residual=0.0000000000021483131632006555 velocity=0.000000000005263955937806486 pressure=0.0000000004624480626998774 divergence=0.0000000000011330172910994918\nStokes n=114 action=Hermitian pass=1 iterations=32 allocations=0 residual=0.000000000006445197860035321 velocity=0.000000000007895822884407266 pressure=0.0000000006936696899477902 divergence=0.0000000000016995224672022857\nStokes n=114 action=Hermitian pass=2 iterations=32 allocations=0 residual=0.0000000000028645275261962852 velocity=0.000000000010528217186944744 pressure=0.0000000009249181406230001 divergence=0.000000000002266145604501446\nStokes n=387 action=Forward pass=0 iterations=115 allocations=129 residual=0.0000000000058970171743063394 velocity=0.000000000024719231339932892 pressure=0.000000004104152844154217 divergence=0.0000000000024619984870244416\nStokes n=387 action=Forward pass=1 iterations=116 allocations=0 residual=0.00000000000761223636988427 velocity=0.000000000013726866423306216 pressure=0.000000002912998897652841 divergence=0.000000000001883608862609857\nStokes n=387 action=Forward pass=2 iterations=115 allocations=0 residual=0.000000000007862668751717697 velocity=0.000000000049438045543244316 pressure=0.000000008208253534009759 divergence=0.000000000004923950136515032\nStokes n=387 action=Transpose pass=0 iterations=115 allocations=129 residual=0.0000000000058970171743063394 velocity=0.000000000024719231339932892 pressure=0.000000004104152844154217 divergence=0.0000000000024619984870244416\nStokes n=387 action=Transpose pass=1 iterations=116 allocations=0 residual=0.00000000000761223636988427 velocity=0.000000000013726866423306216 pressure=0.000000002912998897652841 divergence=0.000000000001883608862609857\nStokes n=387 action=Transpose pass=2 iterations=115 allocations=0 residual=0.000000000007862668751717697 velocity=0.000000000049438045543244316 pressure=0.000000008208253534009759 divergence=0.000000000004923950136515032\nStokes n=387 action=Hermitian pass=0 iterations=115 allocations=129 residual=0.0000000000058970171743063394 velocity=0.000000000024719231339932892 pressure=0.000000004104152844154217 divergence=0.0000000000024619984870244416\nStokes n=387 action=Hermitian pass=1 iterations=116 allocations=0 residual=0.00000000000761223636988427 velocity=0.000000000013726866423306216 pressure=0.000000002912998897652841 divergence=0.000000000001883608862609857\nStokes n=387 action=Hermitian pass=2 iterations=115 allocations=0 residual=0.000000000007862668751717697 velocity=0.000000000049438045543244316 pressure=0.000000008208253534009759 divergence=0.000000000004923950136515032\nok\n\ntest result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 1941 filtered out; finished in 47.37s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "compute_schur": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest native_cuda_saddle_preconditioner_f32_matches_cpu_without_action_staging ... ok\ntest native_cuda_saddle_preconditioner_matches_cpu_without_action_staging ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.66s\n\n========= ERROR SUMMARY: 0 errors\n"
+  },
+  "limitations": [
+    "Host geometry, forms, BC lifting and pressure mass setup remain.",
+    "Navier-Stokes/BDF application lifecycle has not yet migrated to the retained session.",
+    "This real symmetric fixture exercises all three actions but does not distinguish transpose from Hermitian; a separate nonsymmetric complex test does.",
+    "Iteration growth from 32 to 115-116 is not mesh-independent convergence.",
+    "No elapsed-time speedup claim.",
+    "The new direct host-CSR constructor is f64; existing f32 device-input construction remains supported."
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "date": "2026-10-21",
+  "base_revision": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "state": "uncommitted working tree, final source hashes below",
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/fem_hex.rs": "f3f49041945ce407aa98af0ce7340f977aea3d762a0d9bdde861fd1705417454",
+    "crates/sonium-compute/src/cuda/fem_hex/material_tests.rs": "971ccdc18cb94469babd26e6a6ae46a2507fd17018453cc2c2042ae08801b5f2",
+    "crates/sonium-compute/src/cuda/kernels/fem_hex.cu": "a3c4beaf2f7b58a82f9e2a8b801f92d12378c29c21d9a8907e441a3d746a0d84",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_hex.rs": "320913976bfc6f1d4249d89db291900b5df6e45580935a52bb406953570ce34a",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_hex_solve.rs": "1dc48d8c0c779aa68fa5c05b77f019a69b35a2648ab00cb68c5e984173f50563",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_hex_solve/tests.rs": "6e2c570a7b0a82ec261e08bacd775bd002c949312745e9144ae0ad825bc14585"
+  },
+  "native_logs": {
+    "hex-material-native-compute.log": "========= COMPUTE-SANITIZER\n\nrunning 3 tests\ntest cuda::fem_hex::material_tests::native_material_updates_preserve_reference_and_residency ... ok\ntest cuda::fem_hex::tests::hex_partial_kernel_compiles_with_nvrtc ... ok\ntest cuda::fem_hex::tests::native_hex_partial_actions ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 728 filtered out; finished in 3.90s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "hex-material-native-fem.log": "\nrunning 2 tests\ntest physics::acoustics::pressure::device_hex_solve::tests::native_frequency_and_boundary_updates_certify_changed_system ... frequency sweep P2: k=0+0i, iterations=32, residual=0.0000000000635076279553105\nfrequency sweep P2: k=4+0.2i, iterations=45, residual=0.00000000006690099507547336\nfrequency sweep P2: k=6-0.1i, iterations=49, residual=0.0000000000516553454274357\nfrequency sweep P2: k=0+0i, iterations=33, residual=0.00000000004459387696318297\nfrequency sweep P3: k=0+0i, iterations=62, residual=0.00000000008535563243142446\nfrequency sweep P3: k=4+0.2i, iterations=165, residual=0.00000000009528003103805233\nfrequency sweep P3: k=6-0.1i, iterations=224, residual=0.00000000009989701486244595\nfrequency sweep P3: k=0+0i, iterations=65, residual=0.0000000000964680003673582\nok\ntest physics::acoustics::pressure::device_hex_solve::tests::native_session_boundaries_warm_start_and_failed_publication ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1933 filtered out; finished in 3.83s\n\n"
+  },
+  "validation": {
+    "cpu-compute": {
+      "path": "/tmp/hex-material-cpu-compute.log",
+      "tail": [
+        "test cpu::blas3::avx2::tests::avx2_m_fuse_matches_legacy_bitwise_f32 ... ok",
+        "test cpu::blas3::avx2::tests::avx2_nsplit_matches_scalar_with_tails ... ok",
+        "",
+        "test result: ok. 649 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.57s",
+        ""
+      ]
+    },
+    "cpu-fem": {
+      "path": "/tmp/hex-material-cpu-fem.log",
+      "tail": [
+        "test physics::acoustics::aeroacoustics::dg_lee::tests::structured_and_dg_solvers_agree_on_a_shared_packet ... ok",
+        "test physics::fluid::stokes::drag_shape_opt::tests::optimisation_reduces_drag_at_fixed_area ... ok",
+        "",
+        "test result: ok. 1921 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 23.71s",
+        ""
+      ]
+    },
+    "check": {
+      "path": "/tmp/hex-material-check.log",
+      "tail": [
+        "    Checking sonium-sim-propellers v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-sim-propellers)",
+        "    Checking sonium-sim-speaker-modeling v0.7.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-sim-speaker-modeling)",
+        "    Checking sonium-sim-speaker v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-sim-speaker)",
+        "    Checking sonium-qa v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-qa)",
+        "    Finished `dev` profile [optimized + debuginfo] target(s) in 36.69s"
+      ]
+    },
+    "clippy": {
+      "path": "/tmp/hex-material-clippy.log",
+      "tail": [
+        "",
+        "warning: `sonium-sim-structural-mechanics` (lib) generated 1 warning",
+        "    Checking sonium-sim-speaker v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-sim-speaker)",
+        "    Checking sonium-qa v0.2.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-qa)",
+        "    Finished `dev` profile [optimized + debuginfo] target(s) in 9.28s"
+      ]
+    },
+    "cuda-clippy": {
+      "path": "/tmp/hex-material-cuda-clippy.log",
+      "tail": [
+        "    |",
+        "    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#useless_vec",
+        "",
+        "warning: `sonium-fem` (lib test) generated 78 warnings (2 duplicates) (run `cargo clippy --fix --lib -p sonium-fem --tests -- ` to apply 40 suggestions)",
+        "    Finished `dev` profile [optimized + debuginfo] target(s) in 10.35s"
+      ]
+    },
+    "compute-cuda-clippy": {
+      "path": "/tmp/hex-material-compute-clippy.log",
+      "tail": [
+        "    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#chunks_exact_to_as_chunks",
+        "    = note: `#[warn(clippy::chunks_exact_to_as_chunks)]` on by default",
+        "",
+        "warning: `sonium-compute` (lib test) generated 15 warnings (run `cargo clippy --fix --lib -p sonium-compute --tests -- ` to apply 11 suggestions)",
+        "    Finished `dev` profile [optimized + debuginfo] target(s) in 4.75s"
+      ]
+    }
+  },
+  "commands": [
+    "SONIUM_REQUIRE_CUDA=1 compute-sanitizer --tool memcheck --error-exitcode 99 target/debug/deps/sonium_compute-ca3c6de78cf09182 cuda::fem_hex --test-threads=1",
+    "SONIUM_REQUIRE_CUDA=1 target/debug/deps/sonium_fem-c5be30da88304adc device_hex_solve --test-threads=1 --nocapture"
+  ],
+  "scope": [
+    "One launch lowers scalar complex diffusion and mass samples to seven weighted quadrature coefficients per point.",
+    "Counters exclude initial reference preparation and fixture uploads. Updates assert zero allocation and zero H2D/D2H/D2D bytes.",
+    "Full pressure solves retain Krylov control transfers; auxiliary AMG remains lagged until explicitly rebuilt.",
+    "Tests provide sample fields; application-specific device material evaluation and general anisotropic tensors remain open.",
+    "No wall-time performance claim."
+  ],
+  "gpu": {
+    "name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+    "driver": "610.57.04",
+    "memory_total_mib": 97887
+  }
+}

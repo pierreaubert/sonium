@@ -1,0 +1,182 @@
+{
+  "date": "2026-10-22",
+  "scope": "Generic host-assembled H1 tetrahedron P1/P2 Complex64 Helmholtz admission and retained CUDA FGMRES",
+  "source_sha256": {
+    "crates/sonium-fem/src/backend.rs": "70eab0eb484ecdb8ebccdf3bfd871d28e8c5234cbbb02471194e6657e2fd844d",
+    "crates/sonium-fem/src/solver/device.rs": "a22784f523ee9946f98c0375090509df48848cdbbe2349b4e5e3243368e5d646",
+    "crates/sonium-fem/src/solver/device/tests.rs": "e64cb260dcb50490edec2b7f2d1b511d6c7dec0a2a039a15d4e57e8045854533",
+    "crates/sonium-fem/src/solver/device/tests/tetrahedral.rs": "a8cf6aec9ff03fe6b87f4a23075b356db88272d00518f6c7957ad5c83526b469",
+    "crates/sonium-fem/tests/fem_cuda_admission.rs": "59de4e99594794b9135e72006442201241a732b84db4f798020341b8cf48d813"
+  },
+  "binary_sha256": "4336e4977ee209fe91648a9e79d509322ec10b5099218b5c416b17a7e95cb528",
+  "metrics": [
+    {
+      "degree": "P1",
+      "action": "Forward",
+      "pass_index": 0,
+      "iterations": 17,
+      "allocations": 132,
+      "relative_residual": 6.255486586987299e-10
+    },
+    {
+      "degree": "P1",
+      "action": "Forward",
+      "pass_index": 1,
+      "iterations": 18,
+      "allocations": 0,
+      "relative_residual": 7.884620240958534e-11
+    },
+    {
+      "degree": "P1",
+      "action": "Forward",
+      "pass_index": 2,
+      "iterations": 18,
+      "allocations": 0,
+      "relative_residual": 1.0908090824463063e-11
+    },
+    {
+      "degree": "P1",
+      "action": "Transpose",
+      "pass_index": 0,
+      "iterations": 17,
+      "allocations": 129,
+      "relative_residual": 6.255486586987299e-10
+    },
+    {
+      "degree": "P1",
+      "action": "Transpose",
+      "pass_index": 1,
+      "iterations": 18,
+      "allocations": 0,
+      "relative_residual": 7.884620240958534e-11
+    },
+    {
+      "degree": "P1",
+      "action": "Transpose",
+      "pass_index": 2,
+      "iterations": 18,
+      "allocations": 0,
+      "relative_residual": 1.0908090824463063e-11
+    },
+    {
+      "degree": "P1",
+      "action": "Hermitian",
+      "pass_index": 0,
+      "iterations": 17,
+      "allocations": 129,
+      "relative_residual": 6.255486586987299e-10
+    },
+    {
+      "degree": "P1",
+      "action": "Hermitian",
+      "pass_index": 1,
+      "iterations": 18,
+      "allocations": 0,
+      "relative_residual": 7.884620240958534e-11
+    },
+    {
+      "degree": "P1",
+      "action": "Hermitian",
+      "pass_index": 2,
+      "iterations": 18,
+      "allocations": 0,
+      "relative_residual": 1.0908090824463063e-11
+    },
+    {
+      "degree": "P2",
+      "action": "Forward",
+      "pass_index": 0,
+      "iterations": 27,
+      "allocations": 129,
+      "relative_residual": 5.141132006675347e-10
+    },
+    {
+      "degree": "P2",
+      "action": "Forward",
+      "pass_index": 1,
+      "iterations": 27,
+      "allocations": 0,
+      "relative_residual": 9.160869883891491e-10
+    },
+    {
+      "degree": "P2",
+      "action": "Forward",
+      "pass_index": 2,
+      "iterations": 27,
+      "allocations": 0,
+      "relative_residual": 6.100424636311062e-10
+    },
+    {
+      "degree": "P2",
+      "action": "Transpose",
+      "pass_index": 0,
+      "iterations": 27,
+      "allocations": 129,
+      "relative_residual": 5.141132006833104e-10
+    },
+    {
+      "degree": "P2",
+      "action": "Transpose",
+      "pass_index": 1,
+      "iterations": 27,
+      "allocations": 0,
+      "relative_residual": 9.16086954928716e-10
+    },
+    {
+      "degree": "P2",
+      "action": "Transpose",
+      "pass_index": 2,
+      "iterations": 27,
+      "allocations": 0,
+      "relative_residual": 6.100424907020015e-10
+    },
+    {
+      "degree": "P2",
+      "action": "Hermitian",
+      "pass_index": 0,
+      "iterations": 27,
+      "allocations": 129,
+      "relative_residual": 5.141132006833104e-10
+    },
+    {
+      "degree": "P2",
+      "action": "Hermitian",
+      "pass_index": 1,
+      "iterations": 27,
+      "allocations": 0,
+      "relative_residual": 9.16086954928716e-10
+    },
+    {
+      "degree": "P2",
+      "action": "Hermitian",
+      "pass_index": 2,
+      "iterations": 27,
+      "allocations": 0,
+      "relative_residual": 6.100424907020015e-10
+    }
+  ],
+  "validation": {
+    "native_tests": 2,
+    "memcheck_errors": 0,
+    "cpu_fem_tests": 1947,
+    "cpu_fem_ignored": 1,
+    "admission_integration_tests": 5,
+    "cargo_check": "passed",
+    "cargo_clippy": "passed with warnings",
+    "cuda_lib_tests_clippy": "passed with warnings"
+  },
+  "update_contract": {
+    "input": "already-resident device CSR values and RHS; host staging excluded",
+    "warm_allocations": 0,
+    "h2d_bytes": 0,
+    "d2h_validation_bytes": 8
+  },
+  "limitations": [
+    "Host assembly, constraints and AMG hierarchy setup remain host work",
+    "Fixed-pattern numeric scaling and changed RHS tested with lagged auxiliary AMG",
+    "No general scalar, topology, higher-order or generic matrix-free admission",
+    "No timing speedup measured"
+  ],
+  "native_log": "\nrunning 2 tests\ntest solver::device::tests::tetrahedral::native_tetrahedral_rejection_precedes_callbacks ... ok\ngeneric FEM Helmholtz action=Forward pass=0 iterations=17 allocations=132 residual=0.0000000006255486586987299\ngeneric FEM Helmholtz action=Forward pass=1 iterations=18 allocations=0 residual=0.00000000007884620240958534\ngeneric FEM Helmholtz action=Forward pass=2 iterations=18 allocations=0 residual=0.000000000010908090824463063\ngeneric tetrahedral P1 Forward passed\ngeneric FEM Helmholtz action=Transpose pass=0 iterations=17 allocations=129 residual=0.0000000006255486586987299\ngeneric FEM Helmholtz action=Transpose pass=1 iterations=18 allocations=0 residual=0.00000000007884620240958534\ngeneric FEM Helmholtz action=Transpose pass=2 iterations=18 allocations=0 residual=0.000000000010908090824463063\ngeneric tetrahedral P1 Transpose passed\ngeneric FEM Helmholtz action=Hermitian pass=0 iterations=17 allocations=129 residual=0.0000000006255486586987299\ngeneric FEM Helmholtz action=Hermitian pass=1 iterations=18 allocations=0 residual=0.00000000007884620240958534\ngeneric FEM Helmholtz action=Hermitian pass=2 iterations=18 allocations=0 residual=0.000000000010908090824463063\ngeneric tetrahedral P1 Hermitian passed\ngeneric FEM Helmholtz action=Forward pass=0 iterations=27 allocations=129 residual=0.0000000005141132006675347\ngeneric FEM Helmholtz action=Forward pass=1 iterations=27 allocations=0 residual=0.0000000009160869883891491\ngeneric FEM Helmholtz action=Forward pass=2 iterations=27 allocations=0 residual=0.0000000006100424636311062\ngeneric tetrahedral P2 Forward passed\ngeneric FEM Helmholtz action=Transpose pass=0 iterations=27 allocations=129 residual=0.0000000005141132006833104\ngeneric FEM Helmholtz action=Transpose pass=1 iterations=27 allocations=0 residual=0.000000000916086954928716\ngeneric FEM Helmholtz action=Transpose pass=2 iterations=27 allocations=0 residual=0.0000000006100424907020015\ngeneric tetrahedral P2 Transpose passed\ngeneric FEM Helmholtz action=Hermitian pass=0 iterations=27 allocations=129 residual=0.0000000005141132006833104\ngeneric FEM Helmholtz action=Hermitian pass=1 iterations=27 allocations=0 residual=0.000000000916086954928716\ngeneric FEM Helmholtz action=Hermitian pass=2 iterations=27 allocations=0 residual=0.0000000006100424907020015\ngeneric tetrahedral P2 Hermitian passed\ntest solver::device::tests::tetrahedral::native_generic_tetrahedral_helmholtz_admitted_actions ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1980 filtered out; finished in 0.95s\n\n",
+  "memcheck_log": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest solver::device::tests::tetrahedral::native_tetrahedral_rejection_precedes_callbacks ... ok\ngeneric FEM Helmholtz action=Forward pass=0 iterations=17 allocations=132 residual=0.0000000006255486586987299\ngeneric FEM Helmholtz action=Forward pass=1 iterations=18 allocations=0 residual=0.00000000007884620240958534\ngeneric FEM Helmholtz action=Forward pass=2 iterations=18 allocations=0 residual=0.000000000010908090824463063\ngeneric tetrahedral P1 Forward passed\ngeneric FEM Helmholtz action=Transpose pass=0 iterations=17 allocations=129 residual=0.0000000006255486586987299\ngeneric FEM Helmholtz action=Transpose pass=1 iterations=18 allocations=0 residual=0.00000000007884620240958534\ngeneric FEM Helmholtz action=Transpose pass=2 iterations=18 allocations=0 residual=0.000000000010908090824463063\ngeneric tetrahedral P1 Transpose passed\ngeneric FEM Helmholtz action=Hermitian pass=0 iterations=17 allocations=129 residual=0.0000000006255486586987299\ngeneric FEM Helmholtz action=Hermitian pass=1 iterations=18 allocations=0 residual=0.00000000007884620240958534\ngeneric FEM Helmholtz action=Hermitian pass=2 iterations=18 allocations=0 residual=0.000000000010908090824463063\ngeneric tetrahedral P1 Hermitian passed\ngeneric FEM Helmholtz action=Forward pass=0 iterations=27 allocations=129 residual=0.0000000005141132006675347\ngeneric FEM Helmholtz action=Forward pass=1 iterations=27 allocations=0 residual=0.0000000009160869883891491\ngeneric FEM Helmholtz action=Forward pass=2 iterations=27 allocations=0 residual=0.0000000006100424636311062\ngeneric tetrahedral P2 Forward passed\ngeneric FEM Helmholtz action=Transpose pass=0 iterations=27 allocations=129 residual=0.0000000005141132006833104\ngeneric FEM Helmholtz action=Transpose pass=1 iterations=27 allocations=0 residual=0.000000000916086954928716\ngeneric FEM Helmholtz action=Transpose pass=2 iterations=27 allocations=0 residual=0.0000000006100424907020015\ngeneric tetrahedral P2 Transpose passed\ngeneric FEM Helmholtz action=Hermitian pass=0 iterations=27 allocations=129 residual=0.0000000005141132006833104\ngeneric FEM Helmholtz action=Hermitian pass=1 iterations=27 allocations=0 residual=0.000000000916086954928716\ngeneric FEM Helmholtz action=Hermitian pass=2 iterations=27 allocations=0 residual=0.0000000006100424907020015\ngeneric tetrahedral P2 Hermitian passed\ntest solver::device::tests::tetrahedral::native_generic_tetrahedral_helmholtz_admitted_actions ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1980 filtered out; finished in 8.67s\n\n========= ERROR SUMMARY: 0 errors\n"
+}

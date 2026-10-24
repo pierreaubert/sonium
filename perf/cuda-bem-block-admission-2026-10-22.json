@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-22",
+  "scope": "Early block-GMRES admission for persistent compressed BEM sessions",
+  "implementation": {
+    "entrypoint": "BemSolver::prepare_cuda_hmatrix_block",
+    "preparation": "checks pending context error and native BlockGmres capability cell before host Hmatrix/inverse construction",
+    "existing_scalar_sessions": "solve_block_device checks block dependencies before finite validation or block workspace allocation",
+    "workspace": "dynamic RHS width retained; first-use block/active-width allocations still explicit"
+  },
+  "validation": {
+    "native_block_sessions": "4 passed /tmp/bem-block-admission-native.log",
+    "coverage": [
+      "forward/transpose/Hermitian",
+      "Jacobi and cluster-block Jacobi",
+      "independent, dependent and zero RHS columns",
+      "width changes",
+      "low-rank compressed action",
+      "warm allocation reuse",
+      "failure publication and recovery",
+      "terminal poisoned-context rejection before device work"
+    ],
+    "preflight_memcheck": "1 passed, zero errors /tmp/bem-block-admission-memcheck.log",
+    "cpu_bem": "541 passed, 3 ignored /tmp/bem-block-admission-cpu.log",
+    "root_check": "passed /tmp/bem-block-admission-root-check.log",
+    "root_clippy": "passed with existing warnings /tmp/bem-block-admission-root-clippy.log",
+    "cuda_check": "passed /tmp/bem-block-admission-check.log",
+    "cuda_clippy": "passed with existing warnings /tmp/bem-block-admission-cuda-clippy.log"
+  },
+  "limitations": [
+    "Uses shared declared block Krylov capability contract; arbitrary operator or preconditioner-specific dependencies remain separate.",
+    "Native failure regression uses poisoned context, not runtime CUDA module removal.",
+    "Focused memcheck covers admission; full block numerical paths were native-tested but not re-run under memcheck this turn.",
+    "The separate 1000-panel Auto memcheck remains live in session 1162; not reported passed.",
+    "No measured speedup."
+  ],
+  "source_sha256": {
+    "crates/sonium-bem/src/core/bem_solver_cuda.rs": "4f5997ca83f0ba05d27e63cfba4f32347622dda4fd917a5e694820d2f4f5bc13",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_linear.rs": "23bd2de2b63c481485aeeab45c9747afdecc33cffa1097877146d53898e5a2c6",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_block.rs": "bad672b73b8b6890ccf6c96b44d732d9f9d80c856911a32bb06c9f4822d755e5",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_block_tests.rs": "5052ecb8e3f3930f2f685a0ea08b2c6a831dab92a93fbe73b3b43924ba2cb966"
+  }
+}

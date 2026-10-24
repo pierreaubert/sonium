@@ -1,0 +1,198 @@
+{
+  "date": "2026-10-21",
+  "scope": "Persistent f64 CUDA linear solve cache wired through public solve_bdf_step_cached",
+  "hardware": "RTX PRO 6000 Blackwell Workstation Edition, driver 610.57.04",
+  "source_sha256": {
+    "crates/sonium-compute/src/preconditioner/saddle_point.rs": "526ac3d7d77012699e95ac3ec40bf30fbc656da0c083f42210cb060cb4ca85ef",
+    "crates/sonium-compute/tests/saddle_owned.rs": "010bc3f4457df9c86ce730ae12243095b109b0ac3fc1cf160b60a5916c4e1873",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda.rs": "7191968c2bfdf2205b1f40e927ad942a889e6df1a4d613257e38d3400b2bdf55",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/tests.rs": "64efd1014e83565d146240b2c7ce10ad101f3b29419a6d303227fd19a6756e86",
+    "crates/sonium-fem/src/physics/fluid/stokes/mod.rs": "e346f47c89ab4ce277891afcdb2a47fe01fb8bd0424c68ba3c7179c2a4f5b0c8",
+    "crates/sonium-fem/src/physics/fluid/stokes/navier_stokes.rs": "d97bb41ff8c3d3a10ddf04dda8031578fef1069acf259be9327cb2646b9356f4",
+    "crates/sonium-fem/src/physics/fluid/stokes/workspace.rs": "c14cce42be1fc35ad2901d5c491370581842502c3623058e8cd69949619bd237"
+  },
+  "implementation": {
+    "retained": [
+      "CUDA context and pool",
+      "physical CSR and sparse descriptors",
+      "RHS, initial guess and output buffers",
+      "flexible Krylov workspace",
+      "preconditioner when matrix/Schur/controls exactly match"
+    ],
+    "numeric_change": "fixed physical structure preserved; numeric values uploaded and preconditioner rebuilt",
+    "invalidation": [
+      "matrix shape or sparsity change",
+      "pressure gauge change",
+      "failed setup, transfer or solve"
+    ],
+    "pressure_choices": [
+      "polynomial",
+      "Chebyshev",
+      "owned auxiliary AMG"
+    ],
+    "other_outer_preconditioners": [
+      "owned polynomial Jacobi",
+      "owned Chebyshev"
+    ],
+    "precision": "f64; mixed precision remains on existing route",
+    "fallback": "preserves existing public CPU fallback and reports actual backend"
+  },
+  "production_fixture": {
+    "mesh": "6 by 3 rectangular channel, length 1, height 0.1",
+    "space": "Taylor-Hood P2 velocity / P1 pressure",
+    "mu": 1.85e-05,
+    "rho": 1.2,
+    "dt": 0.001,
+    "time_scheme": "BDF2 with initial BDF1 step",
+    "relative_tolerance": 1e-11,
+    "max_iterations": 500,
+    "probe_inlet_pressure": [
+      1.0,
+      0.5
+    ],
+    "later_inlet_pressure": 1.0,
+    "reference": "CPU sparse direct solves; velocity, pressure and velocity history relative errors <2e-6",
+    "schur": "unsteady BtDiagB, unchanged selection"
+  },
+  "production_cases": [
+    {
+      "pressure_solver": "Polynomial",
+      "phase": "probe",
+      "index": 0,
+      "iterations": 78,
+      "allocations": 319,
+      "reused": false
+    },
+    {
+      "pressure_solver": "Polynomial",
+      "phase": "probe",
+      "index": 1,
+      "iterations": 78,
+      "allocations": 0,
+      "reused": true
+    },
+    {
+      "pressure_solver": "Polynomial",
+      "phase": "step",
+      "index": 1,
+      "iterations": 78,
+      "setups": 2,
+      "uploads": 2
+    },
+    {
+      "pressure_solver": "Polynomial",
+      "phase": "step",
+      "index": 2,
+      "iterations": 76,
+      "setups": 3,
+      "uploads": 3
+    },
+    {
+      "pressure_solver": "Chebyshev",
+      "phase": "probe",
+      "index": 0,
+      "iterations": 69,
+      "allocations": 283,
+      "reused": false
+    },
+    {
+      "pressure_solver": "Chebyshev",
+      "phase": "probe",
+      "index": 1,
+      "iterations": 69,
+      "allocations": 0,
+      "reused": true
+    },
+    {
+      "pressure_solver": "Chebyshev",
+      "phase": "step",
+      "index": 1,
+      "iterations": 68,
+      "setups": 2,
+      "uploads": 2
+    },
+    {
+      "pressure_solver": "Chebyshev",
+      "phase": "step",
+      "index": 2,
+      "iterations": 63,
+      "setups": 3,
+      "uploads": 3
+    },
+    {
+      "pressure_solver": "Amg",
+      "phase": "probe",
+      "index": 0,
+      "iterations": 55,
+      "allocations": 227,
+      "reused": false
+    },
+    {
+      "pressure_solver": "Amg",
+      "phase": "probe",
+      "index": 1,
+      "iterations": 55,
+      "allocations": 0,
+      "reused": true
+    },
+    {
+      "pressure_solver": "Amg",
+      "phase": "step",
+      "index": 1,
+      "iterations": 53,
+      "setups": 2,
+      "uploads": 2
+    },
+    {
+      "pressure_solver": "Amg",
+      "phase": "step",
+      "index": 2,
+      "iterations": 50,
+      "setups": 3,
+      "uploads": 3
+    }
+  ],
+  "failure_and_cache_tests": [
+    "Configuration change refreshes preconditioner without physical matrix upload",
+    "Injected H2D failure evicts cache and permits fresh construction",
+    "Public driver CPU recovery reports Cpu, subsequent retry reports Cuda",
+    "Pressure gauge clears device cache",
+    "Dimension/pattern change builds fresh state",
+    "Nonconvergence evicts cache"
+  ],
+  "large_regression": {
+    "test": "cuda_jacobi_schur_converges_mass_dominated_unsteady_step",
+    "mesh_subdivisions": [
+      32,
+      16
+    ],
+    "iterations": 680,
+    "stall_limit": 3000,
+    "velocity_error_l2": 2.30423e-10,
+    "velocity_reference_l2": 0.003012591,
+    "memcheck_errors": 0
+  },
+  "checks": {
+    "native_BDF_tests": "2 passed, memcheck 0 errors",
+    "native_large_BDF_regression": "1 passed, memcheck 0 errors",
+    "compute_owned_constructor_tests": "3 passed, including owned external pressure scalar/block actions",
+    "compute_saddle_unit_tests": "9 passed",
+    "CPU_Stokes_tests": "103 passed, 1 ignored",
+    "cargo_check": "passed",
+    "cargo_clippy": "passed with existing warnings",
+    "CUDA_compute_FEM_clippy": "passed with existing warnings; final FEM tests repeated"
+  },
+  "logs": {
+    "native": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest physics::fluid::stokes::bdf_cuda::tests::native_bdf_cuda_polynomial_and_chebyshev_control_invalidation ... ok\ntest physics::fluid::stokes::bdf_cuda::tests::native_bdf_cuda_schur_reuses_probes_and_advances_history ... BDF Polynomial probe=0 iterations=78 allocations=319 reused=false\nBDF Polynomial probe=1 iterations=78 allocations=0 reused=true\nBDF Polynomial step=1 iterations=78 setups=2 uploads=2\nBDF Polynomial step=2 iterations=76 setups=3 uploads=3\nWARNING: retained CUDA BDF solve failed (backend transfer failed during cuda_copy_h2d on cuda: injected CUDA transfer failure); falling back to CPU\nBDF Chebyshev probe=0 iterations=69 allocations=283 reused=false\nBDF Chebyshev probe=1 iterations=69 allocations=0 reused=true\nBDF Chebyshev step=1 iterations=68 setups=2 uploads=2\nBDF Chebyshev step=2 iterations=63 setups=3 uploads=3\nWARNING: retained CUDA BDF solve failed (backend transfer failed during cuda_copy_h2d on cuda: injected CUDA transfer failure); falling back to CPU\nBDF Amg probe=0 iterations=55 allocations=227 reused=false\nBDF Amg probe=1 iterations=55 allocations=0 reused=true\nBDF Amg step=1 iterations=53 setups=2 uploads=2\nBDF Amg step=2 iterations=50 setups=3 uploads=3\nWARNING: retained CUDA BDF solve failed (backend transfer failed during cuda_copy_h2d on cuda: injected CUDA transfer failure); falling back to CPU\nok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1947 filtered out; finished in 31.88s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "large_native": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest physics::fluid::stokes::navier_stokes::tests::cuda_jacobi_schur_converges_mass_dominated_unsteady_step ... CUDA_DIAG iterations=680 velocity_error=2.304230e-10 velocity_scale=3.012591e-3\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1948 filtered out; finished in 48.99s\n\n========= ERROR SUMMARY: 0 errors\n"
+  },
+  "limitations": [
+    "Host assembly, RHS/guess uploads, solution downloads, residual certification and time history remain.",
+    "Numeric preconditioner changes rebuild setup, not a native numeric refresh.",
+    "Mixed precision and steady nonlinear entrypoints remain per-call.",
+    "The existing CPU recovery policy remains; strict CUDA refusal is not added.",
+    "No wall-time speedup claim; memory allocations and iteration counts only.",
+    "Krylov vectors use the pool, but sparse/preconditioner/vendor allocation policies do not establish full-session quota coverage.",
+    "The full max-iteration cycle is retained to preserve the legacy unrestarted solve budget; large budgets can consume substantial basis memory."
+  ]
+}

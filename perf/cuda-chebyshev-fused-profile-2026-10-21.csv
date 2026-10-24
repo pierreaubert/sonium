@@ -1,0 +1,52 @@
+Generating SQLite file /tmp/chebyshev-fused-profile.sqlite from /tmp/chebyshev-fused-profile.nsys-rep
+Processing [/tmp/chebyshev-fused-profile.sqlite] with [/var/opt/nvidia/nsight-systems/2026.1.3/target-linux-x64/reports/cuda_gpu_kern_sum.py]... 
+Time (%),Total Time (ns),Instances,Avg (ns),Med (ns),Min (ns),Max (ns),StdDev (ns),Name
+58.1,282952457,12660,22350.1,20192.0,19264,28512,3398.2,"void cusparse::csrmv_v3_kernel<std::integral_constant<bool, (bool)0>, int, int, double, double, double, double, void>(cusparse::KernelCoeffs<T7>, const T3 *, const T2 *, const T3 *, const T4 *, T2, int, int, const T5 *, T6 *, T3 *, T7 *)"
+11.6,56625188,12660,4472.8,3968.0,2911,6592,1471.7,"void cusparse::<unnamed>::csr_partition_kernel<int, int>(const T1 *, T2, T1, T1, T2, long, T2 *, T2)"
+10.6,51341456,738,69568.4,75823.0,61375,102015,8198.8,"void nrm2_kernel<double, double, double, (int)0, (int)0, (int)128>(cublasNrm2Params<int, T1, T2>)"
+7.2,35097298,717,48950.2,48223.0,3168,105215,26755.6,sonium_axpy_many_f64
+7.1,34441753,8559,4024.0,2560.0,2463,6911,1932.9,sonium_chebyshev_update_f64
+2.2,10805775,714,15134.1,15136.0,14336,15456,132.6,sonium_multi_dot_f64
+1.3,6239539,2499,2496.8,2528.0,2176,3008,198.3,"void axpy_kernel_val<double, double>(cublasAxpyParamsVal<T1, T1, T2>)"
+1.2,6065009,2685,2258.8,2240.0,1919,2560,140.6,"void scal_kernel_val<double, double>(cublasScalParamsVal<T1, T2>)"
+0.6,3047255,1245,2447.6,2112.0,1792,3936,657.7,sonium_diagonal_scale_f64
+
+Processing [/tmp/chebyshev-fused-profile.sqlite] with [/var/opt/nvidia/nsight-systems/2026.1.3/target-linux-x64/reports/cuda_api_sum.py]... 
+Time (%),Total Time (ns),Num Calls,Avg (ns),Med (ns),Min (ns),Max (ns),StdDev (ns),Name
+38.1,214182458,750,285576.6,105655.5,7955,577465,242322.4,cuMemcpyDtoHAsync_v2
+22.1,124263576,31242,3977.5,3828.0,3607,1651231,9504.4,cudaLaunchKernel
+11.8,66347021,369,179802.2,180402.0,136048,283588,27307.2,cudaMemcpyAsync
+7.9,44301121,12660,3499.3,3006.0,2665,14557,946.4,cudaMemsetAsync
+7.1,40180823,11235,3576.4,3476.0,3256,34596,648.3,cuLaunchKernel
+4.2,23459115,4416,5312.3,5160.0,4429,24246,956.9,cuMemcpyDtoDAsync_v2
+1.9,10736513,14,766893.8,503013.5,165614,2179562,626577.9,cuModuleLoadData
+1.6,8821686,745,11841.2,1182.0,581,7379561,270302.5,cuMemAllocAsync
+1.3,7256955,1563,4643.0,3517.0,2825,686431,18161.1,cuMemcpyHtoDAsync_v2
+1.2,6775046,4,1693761.5,459466.5,89119,5766994,2724451.9,cuLibraryLoadData
+0.9,5148160,31242,164.8,150.0,130,9698,109.7,cuKernelGetName
+0.4,2078719,476,4367.1,4008.0,2174,37080,2141.4,cuMemsetD8Async
+0.3,1657602,14,118400.1,68540.0,26040,741526,181624.8,cuModuleUnload
+0.3,1553746,7,221963.7,152910.0,26140,614355,224921.4,cuLibraryUnload
+0.2,1162102,22,52822.8,6898.0,501,203986,70129.6,cudaFree
+0.2,954950,14,68210.7,77236.5,2054,170293,65176.8,cudaMalloc
+0.1,728883,369,1975.3,1674.0,1142,8035,678.0,cudaStreamSynchronize
+0.1,611815,745,821.2,701.0,541,4328,307.7,cuMemFreeAsync
+0.1,537729,369,1457.3,1433.0,862,5310,330.1,cudaEventRecord
+0.1,363705,1838,197.9,170.0,130,5691,170.4,cuGetProcAddress_v2
+0.1,336320,1845,182.3,141.0,130,891,63.4,cuStreamGetCaptureInfo_v2
+0.0,138532,2,69266.0,69266.0,12974,125558,79608.9,cuStreamCreate
+0.0,137370,4,34342.5,30057.0,19046,58210,16931.6,cuMemGetInfo_v2
+0.0,128373,2,64186.5,64186.5,5370,123003,83179.1,cuStreamDestroy_v2
+0.0,57286,72,795.6,491.0,381,6583,1004.4,cudaEventCreateWithFlags
+0.0,43418,72,603.0,521.0,320,3356,414.0,cudaEventDestroy
+0.0,41355,16,2584.7,1678.0,1032,9949,2530.7,cudaDeviceSynchronize
+0.0,24386,2,12193.0,12193.0,11392,12994,1132.8,cuCtxSynchronize
+0.0,24016,8,3002.0,1738.0,792,7745,2705.3,cuInit
+0.0,7766,4,1941.5,671.5,461,5962,2682.2,cuLibraryGetKernel
+0.0,4379,5,875.8,872.0,361,1323,375.8,cuStreamGetGreenCtx
+0.0,3868,1,3868.0,3868.0,3868,3868,0.0,cudaEventQuery
+0.0,3637,1,3637.0,3637.0,3637,3637,0.0,cuCtxSetCurrent
+0.0,1443,3,481.0,361.0,320,762,244.2,cudaGetDriverEntryPointByVersion
+0.0,761,4,190.3,180.0,140,261,51.4,cuModuleGetLoadingMode
+0.0,742,2,371.0,371.0,331,411,56.6,cudaGetDeviceProperties
+

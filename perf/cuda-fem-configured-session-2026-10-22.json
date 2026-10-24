@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-22",
+  "scope": "Configured retained complex FEM solves from SolverConfig",
+  "source_sha256": {
+    "crates/sonium-fem/src/solver/device.rs": "50992559d5f56d5047e2176cdbc75ccd2d288ac2d66769719386004b978442f5",
+    "crates/sonium-fem/src/solver/device/configured.rs": "43cf2d6e9858615f5a41ef6e536394a5435c7164d1db0f45f0655288f847e93d",
+    "crates/sonium-fem/src/solver/device/tests.rs": "6775c240e9016643b15f9c53c244aa53ba04ec5826b6efa68c5a0466124d5df7",
+    "crates/sonium-fem/src/solver/device/tests/configured.rs": "80205fa383e6b9b58d712fd0456a1733fec03651b8e1e2903ffd4752f9ad419b"
+  },
+  "binary": {
+    "path": "target/debug/deps/sonium_fem-234ee27f8433be93",
+    "sha256": "dd2c9518e2b30eeada332795b61f3c51c68d335630bbff3509a749cd7b920d83"
+  },
+  "strategies": [
+    "Gmres",
+    "GmresJacobi",
+    "GmresIlu",
+    "GmresSchwarz",
+    "GmresAmg"
+  ],
+  "fixture": {
+    "physics": "Coercive complex Helmholtz with homogeneous Dirichlet elimination",
+    "degrees": [
+      "P1",
+      "P2"
+    ],
+    "mesh": "4x4 triangular grid",
+    "action": "Forward",
+    "schwarz_configurations": [
+      {
+        "subdomains": 3,
+        "overlap": 0
+      },
+      {
+        "subdomains": 8,
+        "overlap": 2
+      }
+    ],
+    "schwarz_oracle": "Direct device action compared with CPU configured Schwarz; zero application allocations and host transfers",
+    "reuse": "Three RHS solves per strategy/configuration/degree; zero warm backend allocations",
+    "residual": "Independent host CSR relative residual <1.1e-9",
+    "solution": "Discrete manufactured solution component error <1e-7",
+    "rejection": "Unsupported solver variants, adaptive restart, NaN tolerance and zero Schwarz partitions reject before assembly/allocation/upload"
+  },
+  "results": {
+    "native": "2 passed",
+    "memcheck": "2 passed; 0 errors",
+    "cpu": "1964 passed; 1 ignored",
+    "check": "passed",
+    "clippy": "passed with existing warnings",
+    "cuda_clippy": "passed with existing warnings",
+    "inventory": "22 packages, 1354 source units; freshness passed",
+    "registry": "40 retained-dispatch rows, zero complete; validation and 10 audit tests passed"
+  },
+  "logs": {
+    "build": {
+      "path": "/tmp/fem-configured-build.log",
+      "sha256": "2c5e097637fdc84eacf40a6c2f578139d772168e9d3d34862c2ad7f5f3222f28"
+    },
+    "native": {
+      "path": "/tmp/fem-configured-native.log",
+      "sha256": "aa0cdb63e4a8b139e8974c2935383f32d401ebf999550f35b25216c3e289237a"
+    },
+    "memcheck": {
+      "path": "/tmp/fem-configured-memcheck.log",
+      "sha256": "db865b36c8c7173a3fc6f5f1b39d170dd72414e483e7e8d39cce447958c999f0"
+    },
+    "cpu": {
+      "path": "/tmp/fem-configured-cpu.log",
+      "sha256": "a8eeb678fe1d69bb73200fdc5a0c7b71bc3bc4de0a7cbc56091d9ecebe10bcc9"
+    },
+    "check": {
+      "path": "/tmp/fem-configured-check.log",
+      "sha256": "b9aca151188e63ea58768044dee8a2abe989beb3accfa67ecd8bc16a6efef5fd"
+    },
+    "clippy": {
+      "path": "/tmp/fem-configured-clippy.log",
+      "sha256": "39876290dfe3b51389391d3e36b0b1dbbca9fb98e3ba53c375188608eda481f9"
+    },
+    "cuda_clippy": {
+      "path": "/tmp/fem-configured-cuda-clippy.log",
+      "sha256": "217870f018000f42c1bb6eec41008487eef15a3d55152220d08005ce76ae6010"
+    }
+  },
+  "limitations": [
+    "No performance claim",
+    "Legacy solve_csr_with_guess remains CPU-only",
+    "Configuration wrapper currently Complex64 only",
+    "Native fixture covers forward action; generic session adjoint tests remain separate historical evidence",
+    "Host assembly and preconditioner setup remain; device numeric updates explicitly lag preconditioning",
+    "Pipelined/adaptive/shifted algorithms are rejected, not implemented by replacement"
+  ]
+}

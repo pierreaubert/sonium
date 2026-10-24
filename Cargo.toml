@@ -28,6 +28,7 @@ members = [
     "crates/sonium-qa",
     "crates/sonium-demo-workers",
     "crates/sonium-sim-room",
+    "crates/sonium-sim-motor",
     "crates/sonium-sim-pcfan",
     "crates/sonium-sim-propellers",
     "crates/sonium-sim-speaker-modeling",
@@ -68,6 +69,7 @@ default-members = [
     "crates/sonium-roomeq",
     "crates/sonium-qa",
     "crates/sonium-sim-room",
+    "crates/sonium-sim-motor",
     "crates/sonium-sim-pcfan",
     "crates/sonium-sim-propellers",
     "crates/sonium-sim-speaker-modeling",
@@ -114,6 +116,7 @@ sonium-mesher = { path = "crates/sonium-mesher" }
 sonium-roomeq = { path = "crates/sonium-roomeq" }
 sonium-qa = { path = "crates/sonium-qa" }
 sonium-sim-room = { path = "crates/sonium-sim-room" }
+sonium-sim-motor = { path = "crates/sonium-sim-motor" }
 sonium-sim-pcfan = { path = "crates/sonium-sim-pcfan" }
 sonium-sim-propellers = { path = "crates/sonium-sim-propellers" }
 sonium-sim-speaker-modeling = { path = "crates/sonium-sim-speaker-modeling" }

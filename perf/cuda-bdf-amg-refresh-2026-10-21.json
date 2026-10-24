@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-21",
+  "scope": "BDF pressure-AMG numeric refresh integration",
+  "source_sha256": {
+    "crates/sonium-compute/src/preconditioner/saddle_point.rs": "6e218f73b419851f9314e35b7e8dcf274722485ad496174a323295631d792289",
+    "crates/sonium-compute/tests/saddle_owned.rs": "a55a7ff884ee167a2e4e047d39fd561f143532aa73ea88369a3f1dd3a678d7b0",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda.rs": "706f474c2fb4c6fad53245f242b53c766f885ab682c53f0a4a51b259415da35c",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/pressure.rs": "4d8b8d7260ae447f25d2be50dbb429ff18101195cdf7f2ad6e09db58f02cde22",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/tests.rs": "f621121b14b57d941db7f44d2055a5c3653eb087cdef0fbc8f419fc3242fbfa5"
+  },
+  "native_bdf": {
+    "passed": 3,
+    "failed": 0,
+    "memcheck_errors": 0,
+    "seconds": 57.19,
+    "physical_pressure_amg_iterations": [
+      55,
+      55,
+      53,
+      50
+    ],
+    "device_setup_builds_across_physical_timesteps": 1,
+    "previous_device_setup_builds": 3,
+    "new_device_allocations_per_changed_timestep": 0,
+    "velocity_pressure_history_relative_tolerance": 2e-06,
+    "pressure_change_partial_upload_evicts_cache": true,
+    "hierarchy_change_with_same_finest_pattern": {
+      "fixture": "8 velocity identity DOFs plus a 128-DOF tridiagonal pressure block",
+      "device_builds": [
+        1,
+        1,
+        2
+      ],
+      "allocations": [
+        83,
+        0,
+        48
+      ]
+    },
+    "changed_pressure_pattern_rebuild": true
+  },
+  "native_compute": {
+    "passed": 6,
+    "failed": 0,
+    "memcheck_errors": 0,
+    "seconds": 0.94,
+    "replacement_pressure_action_block_parity": true
+  },
+  "cpu_saddle_unit_tests": 9,
+  "checks": [
+    "cargo check",
+    "cargo clippy",
+    "cargo clippy -p sonium-fem -p sonium-compute --features cuda --tests"
+  ],
+  "logs": [
+    "/tmp/bdf-amg-refresh-native.log",
+    "/tmp/bdf-amg-refresh-compute-native.log",
+    "/tmp/bdf-amg-refresh-cpu.log",
+    "/tmp/bdf-amg-refresh-check.log",
+    "/tmp/bdf-amg-refresh-clippy.log",
+    "/tmp/bdf-amg-refresh-cuda-clippy.log",
+    "/tmp/bdf-amg-refresh-final-clippy.log"
+  ],
+  "limits": [
+    "Host AMG hierarchy construction is repeated for changed pressure values; device setup count is not host setup count",
+    "The small physical BDF fixture uses a single AMG level; the larger algebra fixture separately verifies multilevel lifecycle",
+    "Direct coarse factors remain outside the refresh API",
+    "Pressure AMG still embeds velocity identity rows; pressure-only hierarchy/action is a future optimization",
+    "Host assembly, history, numeric uploads and output transfers remain",
+    "No elapsed-time speedup claim"
+  ]
+}

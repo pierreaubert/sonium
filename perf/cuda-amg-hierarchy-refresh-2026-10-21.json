@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-21",
+  "scope": "checked retained AMG refresh from a complete validated host hierarchy",
+  "source_sha256": {
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/mod.rs": "292360a41a5fbd517945af6e64f7bc5883fc27d5e4f2c0624519afcf1ef36b97",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/backend_refresh.rs": "35116524e29569c938fc52fb43ecb23d38aeb6dd030edbcfb1ce3f0a04ccc1b4",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/backend_refresh_tests.rs": "84536b93361036498bfb2729ca030ac62b5ade44ddc0214355af6a3984556f1d"
+  },
+  "api": "BackendAmgPreconditioner::try_refresh_from_host_amg",
+  "coverage": [
+    "all level matrix and restriction/prolongation values",
+    "Jacobi, L1-Jacobi and Chebyshev scaling and spectral bounds",
+    "configuration and portable checkpoint replacement",
+    "structural mismatch requests rebuild before mutation",
+    "invalid host data preserves previous published state",
+    "partial transfer failure blocks scalar/block actions and checkpoint export",
+    "successful full refresh recovers invalid state"
+  ],
+  "native": {
+    "scalars": [
+      "f64",
+      "Complex64"
+    ],
+    "passed_tests": 3,
+    "failed_tests": 0,
+    "memcheck_errors": 0,
+    "seconds": 2.55,
+    "device_allocations_during_each_refresh": 0,
+    "action_reference": "fresh device hierarchy from identical host setup",
+    "relative_action_tolerance": 1e-12,
+    "checkpoint_restore_parity": true
+  },
+  "crate_tests": {
+    "passed": 339,
+    "failed": 0,
+    "ignored": 1
+  },
+  "checks": [
+    "cargo check",
+    "cargo clippy",
+    "cargo clippy -p sonium-solvers-preconditioners --features cuda --tests"
+  ],
+  "logs": [
+    "/tmp/amg-refresh-native.log",
+    "/tmp/amg-refresh-suite.log",
+    "/tmp/amg-refresh-check.log",
+    "/tmp/amg-refresh-clippy.log",
+    "/tmp/amg-refresh-cuda-clippy.log"
+  ],
+  "limits": [
+    "BDF producer ownership integration still pending",
+    "Host hierarchy must be rebuilt or numerically recomputed by caller",
+    "Every hierarchy matrix and transfer pattern and coloring must match for storage reuse",
+    "Attached direct coarse factors reject refresh until refactorization support exists",
+    "No elapsed-time speedup claim",
+    "No f32 or Complex32 refresh runtime claim"
+  ]
+}

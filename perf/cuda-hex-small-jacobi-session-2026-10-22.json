@@ -1,0 +1,53 @@
+{
+  "status": "validated_opt_in_session_integration",
+  "default_enabled": false,
+  "source_sha256": {
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/backend_profile.rs": "02a10abf21cf827966f4e4caaa26d05b1399cd78861a0d91c6f9e3fd370c6e8d",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_hex_solve.rs": "b0fee7ca2c1049f752ba42c3a7eedbb1c058b59c47bc2b58ba5044a3309e9875",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_hex_solve/tests.rs": "2a3f86cfa0377f74990c42629e92528c0c25ffcebd257dc7f2f0c57e08b16401"
+  },
+  "validation": {
+    "native": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 1m 19s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2013 filtered out; finished in 5.12s"
+    ],
+    "memcheck": [
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 2013 filtered out; finished in 62.43s",
+      "========= ERROR SUMMARY: 0 errors"
+    ],
+    "cpu_fem": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 2m 04s",
+      "test result: ok. 1964 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 25.03s"
+    ],
+    "cpu_preconditioners": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 8.23s",
+      "test result: ok. 241 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.74s"
+    ],
+    "check": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 1m 24s"
+    ],
+    "clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 1m 10s"
+    ],
+    "cuda_fem_clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 15.63s"
+    ]
+  },
+  "contract": [
+    "No allocation, dispatch or transfer when toggled.",
+    "Certified output and previous-solution warm start are retained.",
+    "Numeric refresh and explicit rebuild preserve option.",
+    "Existing failure invalidation and recovery remain enforced."
+  ],
+  "scope": [
+    "Q2/Q3 retained hex pressure",
+    "Dirichlet/Neumann/Robin boundaries",
+    "RHS, frequency, material and facet updates",
+    "Classical and aggregation AMG; refresh/rebuild and failure recovery"
+  ],
+  "performance_reference": "cuda-small-jacobi-cooperative-2026-10-22.json",
+  "limitations": [
+    "No global performance promotion.",
+    "This integration does not establish coverage of other FEM families or the complete CUDA roadmap."
+  ]
+}

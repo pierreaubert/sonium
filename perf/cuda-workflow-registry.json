@@ -1,0 +1,1239 @@
+{
+  "schema_version": 1,
+  "scope": "Reviewed initial solver facade subset; not the complete compute/solvers/BEM/FEM workflow denominator.",
+  "source_inventory": "perf/cuda-source-inventory.json",
+  "reviewed_source_sha256": {
+    "crates/sonium-solvers/src/solve.rs": "4ad541d17c6398fe658008646d6e062912c282b324e1a7e786ad8d0f8a9e357f",
+    "crates/sonium-solvers/src/solve/cuda_session.rs": "9ca050e5d547a48bc6002be50b6f84673e65d9b222c6a086609d5deeb09c6b19",
+    "crates/sonium-solvers/src/solve/cuda_session/preconditioner.rs": "d3c1c2eaf1bbd98b586a61a8af13ffed2fb5f74c84f044d9cbcbfbe450d08dcd",
+    "crates/sonium-solvers/src/solve/cuda_session/update.rs": "78f3ff9a1a786eb64f7e98af416401a010576c5ef89381ff9cc1e2db1bb00f90",
+    "crates/sonium-solvers/src/solve/cuda_session/prepared.rs": "2aacc73df11db14b488cde7dbff5c689345fba936a0eb6c76591ceb580568630",
+    "crates/sonium-solvers/src/solve/cuda_session_tests.rs": "ca50cbb7fdc9d887f22da17f42844c1fcf341d9d758e59261a9b50c17fc4c7df",
+    "crates/sonium-solvers/src/solve/cuda_session_refresh_tests.rs": "5b0635c9631ce49473a3b6deca1751d6f463bb152f8d49710e32bd1e577cec41",
+    "crates/sonium-compute/src/preconditioner/chebyshev.rs": "3a47b8f8032034920d6b1f3a8e520e3f80fbe009f56a4f66daeac42a50a04330",
+    "crates/sonium-compute/src/preconditioner/matrix.rs": "ed07c433c26e1831186744a01554dc1db9b9cceca5079effa50d4fe0e3c6a627",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/chebyshev.rs": "1b89fb8ecc211b66d276f61ea096abad7b6755e45014d275e81654dfd3618007",
+    "crates/sonium-compute/src/cuda/cublas.rs": "53e30ccbbb9fcd6b15927cf67a596610dc818b7da3f129165b4694078cfa337f",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/cuda_ilu.rs": "9588e6eff1617b4f3a27c85cd21bc1ab63c46e0ea4611826ddbb1ad7d7d7103c",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/ilu.rs": "d021f2abc4c0fe5f00d8e6bd5d2ccc71123019b6256240c5de0c5710438a00ce",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/lib.rs": "47a7e5585376589ebf50567a8504a0d10cc0bbecdd5c0fe856e917ab0f5d5fb5",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/cuda_schwarz.rs": "15cb2ec4ad9a6a9d7000975667c66fc4942957aabeffdf5822caee2c0926da6b",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/schwarz.rs": "961a1a96eccc8699888a7d9f05a89ab491645fea66a100e45f2b5d0df55688ad",
+    "crates/sonium-solvers/src/solve/cuda_prepared_tests.rs": "9475b174e70327e4d6817d4d1fa39598067028bdccd0e31cacd56e0ff9ed8b9c"
+  },
+  "strategy_enum": {
+    "path": "crates/sonium-solvers/src/solve.rs",
+    "name": "LinearSolverType"
+  },
+  "scalars": [
+    "f32",
+    "f64",
+    "Complex32",
+    "Complex64"
+  ],
+  "unreviewed_scope": [
+    "remaining compute entrypoints and module-failure combinations",
+    "split solver direct/eigen/iterative/nonlinear/optimization/time APIs",
+    "prepared FGMRES callbacks and transitive residency",
+    "facade block RHS, adjoints, nullspaces and structural updates",
+    "all BEM producer variants",
+    "all FEM producer variants",
+    "all simulation application entrypoints"
+  ],
+  "evidence": [
+    {
+      "path": "perf/cuda-public-solver-session-2026-10-22.json",
+      "use": "historical bounded single-forward five-strategy/four-scalar session test; source may have changed"
+    },
+    {
+      "path": "perf/cuda-public-solver-refresh-2026-10-22.json",
+      "use": "historical bounded fixed-pattern refresh tests; source may have changed"
+    },
+    {
+      "path": "perf/cuda-workflow-registry-validation-2026-10-22.json",
+      "use": "Current six native tests for bounded session correctness, update/recovery and allocation/transfer assertions; no performance claim."
+    },
+    {
+      "path": "perf/cuda-public-chebyshev-session-2026-10-22.json",
+      "use": "Current seven native facade tests and memcheck, now including retained real-SPD Chebyshev across four scalar representations and update/recovery."
+    },
+    {
+      "path": "perf/cuda-public-ilu-session-2026-10-22.json",
+      "use": "Current native seven-strategy/four-scalar retained facade tests and direct ILU factor parity; both memchecks pass. No performance claim."
+    },
+    {
+      "path": "perf/cuda-public-schwarz-session-2026-10-22.json",
+      "use": "Current nine-strategy/four-scalar facade tests and direct one-level Schwarz overlap/weight parity; both memchecks pass. No speedup claim."
+    },
+    {
+      "path": "perf/cuda-public-auto-session-2026-10-22.json",
+      "use": "Eight current public tests and memcheck including actual row-cutoff Auto selection; two prepared-FGMRES provenance tests; no performance claim."
+    },
+    {
+      "path": "perf/cuda-ilut-session-2026-10-22.json",
+      "use": "Current native facade/ILU regression after shared triangular storage refactor; new ILUT native action and bounded resolved-PML qualification; no speedup or full producer-routing claim."
+    }
+  ],
+  "workflows": [
+    {
+      "id": "solver-facade/Auto/f32/single-forward",
+      "strategy": "Auto",
+      "scalar": "f32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "Resolve once by CPU size/scalar policy; ILU for small or real systems, FGMRES-Schwarz for large complex storage; no implicit SPD assumption",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_policy_selection_and_selected_preconditioner_setup_upload",
+        "solve": "selected_resident_standard_or_flexible_Krylov_not_CPU_optional_pipelined_variant",
+        "numeric_update": "retain_selected_strategy_and_refresh_selected_preconditioner",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "CPU optional pipelined-GMRES variant is not implemented on CUDA.",
+        "Independent native nnz-only crossover fixture remains open.",
+        "Broader sizes, conditioning, block/adjoint and application producers remain to be reviewed."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Auto/f64/single-forward",
+      "strategy": "Auto",
+      "scalar": "f64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "Resolve once by CPU size/scalar policy; ILU for small or real systems, FGMRES-Schwarz for large complex storage; no implicit SPD assumption",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_policy_selection_and_selected_preconditioner_setup_upload",
+        "solve": "selected_resident_standard_or_flexible_Krylov_not_CPU_optional_pipelined_variant",
+        "numeric_update": "retain_selected_strategy_and_refresh_selected_preconditioner",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "CPU optional pipelined-GMRES variant is not implemented on CUDA.",
+        "Independent native nnz-only crossover fixture remains open.",
+        "Broader sizes, conditioning, block/adjoint and application producers remain to be reviewed."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Auto/Complex32/single-forward",
+      "strategy": "Auto",
+      "scalar": "Complex32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "Resolve once by CPU size/scalar policy; ILU for small or real systems, FGMRES-Schwarz for large complex storage; no implicit SPD assumption",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_policy_selection_and_selected_preconditioner_setup_upload",
+        "solve": "selected_resident_standard_or_flexible_Krylov_not_CPU_optional_pipelined_variant",
+        "numeric_update": "retain_selected_strategy_and_refresh_selected_preconditioner",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "CPU optional pipelined-GMRES variant is not implemented on CUDA.",
+        "Independent native nnz-only crossover fixture remains open.",
+        "Broader sizes, conditioning, block/adjoint and application producers remain to be reviewed."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Auto/Complex64/single-forward",
+      "strategy": "Auto",
+      "scalar": "Complex64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "Resolve once by CPU size/scalar policy; ILU for small or real systems, FGMRES-Schwarz for large complex storage; no implicit SPD assumption",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_policy_selection_and_selected_preconditioner_setup_upload",
+        "solve": "selected_resident_standard_or_flexible_Krylov_not_CPU_optional_pipelined_variant",
+        "numeric_update": "retain_selected_strategy_and_refresh_selected_preconditioner",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "CPU optional pipelined-GMRES variant is not implemented on CUDA.",
+        "Independent native nnz-only crossover fixture remains open.",
+        "Broader sizes, conditioning, block/adjoint and application producers remain to be reviewed."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Gmres/f32/single-forward",
+      "strategy": "Gmres",
+      "scalar": "f32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "strategy-specific CPU admission; general matrix for supported CUDA GMRES identity/Jacobi",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Gmres/f64/single-forward",
+      "strategy": "Gmres",
+      "scalar": "f64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "strategy-specific CPU admission; general matrix for supported CUDA GMRES identity/Jacobi",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Gmres/Complex32/single-forward",
+      "strategy": "Gmres",
+      "scalar": "Complex32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "strategy-specific CPU admission; general matrix for supported CUDA GMRES identity/Jacobi",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Gmres/Complex64/single-forward",
+      "strategy": "Gmres",
+      "scalar": "Complex64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "strategy-specific CPU admission; general matrix for supported CUDA GMRES identity/Jacobi",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresJacobi/f32/single-forward",
+      "strategy": "GmresJacobi",
+      "scalar": "f32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "strategy-specific CPU admission; general matrix for supported CUDA GMRES identity/Jacobi",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresJacobi/f64/single-forward",
+      "strategy": "GmresJacobi",
+      "scalar": "f64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "strategy-specific CPU admission; general matrix for supported CUDA GMRES identity/Jacobi",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresJacobi/Complex32/single-forward",
+      "strategy": "GmresJacobi",
+      "scalar": "Complex32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "strategy-specific CPU admission; general matrix for supported CUDA GMRES identity/Jacobi",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresJacobi/Complex64/single-forward",
+      "strategy": "GmresJacobi",
+      "scalar": "Complex64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "strategy-specific CPU admission; general matrix for supported CUDA GMRES identity/Jacobi",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresIlu/f32/single-forward",
+      "strategy": "GmresIlu",
+      "scalar": "f32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked default ILU(0) pivots and finite normalized factors; no reordering",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_checked_ILU0_factorization_and_device_upload",
+        "solve": "resident_dependency_level_triangular_actions_and_Krylov_vectors",
+        "numeric_update": "host_refactorization_then_in_place_factor_upload_or_pattern_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and reordered factor workflows remain open.",
+        "Host factorization/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresIlu/f64/single-forward",
+      "strategy": "GmresIlu",
+      "scalar": "f64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked default ILU(0) pivots and finite normalized factors; no reordering",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_checked_ILU0_factorization_and_device_upload",
+        "solve": "resident_dependency_level_triangular_actions_and_Krylov_vectors",
+        "numeric_update": "host_refactorization_then_in_place_factor_upload_or_pattern_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and reordered factor workflows remain open.",
+        "Host factorization/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresIlu/Complex32/single-forward",
+      "strategy": "GmresIlu",
+      "scalar": "Complex32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked default ILU(0) pivots and finite normalized factors; no reordering",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_checked_ILU0_factorization_and_device_upload",
+        "solve": "resident_dependency_level_triangular_actions_and_Krylov_vectors",
+        "numeric_update": "host_refactorization_then_in_place_factor_upload_or_pattern_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and reordered factor workflows remain open.",
+        "Host factorization/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresIlu/Complex64/single-forward",
+      "strategy": "GmresIlu",
+      "scalar": "Complex64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked default ILU(0) pivots and finite normalized factors; no reordering",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_checked_ILU0_factorization_and_device_upload",
+        "solve": "resident_dependency_level_triangular_actions_and_Krylov_vectors",
+        "numeric_update": "host_refactorization_then_in_place_factor_upload_or_pattern_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and reordered factor workflows remain open.",
+        "Host factorization/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresAmg/f32/single-forward",
+      "strategy": "GmresAmg",
+      "scalar": "f32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresAmg/f64/single-forward",
+      "strategy": "GmresAmg",
+      "scalar": "f64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresAmg/Complex32/single-forward",
+      "strategy": "GmresAmg",
+      "scalar": "Complex32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresAmg/Complex64/single-forward",
+      "strategy": "GmresAmg",
+      "scalar": "Complex64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresChebyshev/f32/single-forward",
+      "strategy": "GmresChebyshev",
+      "scalar": "f32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR with real SPD coefficients; complex storage and RHS allowed",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD admission plus checked CPU Chebyshev real-coefficient restriction; non-real HPD coefficients rejected",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_spectral_estimate_and_CSR_upload",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_and_host_spectral_estimate_then_device_numeric_refresh",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Host coefficient production and spectral estimation remain explicit setup/update work."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresChebyshev/f64/single-forward",
+      "strategy": "GmresChebyshev",
+      "scalar": "f64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR with real SPD coefficients; complex storage and RHS allowed",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD admission plus checked CPU Chebyshev real-coefficient restriction; non-real HPD coefficients rejected",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_spectral_estimate_and_CSR_upload",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_and_host_spectral_estimate_then_device_numeric_refresh",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Host coefficient production and spectral estimation remain explicit setup/update work."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresChebyshev/Complex32/single-forward",
+      "strategy": "GmresChebyshev",
+      "scalar": "Complex32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR with real SPD coefficients; complex storage and RHS allowed",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD admission plus checked CPU Chebyshev real-coefficient restriction; non-real HPD coefficients rejected",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_spectral_estimate_and_CSR_upload",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_and_host_spectral_estimate_then_device_numeric_refresh",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Host coefficient production and spectral estimation remain explicit setup/update work."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresChebyshev/Complex64/single-forward",
+      "strategy": "GmresChebyshev",
+      "scalar": "Complex64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR with real SPD coefficients; complex storage and RHS allowed",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD admission plus checked CPU Chebyshev real-coefficient restriction; non-real HPD coefficients rejected",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_spectral_estimate_and_CSR_upload",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_and_host_spectral_estimate_then_device_numeric_refresh",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Host coefficient production and spectral estimation remain explicit setup/update work."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresSchwarz/f32/single-forward",
+      "strategy": "GmresSchwarz",
+      "scalar": "f32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked CPU one-level Schwarz setup and default local ILU(0) pivots; facade overlap depth 1",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_CPU_partition_overlap_weights_and_packed_local_factor_upload",
+        "solve": "resident_sparse_gather_local_ILU_and_weighted_assembly_with_Krylov_control_scalars",
+        "numeric_update": "host_refactorization_then_in_place_factors_or_preconditioner_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and coarse-space variants remain open.",
+        "Host partition/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresSchwarz/f64/single-forward",
+      "strategy": "GmresSchwarz",
+      "scalar": "f64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked CPU one-level Schwarz setup and default local ILU(0) pivots; facade overlap depth 1",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_CPU_partition_overlap_weights_and_packed_local_factor_upload",
+        "solve": "resident_sparse_gather_local_ILU_and_weighted_assembly_with_Krylov_control_scalars",
+        "numeric_update": "host_refactorization_then_in_place_factors_or_preconditioner_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and coarse-space variants remain open.",
+        "Host partition/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresSchwarz/Complex32/single-forward",
+      "strategy": "GmresSchwarz",
+      "scalar": "Complex32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked CPU one-level Schwarz setup and default local ILU(0) pivots; facade overlap depth 1",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_CPU_partition_overlap_weights_and_packed_local_factor_upload",
+        "solve": "resident_sparse_gather_local_ILU_and_weighted_assembly_with_Krylov_control_scalars",
+        "numeric_update": "host_refactorization_then_in_place_factors_or_preconditioner_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and coarse-space variants remain open.",
+        "Host partition/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/GmresSchwarz/Complex64/single-forward",
+      "strategy": "GmresSchwarz",
+      "scalar": "Complex64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked CPU one-level Schwarz setup and default local ILU(0) pivots; facade overlap depth 1",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_CPU_partition_overlap_weights_and_packed_local_factor_upload",
+        "solve": "resident_sparse_gather_local_ILU_and_weighted_assembly_with_Krylov_control_scalars",
+        "numeric_update": "host_refactorization_then_in_place_factors_or_preconditioner_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and coarse-space variants remain open.",
+        "Host partition/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/FgmresSchwarz/f32/single-forward",
+      "strategy": "FgmresSchwarz",
+      "scalar": "f32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked CPU one-level Schwarz setup and default local ILU(0) pivots; facade overlap depth 1",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_CPU_partition_overlap_weights_and_packed_local_factor_upload",
+        "solve": "resident_sparse_gather_local_ILU_and_weighted_assembly_with_Krylov_control_scalars",
+        "numeric_update": "host_refactorization_then_in_place_factors_or_preconditioner_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and coarse-space variants remain open.",
+        "Host partition/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/FgmresSchwarz/f64/single-forward",
+      "strategy": "FgmresSchwarz",
+      "scalar": "f64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked CPU one-level Schwarz setup and default local ILU(0) pivots; facade overlap depth 1",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_CPU_partition_overlap_weights_and_packed_local_factor_upload",
+        "solve": "resident_sparse_gather_local_ILU_and_weighted_assembly_with_Krylov_control_scalars",
+        "numeric_update": "host_refactorization_then_in_place_factors_or_preconditioner_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and coarse-space variants remain open.",
+        "Host partition/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/FgmresSchwarz/Complex32/single-forward",
+      "strategy": "FgmresSchwarz",
+      "scalar": "Complex32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked CPU one-level Schwarz setup and default local ILU(0) pivots; facade overlap depth 1",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_CPU_partition_overlap_weights_and_packed_local_factor_upload",
+        "solve": "resident_sparse_gather_local_ILU_and_weighted_assembly_with_Krylov_control_scalars",
+        "numeric_update": "host_refactorization_then_in_place_factors_or_preconditioner_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and coarse-space variants remain open.",
+        "Host partition/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/FgmresSchwarz/Complex64/single-forward",
+      "strategy": "FgmresSchwarz",
+      "scalar": "Complex64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "General matrix with checked CPU one-level Schwarz setup and default local ILU(0) pivots; facade overlap depth 1",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_CPU_partition_overlap_weights_and_packed_local_factor_upload",
+        "solve": "resident_sparse_gather_local_ILU_and_weighted_assembly_with_Krylov_control_scalars",
+        "numeric_update": "host_refactorization_then_in_place_factors_or_preconditioner_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader matrices and application producers remain to be reviewed.",
+        "Block, transpose/Hermitian and coarse-space variants remain open.",
+        "Host partition/refactorization and launch-depth performance remain open."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Cg/f32/single-forward",
+      "strategy": "Cg",
+      "scalar": "f32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Cg/f64/single-forward",
+      "strategy": "Cg",
+      "scalar": "f64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Cg/Complex32/single-forward",
+      "strategy": "Cg",
+      "scalar": "Complex32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/Cg/Complex64/single-forward",
+      "strategy": "Cg",
+      "scalar": "Complex64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/CgAmg/f32/single-forward",
+      "strategy": "CgAmg",
+      "scalar": "f32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/CgAmg/f64/single-forward",
+      "strategy": "CgAmg",
+      "scalar": "f64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/CgAmg/Complex32/single-forward",
+      "strategy": "CgAmg",
+      "scalar": "Complex32",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    },
+    {
+      "id": "solver-facade/CgAmg/Complex64/single-forward",
+      "strategy": "CgAmg",
+      "scalar": "Complex64",
+      "cpu_entrypoint": "sonium_solvers::solve_with_backend_and_assumption",
+      "cuda_entrypoint": "sonium_solvers::CudaLinearSolveSession::try_new",
+      "matrix": "square canonicalizable CSR; caller supplies assembled coefficients",
+      "action": "forward",
+      "rhs": "single",
+      "constraints": "already encoded in input matrix and RHS; no constraint lowering in facade",
+      "assumption": "SPD/HPD validated with bounded exact or explicit large-system assumption policy",
+      "dispatch": "retained_cuda",
+      "phases": {
+        "setup": "host_validation_and_upload_with_host_amg_setup",
+        "solve": "resident_bulk_vectors_with_control_scalar_transfers",
+        "numeric_update": "host_values_fixed_pattern_refresh_preconditioner_may_rebuild",
+        "output": "device_solution_or_explicit_host_download"
+      },
+      "correctness": "bounded_native_tests_passed",
+      "residency": "bounded_native_allocation_and_transfer_assertions_passed",
+      "performance": "unmeasured_for_this_row",
+      "complete": false,
+      "remaining": [
+        "Broader sizes, conditioning and application producer parity remain to be reviewed.",
+        "Block RHS and transpose/Hermitian actions are separate open workflows.",
+        "Recurring host coefficient production is not eliminated by uploading refreshed values."
+      ],
+      "current_native_evidence": "perf/cuda-ilut-session-2026-10-22.json"
+    }
+  ]
+}

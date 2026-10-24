@@ -1,0 +1,2582 @@
+{
+  "status": "experimental_disabled_by_default",
+  "decision": "Do not promote: matched FEM solves regress despite fewer dispatches.",
+  "conditions": {
+    "suspended_pid": 1716879,
+    "command": [
+      "target/release/examples/cuda_fem_compare",
+      "4",
+      "8"
+    ],
+    "gpu_samples": [
+      {
+        "process_state": "T (stopped)",
+        "utilization_percent": "0"
+      },
+      {
+        "process_state": "T (stopped)",
+        "utilization_percent": "0"
+      },
+      {
+        "process_state": "T (stopped)",
+        "utilization_percent": "0"
+      }
+    ],
+    "runs": [
+      {
+        "mode": "off",
+        "exit_code": 0,
+        "output": "/tmp/fem-small-jacobi-ab-0-off.jsonl"
+      },
+      {
+        "mode": "on",
+        "exit_code": 0,
+        "output": "/tmp/fem-small-jacobi-ab-1-on.jsonl"
+      },
+      {
+        "mode": "on",
+        "exit_code": 0,
+        "output": "/tmp/fem-small-jacobi-ab-2-on.jsonl"
+      },
+      {
+        "mode": "off",
+        "exit_code": 0,
+        "output": "/tmp/fem-small-jacobi-ab-3-off.jsonl"
+      }
+    ],
+    "resumed": true
+  },
+  "runs": [
+    {
+      "mode": "off",
+      "exit_code": 0,
+      "output": "/tmp/fem-small-jacobi-ab-0-off.jsonl",
+      "rows": [
+        {
+          "action_repetitions": 100,
+          "action_samples": 7,
+          "boundary": "natural_neumann",
+          "context_setup_ms": 334.573705,
+          "k": 5.0,
+          "preconditioner_mass_shift": [
+            25.0,
+            25.0
+          ],
+          "scalar": "complex64",
+          "solve_initial_guess": "zero",
+          "solve_samples": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_profile": "aggregation",
+          "amg_smoother": "Jacobi",
+          "family_filter": "hex",
+          "hex_low_order_refined": true,
+          "max_iterations": 600,
+          "restart": 60,
+          "synchronized_profile": false
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.7840155827238253e-16,
+              "timing": {
+                "max_ms": 0.02744389,
+                "median_ms": 0.027402199999999998,
+                "min_ms": 0.02739689,
+                "samples_ms": [
+                  0.02744389,
+                  0.02740181,
+                  0.027411929999999998,
+                  0.02739689,
+                  0.027403610000000002,
+                  0.0273997,
+                  0.027402199999999998
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.520397071016613e-16,
+              "timing": {
+                "max_ms": 0.05673918,
+                "median_ms": 0.056717729999999994,
+                "min_ms": 0.05668307,
+                "samples_ms": [
+                  0.05673918,
+                  0.05668307,
+                  0.056713429999999995,
+                  0.056717729999999994,
+                  0.05669589,
+                  0.05671914,
+                  0.05671934
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            729,
+            72,
+            27,
+            19
+          ],
+          "amg_level_nnz": [
+            15625,
+            1740,
+            482,
+            290
+          ],
+          "amg_operator_complexity": 1.160768,
+          "csr_setup_ms": 8.374925,
+          "degree": 2,
+          "dofs": 729,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 17.325779999999998,
+          "nnz": 35937,
+          "preconditioner_apply_ms": 0.634221,
+          "preconditioner_kernel_launches": 15,
+          "preconditioner_library_operations": 22,
+          "preconditioner_setup_ms": 31.964278999999998,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "small_jacobi": false,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 333280,
+              "h2d_bytes": 6560,
+              "iterations": [
+                82,
+                82,
+                82,
+                82,
+                82
+              ],
+              "kernel_launches": 7815,
+              "library_operations": 11170,
+              "operator": "cusparse",
+              "solution_error": 3.701474121021632e-08,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 85.093812,
+                "median_ms": 84.840221,
+                "min_ms": 84.79757000000001,
+                "samples_ms": [
+                  85.093812,
+                  84.79757000000001,
+                  84.82972099999999,
+                  84.84452900000001,
+                  84.840221
+                ]
+              },
+              "true_relative_residual": 6.84310891091534e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 333280,
+              "h2d_bytes": 6560,
+              "iterations": [
+                82,
+                82,
+                82,
+                82,
+                82
+              ],
+              "kernel_launches": 8670,
+              "library_operations": 10735,
+              "operator": "specialized",
+              "solution_error": 3.701474111053192e-08,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 87.736978,
+                "median_ms": 87.62135,
+                "min_ms": 87.54261000000001,
+                "samples_ms": [
+                  87.736978,
+                  87.587385,
+                  87.62135,
+                  87.54261000000001,
+                  87.659331
+                ]
+              },
+              "true_relative_residual": 6.843108994368578e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 23.56009,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.6470021345808286e-16,
+              "timing": {
+                "max_ms": 0.03883837,
+                "median_ms": 0.038815020000000006,
+                "min_ms": 0.03878467,
+                "samples_ms": [
+                  0.03883837,
+                  0.038801,
+                  0.03881583,
+                  0.03878467,
+                  0.03882414,
+                  0.038815020000000006,
+                  0.038809119999999996
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.587444458735068e-16,
+              "timing": {
+                "max_ms": 0.06499842,
+                "median_ms": 0.06499122,
+                "min_ms": 0.06497538,
+                "samples_ms": [
+                  0.06497759,
+                  0.06499532,
+                  0.06497538,
+                  0.06499842,
+                  0.06499122,
+                  0.06499331,
+                  0.06498140000000001
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            2197,
+            159,
+            33,
+            21,
+            15
+          ],
+          "amg_level_nnz": [
+            50653,
+            4259,
+            520,
+            275,
+            142
+          ],
+          "amg_operator_complexity": 1.102580301265473,
+          "csr_setup_ms": 1.178312,
+          "degree": 3,
+          "dofs": 2197,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 89.066938,
+          "nnz": 226981,
+          "preconditioner_apply_ms": 0.8233900000000001,
+          "preconditioner_kernel_launches": 20,
+          "preconditioner_library_operations": 29,
+          "preconditioner_setup_ms": 45.814014,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "small_jacobi": false,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 840960,
+              "h2d_bytes": 14080,
+              "iterations": [
+                176,
+                176,
+                176,
+                176,
+                176
+              ],
+              "kernel_launches": 21160,
+              "library_operations": 30070,
+              "operator": "cusparse",
+              "solution_error": 1.0484432797754916e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 244.710139,
+                "median_ms": 244.59626300000002,
+                "min_ms": 244.48916,
+                "samples_ms": [
+                  244.59626300000002,
+                  244.710139,
+                  244.638473,
+                  244.49005200000002,
+                  244.48916
+                ]
+              },
+              "true_relative_residual": 9.778279810317362e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 840960,
+              "h2d_bytes": 14080,
+              "iterations": [
+                176,
+                176,
+                176,
+                176,
+                176
+              ],
+              "kernel_launches": 22975,
+              "library_operations": 29150,
+              "operator": "specialized",
+              "solution_error": 1.0484432614180408e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 250.14175799999998,
+                "median_ms": 249.580746,
+                "min_ms": 249.452923,
+                "samples_ms": [
+                  250.14175799999998,
+                  249.452923,
+                  249.580746,
+                  250.11225199999998,
+                  249.548134
+                ]
+              },
+              "true_relative_residual": 9.778279677088571e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 23.327609,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.9421464026215323e-16,
+              "timing": {
+                "max_ms": 0.03992463,
+                "median_ms": 0.03991962,
+                "min_ms": 0.039901690000000004,
+                "samples_ms": [
+                  0.03992463,
+                  0.0399095,
+                  0.03992021999999999,
+                  0.039915610000000004,
+                  0.03991992,
+                  0.03991962,
+                  0.039901690000000004
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 3.3925973381370487e-16,
+              "timing": {
+                "max_ms": 0.11020686,
+                "median_ms": 0.11012822,
+                "min_ms": 0.10952587,
+                "samples_ms": [
+                  0.10954650999999999,
+                  0.10958338,
+                  0.10952587,
+                  0.11020686,
+                  0.11012822,
+                  0.11020566000000001,
+                  0.11014014000000001
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            4913,
+            396,
+            86,
+            54,
+            39,
+            27
+          ],
+          "amg_level_nnz": [
+            117649,
+            13523,
+            1885,
+            1046,
+            604,
+            295
+          ],
+          "amg_operator_complexity": 1.1474980662819063,
+          "csr_setup_ms": 2.794403,
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 512,
+          "family": "hex",
+          "host_assembly_ms": 131.957334,
+          "nnz": 274625,
+          "preconditioner_apply_ms": 1.010164,
+          "preconditioner_kernel_launches": 25,
+          "preconditioner_library_operations": 36,
+          "preconditioner_setup_ms": 110.979737,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "small_jacobi": false,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 344800,
+              "h2d_bytes": 6800,
+              "iterations": [
+                85,
+                85,
+                85,
+                85,
+                85
+              ],
+              "kernel_launches": 12350,
+              "library_operations": 17525,
+              "operator": "cusparse",
+              "solution_error": 1.4051661218589312e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 134.059797,
+                "median_ms": 133.904021,
+                "min_ms": 133.73710499999999,
+                "samples_ms": [
+                  133.73710499999999,
+                  133.904021,
+                  133.967442,
+                  134.059797,
+                  133.77124
+                ]
+              },
+              "true_relative_residual": 9.073364487375826e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 344800,
+              "h2d_bytes": 6800,
+              "iterations": [
+                85,
+                85,
+                85,
+                85,
+                85
+              ],
+              "kernel_launches": 13235,
+              "library_operations": 17075,
+              "operator": "specialized",
+              "solution_error": 1.40516611550332e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 140.183947,
+                "median_ms": 140.126388,
+                "min_ms": 140.06111399999998,
+                "samples_ms": [
+                  140.126388,
+                  140.183947,
+                  140.06111399999998,
+                  140.099768,
+                  140.12844199999998
+                ]
+              },
+              "true_relative_residual": 9.073364428611097e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 24.559212,
+          "subdivisions": 8
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.654242014992561e-16,
+              "timing": {
+                "max_ms": 0.12953898,
+                "median_ms": 0.12950281,
+                "min_ms": 0.12947806,
+                "samples_ms": [
+                  0.12950532,
+                  0.12950281,
+                  0.12953898,
+                  0.12951053,
+                  0.12947877,
+                  0.1294989,
+                  0.12947806
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.754370046149782e-16,
+              "timing": {
+                "max_ms": 0.12650473,
+                "median_ms": 0.12644181000000002,
+                "min_ms": 0.12640605,
+                "samples_ms": [
+                  0.12644181000000002,
+                  0.12646737,
+                  0.12650473,
+                  0.12647198,
+                  0.12641517,
+                  0.12643148999999998,
+                  0.12640605
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            15625,
+            823,
+            157,
+            92,
+            52,
+            37,
+            24
+          ],
+          "amg_level_nnz": [
+            389017,
+            25060,
+            3812,
+            2050,
+            797,
+            481,
+            245
+          ],
+          "amg_operator_complexity": 1.0834025248253933,
+          "csr_setup_ms": 11.00158,
+          "degree": 3,
+          "dofs": 15625,
+          "elements": 512,
+          "family": "hex",
+          "host_assembly_ms": 798.697005,
+          "nnz": 1771561,
+          "preconditioner_apply_ms": 1.295574,
+          "preconditioner_kernel_launches": 30,
+          "preconditioner_library_operations": 43,
+          "preconditioner_setup_ms": 430.71795000000003,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "small_jacobi": false,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 670080,
+              "h2d_bytes": 12160,
+              "iterations": [
+                152,
+                152,
+                152,
+                152,
+                152
+              ],
+              "kernel_launches": 25880,
+              "library_operations": 36630,
+              "operator": "cusparse",
+              "solution_error": 3.033437227540406e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 314.27754899999996,
+                "median_ms": 314.265126,
+                "min_ms": 314.120361,
+                "samples_ms": [
+                  314.27754899999996,
+                  314.120361,
+                  314.270105,
+                  314.265126,
+                  314.2195
+                ]
+              },
+              "true_relative_residual": 8.888122910249415e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 670080,
+              "h2d_bytes": 12160,
+              "iterations": [
+                152,
+                152,
+                152,
+                152,
+                152
+              ],
+              "kernel_launches": 27455,
+              "library_operations": 35830,
+              "operator": "specialized",
+              "solution_error": 3.0334372468882876e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 313.690457,
+                "median_ms": 313.540573,
+                "min_ms": 313.524964,
+                "samples_ms": [
+                  313.537658,
+                  313.524964,
+                  313.540573,
+                  313.67008899999996,
+                  313.690457
+                ]
+              },
+              "true_relative_residual": 8.888123017283117e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 52.679059,
+          "subdivisions": 8
+        }
+      ]
+    },
+    {
+      "mode": "on",
+      "exit_code": 0,
+      "output": "/tmp/fem-small-jacobi-ab-1-on.jsonl",
+      "rows": [
+        {
+          "action_repetitions": 100,
+          "action_samples": 7,
+          "boundary": "natural_neumann",
+          "context_setup_ms": 335.769121,
+          "k": 5.0,
+          "preconditioner_mass_shift": [
+            25.0,
+            25.0
+          ],
+          "scalar": "complex64",
+          "solve_initial_guess": "zero",
+          "solve_samples": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_profile": "aggregation",
+          "amg_smoother": "Jacobi",
+          "family_filter": "hex",
+          "hex_low_order_refined": true,
+          "max_iterations": 600,
+          "restart": 60,
+          "synchronized_profile": false
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.7840155827238253e-16,
+              "timing": {
+                "max_ms": 0.02757493,
+                "median_ms": 0.02752815,
+                "min_ms": 0.02752153,
+                "samples_ms": [
+                  0.02757493,
+                  0.027532849999999998,
+                  0.02752835,
+                  0.02752815,
+                  0.02752153,
+                  0.02752454,
+                  0.027522940000000003
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.520397071016613e-16,
+              "timing": {
+                "max_ms": 0.057001880000000005,
+                "median_ms": 0.05699056,
+                "min_ms": 0.05698064,
+                "samples_ms": [
+                  0.05699006,
+                  0.05698064,
+                  0.056998969999999996,
+                  0.056996870000000005,
+                  0.057001880000000005,
+                  0.05699056,
+                  0.05698204
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            729,
+            72,
+            27,
+            19
+          ],
+          "amg_level_nnz": [
+            15625,
+            1740,
+            482,
+            290
+          ],
+          "amg_operator_complexity": 1.160768,
+          "csr_setup_ms": 7.957573000000001,
+          "degree": 2,
+          "dofs": 729,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 17.396914,
+          "nnz": 35937,
+          "preconditioner_apply_ms": 0.6591490000000001,
+          "preconditioner_kernel_launches": 13,
+          "preconditioner_library_operations": 16,
+          "preconditioner_setup_ms": 30.104817,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "small_jacobi": true,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 333280,
+              "h2d_bytes": 6560,
+              "iterations": [
+                82,
+                82,
+                82,
+                82,
+                82
+              ],
+              "kernel_launches": 6995,
+              "library_operations": 8710,
+              "operator": "cusparse",
+              "solution_error": 3.7014740996405766e-08,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 87.265866,
+                "median_ms": 87.119799,
+                "min_ms": 87.092057,
+                "samples_ms": [
+                  87.265866,
+                  87.16903300000001,
+                  87.119799,
+                  87.092057,
+                  87.10641399999999
+                ]
+              },
+              "true_relative_residual": 6.843108968081124e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 333280,
+              "h2d_bytes": 6560,
+              "iterations": [
+                82,
+                82,
+                82,
+                82,
+                82
+              ],
+              "kernel_launches": 7850,
+              "library_operations": 8275,
+              "operator": "specialized",
+              "solution_error": 3.7014740895277655e-08,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 90.381258,
+                "median_ms": 90.17367399999999,
+                "min_ms": 89.899064,
+                "samples_ms": [
+                  89.899064,
+                  90.17367399999999,
+                  90.211135,
+                  90.381258,
+                  89.98626999999999
+                ]
+              },
+              "true_relative_residual": 6.843108857614253e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 23.601608,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.6470021345808286e-16,
+              "timing": {
+                "max_ms": 0.03899587,
+                "median_ms": 0.03898876,
+                "min_ms": 0.03896922,
+                "samples_ms": [
+                  0.03899015,
+                  0.03898786,
+                  0.03899386,
+                  0.03898876,
+                  0.03896922,
+                  0.03899587,
+                  0.03897884
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.587444458735068e-16,
+              "timing": {
+                "max_ms": 0.06533536000000001,
+                "median_ms": 0.06532053,
+                "min_ms": 0.06530501,
+                "samples_ms": [
+                  0.06532304,
+                  0.06530821,
+                  0.06532425,
+                  0.06532053,
+                  0.06530501,
+                  0.06530601,
+                  0.06533536000000001
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            2197,
+            159,
+            33,
+            21,
+            15
+          ],
+          "amg_level_nnz": [
+            50653,
+            4259,
+            520,
+            275,
+            142
+          ],
+          "amg_operator_complexity": 1.102580301265473,
+          "csr_setup_ms": 1.186838,
+          "degree": 3,
+          "dofs": 2197,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 97.082532,
+          "nnz": 226981,
+          "preconditioner_apply_ms": 0.8416539999999999,
+          "preconditioner_kernel_launches": 17,
+          "preconditioner_library_operations": 20,
+          "preconditioner_setup_ms": 45.720437000000004,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "small_jacobi": true,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 840960,
+              "h2d_bytes": 14080,
+              "iterations": [
+                176,
+                176,
+                176,
+                176,
+                176
+              ],
+              "kernel_launches": 18520,
+              "library_operations": 22150,
+              "operator": "cusparse",
+              "solution_error": 1.0484432723732346e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 249.485265,
+                "median_ms": 249.43485,
+                "min_ms": 249.052686,
+                "samples_ms": [
+                  249.43485,
+                  249.052686,
+                  249.48158800000002,
+                  249.130262,
+                  249.485265
+                ]
+              },
+              "true_relative_residual": 9.77827970427882e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 840960,
+              "h2d_bytes": 14080,
+              "iterations": [
+                176,
+                176,
+                176,
+                176,
+                176
+              ],
+              "kernel_launches": 20335,
+              "library_operations": 21230,
+              "operator": "specialized",
+              "solution_error": 1.0484432640496501e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 254.609792,
+                "median_ms": 254.467903,
+                "min_ms": 254.20615800000002,
+                "samples_ms": [
+                  254.609792,
+                  254.20615800000002,
+                  254.467903,
+                  254.242076,
+                  254.549478
+                ]
+              },
+              "true_relative_residual": 9.778279557755542e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 20.570125,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.9421464026215323e-16,
+              "timing": {
+                "max_ms": 0.040106869999999996,
+                "median_ms": 0.04010387,
+                "min_ms": 0.04008423,
+                "samples_ms": [
+                  0.04008423,
+                  0.040106279999999994,
+                  0.040106869999999996,
+                  0.040091049999999996,
+                  0.04010667,
+                  0.04010387,
+                  0.040097850000000004
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 3.3925973381370487e-16,
+              "timing": {
+                "max_ms": 0.11017269999999998,
+                "median_ms": 0.11011768999999999,
+                "min_ms": 0.11006550000000001,
+                "samples_ms": [
+                  0.11013462,
+                  0.11012721,
+                  0.11017269999999998,
+                  0.11010447,
+                  0.11011768999999999,
+                  0.11010847000000001,
+                  0.11006550000000001
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            4913,
+            396,
+            86,
+            54,
+            39,
+            27
+          ],
+          "amg_level_nnz": [
+            117649,
+            13523,
+            1885,
+            1046,
+            604,
+            295
+          ],
+          "amg_operator_complexity": 1.1474980662819063,
+          "csr_setup_ms": 1.9466679999999998,
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 512,
+          "family": "hex",
+          "host_assembly_ms": 129.582886,
+          "nnz": 274625,
+          "preconditioner_apply_ms": 1.052754,
+          "preconditioner_kernel_launches": 22,
+          "preconditioner_library_operations": 27,
+          "preconditioner_setup_ms": 108.78501,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "small_jacobi": true,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 344800,
+              "h2d_bytes": 6800,
+              "iterations": [
+                85,
+                85,
+                85,
+                85,
+                85
+              ],
+              "kernel_launches": 11075,
+              "library_operations": 13700,
+              "operator": "cusparse",
+              "solution_error": 1.4051661209366933e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 137.69198799999998,
+                "median_ms": 137.46632,
+                "min_ms": 137.369948,
+                "samples_ms": [
+                  137.449568,
+                  137.46632,
+                  137.47448500000002,
+                  137.69198799999998,
+                  137.369948
+                ]
+              },
+              "true_relative_residual": 9.07336448465729e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 344800,
+              "h2d_bytes": 6800,
+              "iterations": [
+                85,
+                85,
+                85,
+                85,
+                85
+              ],
+              "kernel_launches": 11960,
+              "library_operations": 13250,
+              "operator": "specialized",
+              "solution_error": 1.4051661118603115e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 144.121306,
+                "median_ms": 143.85061299999998,
+                "min_ms": 143.76473000000001,
+                "samples_ms": [
+                  143.803614,
+                  144.121306,
+                  143.76473000000001,
+                  143.85061299999998,
+                  143.897763
+                ]
+              },
+              "true_relative_residual": 9.073364455236186e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 23.156885,
+          "subdivisions": 8
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.653868806171246e-16,
+              "timing": {
+                "max_ms": 0.129547,
+                "median_ms": 0.12946865,
+                "min_ms": 0.12943728999999998,
+                "samples_ms": [
+                  0.129547,
+                  0.1294437,
+                  0.12946865,
+                  0.12945052,
+                  0.12948598,
+                  0.12948938999999998,
+                  0.12943728999999998
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.754370046149782e-16,
+              "timing": {
+                "max_ms": 0.1264865,
+                "median_ms": 0.12644302,
+                "min_ms": 0.12642058,
+                "samples_ms": [
+                  0.12642058,
+                  0.12648500000000001,
+                  0.12642367999999998,
+                  0.12644302,
+                  0.1264361,
+                  0.12645644,
+                  0.1264865
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            15625,
+            823,
+            157,
+            92,
+            52,
+            37,
+            24
+          ],
+          "amg_level_nnz": [
+            389017,
+            25060,
+            3812,
+            2050,
+            797,
+            481,
+            245
+          ],
+          "amg_operator_complexity": 1.0834025248253933,
+          "csr_setup_ms": 10.832069,
+          "degree": 3,
+          "dofs": 15625,
+          "elements": 512,
+          "family": "hex",
+          "host_assembly_ms": 788.995049,
+          "nnz": 1771561,
+          "preconditioner_apply_ms": 1.420471,
+          "preconditioner_kernel_launches": 26,
+          "preconditioner_library_operations": 31,
+          "preconditioner_setup_ms": 420.574137,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "small_jacobi": true,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 670080,
+              "h2d_bytes": 12160,
+              "iterations": [
+                152,
+                152,
+                152,
+                152,
+                152
+              ],
+              "kernel_launches": 22840,
+              "library_operations": 27510,
+              "operator": "cusparse",
+              "solution_error": 3.033437226926775e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 333.521975,
+                "median_ms": 333.410103,
+                "min_ms": 333.328308,
+                "samples_ms": [
+                  333.328308,
+                  333.41934000000003,
+                  333.410103,
+                  333.405424,
+                  333.521975
+                ]
+              },
+              "true_relative_residual": 8.888122888023382e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 670080,
+              "h2d_bytes": 12160,
+              "iterations": [
+                152,
+                152,
+                152,
+                152,
+                152
+              ],
+              "kernel_launches": 24415,
+              "library_operations": 26710,
+              "operator": "specialized",
+              "solution_error": 3.033437245975071e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 333.230443,
+                "median_ms": 332.96449900000005,
+                "min_ms": 332.87204399999996,
+                "samples_ms": [
+                  333.230443,
+                  332.96449900000005,
+                  332.87204399999996,
+                  332.95663399999995,
+                  333.057045
+                ]
+              },
+              "true_relative_residual": 8.888122987173237e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 52.487095999999994,
+          "subdivisions": 8
+        }
+      ]
+    },
+    {
+      "mode": "on",
+      "exit_code": 0,
+      "output": "/tmp/fem-small-jacobi-ab-2-on.jsonl",
+      "rows": [
+        {
+          "action_repetitions": 100,
+          "action_samples": 7,
+          "boundary": "natural_neumann",
+          "context_setup_ms": 331.081262,
+          "k": 5.0,
+          "preconditioner_mass_shift": [
+            25.0,
+            25.0
+          ],
+          "scalar": "complex64",
+          "solve_initial_guess": "zero",
+          "solve_samples": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_profile": "aggregation",
+          "amg_smoother": "Jacobi",
+          "family_filter": "hex",
+          "hex_low_order_refined": true,
+          "max_iterations": 600,
+          "restart": 60,
+          "synchronized_profile": false
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.7840155827238253e-16,
+              "timing": {
+                "max_ms": 0.02757383,
+                "median_ms": 0.02753346,
+                "min_ms": 0.027510009999999998,
+                "samples_ms": [
+                  0.02757383,
+                  0.027534959999999997,
+                  0.02753346,
+                  0.027516620000000002,
+                  0.02751923,
+                  0.027510009999999998,
+                  0.027535659999999997
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.520397071016613e-16,
+              "timing": {
+                "max_ms": 0.05699767,
+                "median_ms": 0.056988660000000003,
+                "min_ms": 0.056978230000000005,
+                "samples_ms": [
+                  0.05699436000000001,
+                  0.056988660000000003,
+                  0.05699767,
+                  0.056978230000000005,
+                  0.05698665,
+                  0.05697904,
+                  0.056989450000000004
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            729,
+            72,
+            27,
+            19
+          ],
+          "amg_level_nnz": [
+            15625,
+            1740,
+            482,
+            290
+          ],
+          "amg_operator_complexity": 1.160768,
+          "csr_setup_ms": 8.25663,
+          "degree": 2,
+          "dofs": 729,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 19.127463000000002,
+          "nnz": 35937,
+          "preconditioner_apply_ms": 0.661393,
+          "preconditioner_kernel_launches": 13,
+          "preconditioner_library_operations": 16,
+          "preconditioner_setup_ms": 30.536234999999998,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "small_jacobi": true,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 333280,
+              "h2d_bytes": 6560,
+              "iterations": [
+                82,
+                82,
+                82,
+                82,
+                82
+              ],
+              "kernel_launches": 6995,
+              "library_operations": 8710,
+              "operator": "cusparse",
+              "solution_error": 3.7014740996405766e-08,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 87.291675,
+                "median_ms": 87.169994,
+                "min_ms": 87.126783,
+                "samples_ms": [
+                  87.15183999999999,
+                  87.291675,
+                  87.215632,
+                  87.126783,
+                  87.169994
+                ]
+              },
+              "true_relative_residual": 6.843108968081124e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 333280,
+              "h2d_bytes": 6560,
+              "iterations": [
+                82,
+                82,
+                82,
+                82,
+                82
+              ],
+              "kernel_launches": 7850,
+              "library_operations": 8275,
+              "operator": "specialized",
+              "solution_error": 3.7014740895277655e-08,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 89.88346399999999,
+                "median_ms": 89.855622,
+                "min_ms": 89.81164899999999,
+                "samples_ms": [
+                  89.81164899999999,
+                  89.825505,
+                  89.88346399999999,
+                  89.882664,
+                  89.855622
+                ]
+              },
+              "true_relative_residual": 6.843108857614253e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 23.371492,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.6473288059906332e-16,
+              "timing": {
+                "max_ms": 0.039000480000000004,
+                "median_ms": 0.03899146,
+                "min_ms": 0.038974629999999996,
+                "samples_ms": [
+                  0.03898795,
+                  0.038992860000000004,
+                  0.03898575,
+                  0.03899647,
+                  0.03899146,
+                  0.039000480000000004,
+                  0.038974629999999996
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.587444458735068e-16,
+              "timing": {
+                "max_ms": 0.06533746,
+                "median_ms": 0.06530661,
+                "min_ms": 0.06529659,
+                "samples_ms": [
+                  0.06533746,
+                  0.0653056,
+                  0.06529659,
+                  0.06533375999999999,
+                  0.06529919000000001,
+                  0.06533496,
+                  0.06530661
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            2197,
+            159,
+            33,
+            21,
+            15
+          ],
+          "amg_level_nnz": [
+            50653,
+            4259,
+            520,
+            275,
+            142
+          ],
+          "amg_operator_complexity": 1.102580301265473,
+          "csr_setup_ms": 1.207046,
+          "degree": 3,
+          "dofs": 2197,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 86.245854,
+          "nnz": 226981,
+          "preconditioner_apply_ms": 0.842576,
+          "preconditioner_kernel_launches": 17,
+          "preconditioner_library_operations": 20,
+          "preconditioner_setup_ms": 47.280092,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "small_jacobi": true,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 840960,
+              "h2d_bytes": 14080,
+              "iterations": [
+                176,
+                176,
+                176,
+                176,
+                176
+              ],
+              "kernel_launches": 18520,
+              "library_operations": 22150,
+              "operator": "cusparse",
+              "solution_error": 1.048443263997506e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 249.47174,
+                "median_ms": 249.212279,
+                "min_ms": 248.935364,
+                "samples_ms": [
+                  249.212279,
+                  249.47174,
+                  249.013633,
+                  249.224853,
+                  248.935364
+                ]
+              },
+              "true_relative_residual": 9.778279573781672e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 840960,
+              "h2d_bytes": 14080,
+              "iterations": [
+                176,
+                176,
+                176,
+                176,
+                176
+              ],
+              "kernel_launches": 20335,
+              "library_operations": 21230,
+              "operator": "specialized",
+              "solution_error": 1.0484432640496501e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 254.91207500000002,
+                "median_ms": 254.24908000000002,
+                "min_ms": 254.20041799999998,
+                "samples_ms": [
+                  254.91207500000002,
+                  254.24908000000002,
+                  254.24683599999997,
+                  254.339111,
+                  254.20041799999998
+                ]
+              },
+              "true_relative_residual": 9.778279557755542e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 20.297007999999998,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.9421464026215323e-16,
+              "timing": {
+                "max_ms": 0.04012471,
+                "median_ms": 0.04009605,
+                "min_ms": 0.04008062,
+                "samples_ms": [
+                  0.04012471,
+                  0.04011199,
+                  0.04009605,
+                  0.040097259999999996,
+                  0.04008693,
+                  0.04008062,
+                  0.04008844
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 3.3925973381370487e-16,
+              "timing": {
+                "max_ms": 0.11018211,
+                "median_ms": 0.11009816,
+                "min_ms": 0.11008062,
+                "samples_ms": [
+                  0.11009754999999999,
+                  0.11012241,
+                  0.11014535,
+                  0.11009816,
+                  0.11008062,
+                  0.11009455,
+                  0.11018211
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            4913,
+            396,
+            86,
+            54,
+            39,
+            27
+          ],
+          "amg_level_nnz": [
+            117649,
+            13523,
+            1885,
+            1046,
+            604,
+            295
+          ],
+          "amg_operator_complexity": 1.1474980662819063,
+          "csr_setup_ms": 1.527603,
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 512,
+          "family": "hex",
+          "host_assembly_ms": 135.461413,
+          "nnz": 274625,
+          "preconditioner_apply_ms": 1.052664,
+          "preconditioner_kernel_launches": 22,
+          "preconditioner_library_operations": 27,
+          "preconditioner_setup_ms": 110.408676,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "small_jacobi": true,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 344800,
+              "h2d_bytes": 6800,
+              "iterations": [
+                85,
+                85,
+                85,
+                85,
+                85
+              ],
+              "kernel_launches": 11075,
+              "library_operations": 13700,
+              "operator": "cusparse",
+              "solution_error": 1.4051661209366933e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 137.721284,
+                "median_ms": 137.447595,
+                "min_ms": 137.405675,
+                "samples_ms": [
+                  137.621163,
+                  137.447595,
+                  137.405675,
+                  137.435361,
+                  137.721284
+                ]
+              },
+              "true_relative_residual": 9.07336448465729e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 344800,
+              "h2d_bytes": 6800,
+              "iterations": [
+                85,
+                85,
+                85,
+                85,
+                85
+              ],
+              "kernel_launches": 11960,
+              "library_operations": 13250,
+              "operator": "specialized",
+              "solution_error": 1.4051661118603115e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 144.035815,
+                "median_ms": 143.855633,
+                "min_ms": 143.808875,
+                "samples_ms": [
+                  143.81329300000002,
+                  143.896912,
+                  144.035815,
+                  143.855633,
+                  143.808875
+                ]
+              },
+              "true_relative_residual": 9.073364455236186e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 22.361479,
+          "subdivisions": 8
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.654361244898984e-16,
+              "timing": {
+                "max_ms": 0.12950221,
+                "median_ms": 0.12946734999999998,
+                "min_ms": 0.12945933999999998,
+                "samples_ms": [
+                  0.129494,
+                  0.12945933999999998,
+                  0.12950221,
+                  0.12946734999999998,
+                  0.12948147999999998,
+                  0.12945963,
+                  0.12945984
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.754370046149782e-16,
+              "timing": {
+                "max_ms": 0.12649612,
+                "median_ms": 0.12647438,
+                "min_ms": 0.12639803,
+                "samples_ms": [
+                  0.12647438,
+                  0.12647428,
+                  0.12647639,
+                  0.12648009,
+                  0.12646335,
+                  0.12649612,
+                  0.12639803
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            15625,
+            823,
+            157,
+            92,
+            52,
+            37,
+            24
+          ],
+          "amg_level_nnz": [
+            389017,
+            25060,
+            3812,
+            2050,
+            797,
+            481,
+            245
+          ],
+          "amg_operator_complexity": 1.0834025248253933,
+          "csr_setup_ms": 10.48932,
+          "degree": 3,
+          "dofs": 15625,
+          "elements": 512,
+          "family": "hex",
+          "host_assembly_ms": 776.1360430000001,
+          "nnz": 1771561,
+          "preconditioner_apply_ms": 1.4202,
+          "preconditioner_kernel_launches": 26,
+          "preconditioner_library_operations": 31,
+          "preconditioner_setup_ms": 414.035973,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "small_jacobi": true,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 670080,
+              "h2d_bytes": 12160,
+              "iterations": [
+                152,
+                152,
+                152,
+                152,
+                152
+              ],
+              "kernel_launches": 22840,
+              "library_operations": 27510,
+              "operator": "cusparse",
+              "solution_error": 3.033437215368458e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 333.705514,
+                "median_ms": 333.437546,
+                "min_ms": 333.369878,
+                "samples_ms": [
+                  333.705514,
+                  333.437546,
+                  333.556912,
+                  333.369878,
+                  333.37095
+                ]
+              },
+              "true_relative_residual": 8.888122866546645e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 670080,
+              "h2d_bytes": 12160,
+              "iterations": [
+                152,
+                152,
+                152,
+                152,
+                152
+              ],
+              "kernel_launches": 24415,
+              "library_operations": 26710,
+              "operator": "specialized",
+              "solution_error": 3.033437245975071e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 333.32026399999995,
+                "median_ms": 333.013462,
+                "min_ms": 332.868418,
+                "samples_ms": [
+                  333.00102999999996,
+                  333.32026399999995,
+                  333.013462,
+                  333.164349,
+                  332.868418
+                ]
+              },
+              "true_relative_residual": 8.888122987173237e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 52.302324999999996,
+          "subdivisions": 8
+        }
+      ]
+    },
+    {
+      "mode": "off",
+      "exit_code": 0,
+      "output": "/tmp/fem-small-jacobi-ab-3-off.jsonl",
+      "rows": [
+        {
+          "action_repetitions": 100,
+          "action_samples": 7,
+          "boundary": "natural_neumann",
+          "context_setup_ms": 330.005335,
+          "k": 5.0,
+          "preconditioner_mass_shift": [
+            25.0,
+            25.0
+          ],
+          "scalar": "complex64",
+          "solve_initial_guess": "zero",
+          "solve_samples": 5,
+          "tolerance": 1e-09
+        },
+        {
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_profile": "aggregation",
+          "amg_smoother": "Jacobi",
+          "family_filter": "hex",
+          "hex_low_order_refined": true,
+          "max_iterations": 600,
+          "restart": 60,
+          "synchronized_profile": false
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.7840155827238253e-16,
+              "timing": {
+                "max_ms": 0.02757855,
+                "median_ms": 0.02752444,
+                "min_ms": 0.02751973,
+                "samples_ms": [
+                  0.02757855,
+                  0.02752233,
+                  0.02751973,
+                  0.027539970000000004,
+                  0.02753747,
+                  0.027522039999999998,
+                  0.02752444
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 2.520397071016613e-16,
+              "timing": {
+                "max_ms": 0.057023120000000004,
+                "median_ms": 0.05698815,
+                "min_ms": 0.05697112,
+                "samples_ms": [
+                  0.056978230000000005,
+                  0.057023120000000004,
+                  0.05699957,
+                  0.05697112,
+                  0.05698815,
+                  0.056986850000000006,
+                  0.056998270000000004
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            729,
+            72,
+            27,
+            19
+          ],
+          "amg_level_nnz": [
+            15625,
+            1740,
+            482,
+            290
+          ],
+          "amg_operator_complexity": 1.160768,
+          "csr_setup_ms": 8.129119000000001,
+          "degree": 2,
+          "dofs": 729,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 17.21481,
+          "nnz": 35937,
+          "preconditioner_apply_ms": 0.637157,
+          "preconditioner_kernel_launches": 15,
+          "preconditioner_library_operations": 22,
+          "preconditioner_setup_ms": 32.383002,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "small_jacobi": false,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 333280,
+              "h2d_bytes": 6560,
+              "iterations": [
+                82,
+                82,
+                82,
+                82,
+                82
+              ],
+              "kernel_launches": 7815,
+              "library_operations": 11170,
+              "operator": "cusparse",
+              "solution_error": 3.701474121021632e-08,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 85.409279,
+                "median_ms": 85.197208,
+                "min_ms": 85.127004,
+                "samples_ms": [
+                  85.15074,
+                  85.127004,
+                  85.197208,
+                  85.306324,
+                  85.409279
+                ]
+              },
+              "true_relative_residual": 6.84310891091534e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 333280,
+              "h2d_bytes": 6560,
+              "iterations": [
+                82,
+                82,
+                82,
+                82,
+                82
+              ],
+              "kernel_launches": 8670,
+              "library_operations": 10735,
+              "operator": "specialized",
+              "solution_error": 3.701474111053192e-08,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 88.056695,
+                "median_ms": 87.95423,
+                "min_ms": 87.91405400000001,
+                "samples_ms": [
+                  87.91405400000001,
+                  87.962076,
+                  87.95423,
+                  88.056695,
+                  87.918603
+                ]
+              },
+              "true_relative_residual": 6.843108994368578e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 23.613018999999998,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.6470021345808286e-16,
+              "timing": {
+                "max_ms": 0.039703810000000006,
+                "median_ms": 0.038982840000000005,
+                "min_ms": 0.03897403,
+                "samples_ms": [
+                  0.03899287,
+                  0.03898114,
+                  0.03897473,
+                  0.038982840000000005,
+                  0.03897403,
+                  0.03909666,
+                  0.039703810000000006
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.587444458735068e-16,
+              "timing": {
+                "max_ms": 0.0653526,
+                "median_ms": 0.06533256,
+                "min_ms": 0.06530941,
+                "samples_ms": [
+                  0.06533256,
+                  0.06530941,
+                  0.0653526,
+                  0.06532584999999999,
+                  0.06534748,
+                  0.06533967,
+                  0.06531292
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            2197,
+            159,
+            33,
+            21,
+            15
+          ],
+          "amg_level_nnz": [
+            50653,
+            4259,
+            520,
+            275,
+            142
+          ],
+          "amg_operator_complexity": 1.102580301265473,
+          "csr_setup_ms": 1.597486,
+          "degree": 3,
+          "dofs": 2197,
+          "elements": 64,
+          "family": "hex",
+          "host_assembly_ms": 98.777192,
+          "nnz": 226981,
+          "preconditioner_apply_ms": 0.8235399999999999,
+          "preconditioner_kernel_launches": 20,
+          "preconditioner_library_operations": 29,
+          "preconditioner_setup_ms": 50.563703000000004,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "small_jacobi": false,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 840960,
+              "h2d_bytes": 14080,
+              "iterations": [
+                176,
+                176,
+                176,
+                176,
+                176
+              ],
+              "kernel_launches": 21160,
+              "library_operations": 30070,
+              "operator": "cusparse",
+              "solution_error": 1.0484432744770685e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 245.989876,
+                "median_ms": 245.837547,
+                "min_ms": 245.713161,
+                "samples_ms": [
+                  245.837547,
+                  245.92894,
+                  245.775249,
+                  245.989876,
+                  245.713161
+                ]
+              },
+              "true_relative_residual": 9.778279672608751e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 840960,
+              "h2d_bytes": 14080,
+              "iterations": [
+                176,
+                176,
+                176,
+                176,
+                176
+              ],
+              "kernel_launches": 22975,
+              "library_operations": 29150,
+              "operator": "specialized",
+              "solution_error": 1.0484432614180408e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 251.368274,
+                "median_ms": 251.167784,
+                "min_ms": 250.96704399999996,
+                "samples_ms": [
+                  250.96704399999996,
+                  251.368274,
+                  251.10508599999997,
+                  251.30282999999997,
+                  251.167784
+                ]
+              },
+              "true_relative_residual": 9.778279677088571e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 22.504941000000002,
+          "subdivisions": 4
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 1.9421464026215323e-16,
+              "timing": {
+                "max_ms": 0.04014284,
+                "median_ms": 0.040110780000000006,
+                "min_ms": 0.040105970000000005,
+                "samples_ms": [
+                  0.04013874,
+                  0.04014284,
+                  0.040110780000000006,
+                  0.040105970000000005,
+                  0.04011138,
+                  0.04010647,
+                  0.04011059
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 3.3925973381370487e-16,
+              "timing": {
+                "max_ms": 0.11019975,
+                "median_ms": 0.11014645,
+                "min_ms": 0.11011158,
+                "samples_ms": [
+                  0.11015056000000001,
+                  0.11019975,
+                  0.11011158,
+                  0.11013903,
+                  0.11017700999999999,
+                  0.11012611,
+                  0.11014645
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            4913,
+            396,
+            86,
+            54,
+            39,
+            27
+          ],
+          "amg_level_nnz": [
+            117649,
+            13523,
+            1885,
+            1046,
+            604,
+            295
+          ],
+          "amg_operator_complexity": 1.1474980662819063,
+          "csr_setup_ms": 1.913775,
+          "degree": 2,
+          "dofs": 4913,
+          "elements": 512,
+          "family": "hex",
+          "host_assembly_ms": 130.90221699999998,
+          "nnz": 274625,
+          "preconditioner_apply_ms": 1.010263,
+          "preconditioner_kernel_launches": 25,
+          "preconditioner_library_operations": 36,
+          "preconditioner_setup_ms": 109.091491,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 3,
+          "small_jacobi": false,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 344800,
+              "h2d_bytes": 6800,
+              "iterations": [
+                85,
+                85,
+                85,
+                85,
+                85
+              ],
+              "kernel_launches": 12350,
+              "library_operations": 17525,
+              "operator": "cusparse",
+              "solution_error": 1.4051661218589312e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 134.032566,
+                "median_ms": 133.809795,
+                "min_ms": 133.707351,
+                "samples_ms": [
+                  133.707351,
+                  133.755351,
+                  134.032566,
+                  133.911517,
+                  133.809795
+                ]
+              },
+              "true_relative_residual": 9.073364487375826e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 344800,
+              "h2d_bytes": 6800,
+              "iterations": [
+                85,
+                85,
+                85,
+                85,
+                85
+              ],
+              "kernel_launches": 13235,
+              "library_operations": 17075,
+              "operator": "specialized",
+              "solution_error": 1.40516611550332e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 140.486512,
+                "median_ms": 140.11034,
+                "min_ms": 140.061196,
+                "samples_ms": [
+                  140.166826,
+                  140.090522,
+                  140.061196,
+                  140.11034,
+                  140.486512
+                ]
+              },
+              "true_relative_residual": 9.073364428611097e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 24.868648,
+          "subdivisions": 8
+        },
+        {
+          "actions": [
+            {
+              "kernel_launches": 0,
+              "library_operations": 700,
+              "operator": "cusparse",
+              "relative_error": 3.654440895427242e-16,
+              "timing": {
+                "max_ms": 0.12951804,
+                "median_ms": 0.12948689,
+                "min_ms": 0.12942988,
+                "samples_ms": [
+                  0.12945523,
+                  0.12942988,
+                  0.12948689,
+                  0.12950151,
+                  0.12951804,
+                  0.12943909,
+                  0.12949871
+                ]
+              }
+            },
+            {
+              "kernel_launches": 1400,
+              "library_operations": 0,
+              "operator": "specialized",
+              "relative_error": 6.754370046149782e-16,
+              "timing": {
+                "max_ms": 0.12654741,
+                "median_ms": 0.1264315,
+                "min_ms": 0.12640385,
+                "samples_ms": [
+                  0.12648129,
+                  0.12654741,
+                  0.12642649,
+                  0.1264315,
+                  0.12640385,
+                  0.12640655,
+                  0.12648009
+                ]
+              }
+            }
+          ],
+          "amg_config": "AmgConfig { coarsening: SmoothedAggregation, interpolation: Standard, restriction: Transpose, symmetrize_strength: false, smoother: Jacobi, f_point_smoothing: false, cycle: VCycle, k_cycle_iterations: 0, strong_threshold: 0.08, max_levels: 25, coarse_size: 16, num_pre_smooth: 2, num_post_smooth: 2, jacobi_weight: 0.6, trunc_factor: 0.0, galerkin_drop_tol: 0.001, max_interp_elements: 4, aggressive_coarsening_levels: 0, mis_distance: 2, sa_strength_with_ata: true, material_soc: None, energy_min_iterations: 4, energy_min_pattern_distance: 1, near_nullspace_dim: 1, block_size: 1, max_grid_complexity: Some(2.0), max_operator_complexity: Some(3.0) }",
+          "amg_level_dofs": [
+            15625,
+            823,
+            157,
+            92,
+            52,
+            37,
+            24
+          ],
+          "amg_level_nnz": [
+            389017,
+            25060,
+            3812,
+            2050,
+            797,
+            481,
+            245
+          ],
+          "amg_operator_complexity": 1.0834025248253933,
+          "csr_setup_ms": 10.916929000000001,
+          "degree": 3,
+          "dofs": 15625,
+          "elements": 512,
+          "family": "hex",
+          "host_assembly_ms": 814.237611,
+          "nnz": 1771561,
+          "preconditioner_apply_ms": 1.2961349999999998,
+          "preconditioner_kernel_launches": 30,
+          "preconditioner_library_operations": 43,
+          "preconditioner_setup_ms": 440.592529,
+          "preconditioner_warm_allocations": 0,
+          "preconditioner_warm_d2h_bytes": 0,
+          "preconditioner_warm_h2d_bytes": 0,
+          "quadrature": 4,
+          "small_jacobi": false,
+          "solves": [
+            {
+              "converged": true,
+              "d2h_bytes": 670080,
+              "h2d_bytes": 12160,
+              "iterations": [
+                152,
+                152,
+                152,
+                152,
+                152
+              ],
+              "kernel_launches": 25880,
+              "library_operations": 36630,
+              "operator": "cusparse",
+              "solution_error": 3.033437221641376e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 314.477381,
+                "median_ms": 314.41332900000003,
+                "min_ms": 314.27556899999996,
+                "samples_ms": [
+                  314.41332900000003,
+                  314.33101400000004,
+                  314.477381,
+                  314.44600099999997,
+                  314.27556899999996
+                ]
+              },
+              "true_relative_residual": 8.888122918494537e-10,
+              "warm_allocations": 0
+            },
+            {
+              "converged": true,
+              "d2h_bytes": 670080,
+              "h2d_bytes": 12160,
+              "iterations": [
+                152,
+                152,
+                152,
+                152,
+                152
+              ],
+              "kernel_launches": 27455,
+              "library_operations": 35830,
+              "operator": "specialized",
+              "solution_error": 3.0334372468882876e-07,
+              "synchronized_profile": null,
+              "timing": {
+                "max_ms": 314.051294,
+                "median_ms": 313.797935,
+                "min_ms": 313.566145,
+                "samples_ms": [
+                  314.051294,
+                  313.828332,
+                  313.566145,
+                  313.654272,
+                  313.797935
+                ]
+              },
+              "true_relative_residual": 8.888123017283117e-10,
+              "warm_allocations": 0
+            }
+          ],
+          "specialized_setup_ms": 56.821757,
+          "subdivisions": 8
+        }
+      ]
+    }
+  ],
+  "comparisons": [
+    {
+      "dofs": 729,
+      "operator": "cusparse",
+      "off_median_ms": 85.110408,
+      "on_median_ms": 87.1604365,
+      "change_percent": 2.408669571881261,
+      "iterations": [
+        82
+      ],
+      "max_true_relative_residual": 6.843108968081124e-10
+    },
+    {
+      "dofs": 729,
+      "operator": "specialized",
+      "off_median_ms": 87.825516,
+      "on_median_ms": 89.89126399999999,
+      "change_percent": 2.3521045979393973,
+      "iterations": [
+        82
+      ],
+      "max_true_relative_residual": 6.843108994368578e-10
+    },
+    {
+      "dofs": 2197,
+      "operator": "cusparse",
+      "off_median_ms": 245.21165000000002,
+      "on_median_ms": 249.218566,
+      "change_percent": 1.6340642869129507,
+      "iterations": [
+        176
+      ],
+      "max_true_relative_residual": 9.778279810317362e-10
+    },
+    {
+      "dofs": 2197,
+      "operator": "specialized",
+      "off_median_ms": 250.55440099999998,
+      "on_median_ms": 254.29409550000003,
+      "change_percent": 1.492567875509021,
+      "iterations": [
+        176
+      ],
+      "max_true_relative_residual": 9.778279677088571e-10
+    },
+    {
+      "dofs": 4913,
+      "operator": "cusparse",
+      "off_median_ms": 133.856908,
+      "on_median_ms": 137.457944,
+      "change_percent": 2.6902130445146666,
+      "iterations": [
+        85
+      ],
+      "max_true_relative_residual": 9.073364487375826e-10
+    },
+    {
+      "dofs": 4913,
+      "operator": "specialized",
+      "off_median_ms": 140.11836399999999,
+      "on_median_ms": 143.85312299999998,
+      "change_percent": 2.665431491906367,
+      "iterations": [
+        85
+      ],
+      "max_true_relative_residual": 9.073364455236186e-10
+    },
+    {
+      "dofs": 15625,
+      "operator": "cusparse",
+      "off_median_ms": 314.27655899999996,
+      "on_median_ms": 333.41472150000004,
+      "change_percent": 6.089592733513438,
+      "iterations": [
+        152
+      ],
+      "max_true_relative_residual": 8.888122918494537e-10
+    },
+    {
+      "dofs": 15625,
+      "operator": "specialized",
+      "off_median_ms": 313.6621805,
+      "on_median_ms": 333.007246,
+      "change_percent": 6.167484224321407,
+      "iterations": [
+        152
+      ],
+      "max_true_relative_residual": 8.888123017283117e-10
+    }
+  ],
+  "source_sha256": {
+    "crates/sonium-compute/src/backend/mod.rs": "171c354401fd75aa5f7ed5bc0786f558912fa6cd43139337d9045cdc9e73aea8",
+    "crates/sonium-compute/src/cuda/cublas.rs": "92c152124565eac6c887b7f25ae811cdf19ea7d5542d79924e5ca79035fa32f2",
+    "crates/sonium-compute/src/cuda/small_jacobi.rs": "3262353fa6e84732f3f521a122b288292c6598ac2c9c7643719517959dfce6b1",
+    "crates/sonium-compute/src/cuda/kernels/local_kernels.cu": "03f95c409dc81b5444a70b77049d7d7afe24ee9094052f6a483368e86997838c",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/amg/mod.rs": "1b2f5e4abc77e0cdecf7c5abd9824febf16ff3af16c543868938ca4c012b115b",
+    "crates/sonium-fem/examples/cuda_fem_compare.rs": "03cacf495e58d05fbafa121194cecbaf23b32def49aadc32229f6778a4ae931c"
+  },
+  "binary_sha256": "3e9a4bdef6dda8c500d53c79728c540f8d455fa17811cec3cc4bfe1c165c377f",
+  "validation": {
+    "native_primitive": "passed, four scalar types",
+    "native_independent_cycles": "passed, complex64 Jacobi/L1/Chebyshev V/W/F with opt-in on final pass",
+    "native_all_scalar_cycles": "passed, V/W/F baseline parity and fewer operations",
+    "cycle_memcheck": "passed, zero errors",
+    "cpu_preconditioners": "241 passed",
+    "cpu_compute": "655 passed",
+    "cargo_check": "passed",
+    "cargo_clippy": "passed with existing warnings",
+    "all_scalar_cycle_memcheck": "passed, zero errors"
+  },
+  "limitations": [
+    "Synchronized phase profile motivated candidate; these A/B runs disable phase profiling.",
+    "BEM sanitizer context remains resident but process is suspended during measurement and resumed afterward.",
+    "No performance result beyond these bounded Q2/Q3 meshes."
+  ]
+}

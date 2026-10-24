@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-22",
+  "scope": "Native retained dense TBEM frequency sweep with explicit Jacobi",
+  "sources_sha256": {
+    "crates/sonium-bem/src/core/solver/frequency_sweep_cuda.rs": "af7cbf85f5ec75202c4d151dd01d1b9d86f69b71c1b40a62c7edae987aafd243",
+    "crates/sonium-bem/src/core/solver/frequency_sweep.rs": "d5fbf4ebb5d693594a7fb562c5df5940408d083234efb8fcf576134d2c1a8a70",
+    "crates/sonium-bem/src/core/bem_solver_cuda.rs": "d89af91f5000b66de31eb6b7becbccea8b0e7c6f1ad387d509b53d1a2f635a1a",
+    "crates/sonium-bem/src/core/bem_solver.rs": "a63a7e9c6094be1d1bfbf663721653f39e931335db978e7fe789129682581694"
+  },
+  "native": {
+    "passed": 1,
+    "physical_solves": 28,
+    "log": "/tmp/cuda-sweep-native.log"
+  },
+  "memcheck": {
+    "passed": 1,
+    "errors": 0,
+    "log": "/tmp/cuda-sweep-memcheck.log"
+  },
+  "cpu_bem": {
+    "passed": 541,
+    "ignored": 3,
+    "log": "/tmp/cuda-sweep-cpu.log"
+  },
+  "cases": {
+    "panels": 20,
+    "ka": [
+      0.1,
+      0.11,
+      0.5,
+      0.51,
+      1.2,
+      1.21,
+      2.2
+    ],
+    "harmonic_factor": [
+      -1,
+      1
+    ],
+    "interior": [
+      false,
+      true
+    ],
+    "boundaries": "prescribed pressure plus nonzero velocity/admittance with per-frequency overrides",
+    "incident": "exterior plane wave; interior point source",
+    "cpu_solution_relative_error_gate": 1e-07,
+    "solver_tolerance": 1e-10,
+    "same_schedule_warm_allocations": 0,
+    "negative": "GCRO-DR rejected before allocation; empty sweep returns without allocation"
+  },
+  "limitations": [
+    "No NumCalc dispatch yet",
+    "Explicit host solution export per frequency; field output remains separate",
+    "Constant Tri3 dense systems below 1000 DOFs",
+    "Point Jacobi is not universally suitable",
+    "GCRO-DR unavailable",
+    "Legacy assembly memory not fully pooled",
+    "No speedup claim"
+  ]
+}

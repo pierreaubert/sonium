@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-22",
+  "scope": "Consistent zero-based host CSR admission for persistent and adjoint preparation",
+  "change": "HostCsrRef constructors reject nonzero first row offsets; panicking constructor delegates to checked validation",
+  "source_sha256": "d28e3a38076fd178a35b9f508091cec7cd224d6d4b39f4ba35c81aa2d90ae3cb",
+  "validation": {
+    "compute_cpu_tests_passed": 654,
+    "cuda_host_csr_tests_passed": 10,
+    "cuda_upload_rejection_cases": 12,
+    "cuda_scalar_types": [
+      "f32",
+      "f64",
+      "Complex32",
+      "Complex64"
+    ],
+    "cuda_entrypoints": [
+      "DeviceCsr",
+      "PersistentDeviceCsr",
+      "AdjointDeviceCsr"
+    ],
+    "rejection_allocation_operations": 0,
+    "rejection_kernel_launches": 0,
+    "rejection_h2d_bytes": 0,
+    "rejection_d2h_bytes": 0,
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_compute_clippy": "passed with existing warnings"
+  },
+  "limits": [
+    "Device upload already rejected these malformed matrices before this change; the fix closes inconsistent host preparation validation",
+    "Public struct fields still permit unchecked construction; checked transformations/uploads revalidate",
+    "No new solver/physics coverage or performance claim"
+  ],
+  "logs": [
+    "/tmp/csr-validation-compute.log",
+    "/tmp/csr-validation-native.log",
+    "/tmp/csr-validation-check.log",
+    "/tmp/csr-validation-clippy.log",
+    "/tmp/csr-validation-cuda-clippy.log"
+  ]
+}

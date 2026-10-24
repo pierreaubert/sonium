@@ -1,0 +1,97 @@
+{
+  "date": "2026-10-22",
+  "scope": "Direct canonical CSR preparation for retained generic/configured CUDA FEM sessions, adopted by room treatment forward/Hermitian preparation",
+  "source_sha256": {
+    "crates/sonium-fem/src/solver/mod.rs": "49ab380948129330cd814724202c319a6f81d4a066b5b9bc8dc81bc1269b4896",
+    "crates/sonium-fem/src/solver/device.rs": "de9f18e4fb5bf7a2c7362b12b430c76f12307335962692ec307da7c3aa8fd539",
+    "crates/sonium-fem/src/solver/device/configured.rs": "0c512481b002efc167021aa63a9de7b0c098593c8a46734d4e05a8a391e584aa",
+    "crates/sonium-fem/src/solver/device/tests/configured.rs": "b44310a8174e31da42f7a2740d097cc3673db6e7aa3d551779a77a1ab198f661",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda.rs": "61fe25b8a5f9e04756acfa942eb52aa4d82f2eab9df430faffcfecf8ecdc458a"
+  },
+  "binaries": {
+    "target/debug/deps/sonium_fem-29b7e38cb22668e9": "9e88ae8e69ab757da5227b13e0b052b9d86c9651739709e41f17d3d842d11d89",
+    "target/debug/deps/sonium_sim_room-e8de7d292c6c8339": "bbf15e5613be9e3299720e4fd6aa42212e5d14e288f748501ddeed819a87f667"
+  },
+  "implementation": [
+    "Shared workload/native-method admission and device initialization with existing assembled session",
+    "Forward path borrows canonical CSR values; transpose/Hermitian uses checked linear-time host CSR transpose",
+    "Rejects malformed, noncanonical, nonsquare/empty or non-finite input before upload and preconditioner callback",
+    "Configured session preserves exact solver choice and Schwarz controls",
+    "Room treatment no longer converts CSR to COO and back during phase setup"
+  ],
+  "fixtures": {
+    "csr_actions": "P1/P2 4x4 triangular Helmholtz matrices with Dirichlet elimination and a small nonsymmetric complex perturbation; manufactured RHS and exact solution; ILU and three-domain overlap-one Schwarz; forward/transpose/Hermitian",
+    "reuse": "Three RHS solves per case, zero additional backend allocations on warmed solves; solution parity with COO entry and independent host matvec residual",
+    "recovery": "Injected D2D RHS update failure unpublishes field, blocks solve until repair, and then recovers",
+    "rejection": "12 invalid CSR/RHS cases across all three actions; preconditioner callback not invoked; zero device allocations/H2D",
+    "producer": "Existing single/band treatment and body-fitted handoff CPU objective/gradient/MMA parity and reuse gates"
+  },
+  "results": {
+    "native_configured": "4 passed",
+    "native_generic_regression": "5 passed",
+    "native_room": "3 passed",
+    "memcheck_configured": "4 passed, 0 errors",
+    "memcheck_room": "3 passed, 0 errors",
+    "cpu_fem": "1964 passed, 1 ignored",
+    "cpu_room": "331 passed, 1 ignored",
+    "pipeline": "12 passed",
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_clippy": "passed with existing warnings; none in changed device files",
+    "inventory": "22 packages, 1358 source review units; fresh",
+    "registry": "40 retained-dispatch rows, zero complete; validator and 10 audit tests passed"
+  },
+  "logs": {
+    "build": {
+      "path": "/tmp/fem-csr-build.log",
+      "sha256": "64ede9425f3e2b15650c5ad119552bf10dd4ae0104dba08d8085590b06a0c6a6"
+    },
+    "native": {
+      "path": "/tmp/fem-csr-native.log",
+      "sha256": "cc9c496fcae2d2846aa8f3840d0723d652f9ad801cd649ed63983966308ad5a5"
+    },
+    "generic": {
+      "path": "/tmp/fem-csr-generic.log",
+      "sha256": "bca2837c65ebd33ec26aa9546455296fadd4380339b771a57ee8cc42b548e2d9"
+    },
+    "room": {
+      "path": "/tmp/fem-csr-room.log",
+      "sha256": "35cd2d9e565e097b1a312ee680d4453ba7fe2660a8b89a34c718066c92ed9520"
+    },
+    "memcheck": {
+      "path": "/tmp/fem-csr-memcheck.log",
+      "sha256": "696af97a60ed7c4e11bc1e34667778bef60d9c5ef2efe80b235a8150147f93cb"
+    },
+    "room-memcheck": {
+      "path": "/tmp/fem-csr-room-memcheck.log",
+      "sha256": "aee633b51bb255c5a0850b2f11f788c234c7f202dcc27bfd0ba1c3afde94835a"
+    },
+    "cpu": {
+      "path": "/tmp/fem-csr-cpu.log",
+      "sha256": "52a91ff4663a6d6c8f224740b320a9b9f002234d000e47b9cd366fd92a3bd45b"
+    },
+    "pipeline": {
+      "path": "/tmp/fem-csr-pipeline.log",
+      "sha256": "8ddf8e475abddc4f97f18596aaf36804783bc4082663198f145a056cb27b714f"
+    },
+    "check": {
+      "path": "/tmp/fem-csr-check.log",
+      "sha256": "64efb8b96fa74cefbffbbe8eadbf251948cdbc2f74cc5d47133c6a3352c7f49b"
+    },
+    "clippy": {
+      "path": "/tmp/fem-csr-clippy.log",
+      "sha256": "5027188f09730f667895746956a4ac963ec11383357346153d6c6025ed687427"
+    },
+    "cuda-clippy": {
+      "path": "/tmp/fem-csr-cuda-clippy.log",
+      "sha256": "f3bc17f874c96503cd1cd08bb862ea5e0a5a40c88bf0a4aa9aacd136a379349b"
+    }
+  },
+  "limitations": [
+    "No controlled setup-time or solve-time comparison; no speedup claim",
+    "Host assembly/constraint elimination and preconditioner setup remain explicit host work",
+    "Canonical CSR is required: unsorted/duplicate input must be canonicalized by the caller",
+    "Legacy CPU convenience route is unchanged; explicit retained CUDA API selection is required",
+    "CSR action validation is bounded to Complex64 P1/P2 fixtures; full CUDA workflow coverage remains incomplete"
+  ]
+}

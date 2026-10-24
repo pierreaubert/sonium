@@ -1,0 +1,103 @@
+{
+  "date": "2026-10-21",
+  "scope": "Persistent constant-Tri3 H-matrix CUDA GMRES with fixed geometry/material/frequency and repeated incident fields",
+  "working_tree": true,
+  "head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "source_sha256": {
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix.rs": "055d05e8b211283e1e1f07e57f85de077175abcc447ebeb8740794865f2bf927",
+    "crates/sonium-bem/src/core/bem_solver_cuda_hmatrix_tests.rs": "d41747a4e110573cea94f57c582f2871f313db308f6890a7cecbfbe23c7e7d54",
+    "crates/sonium-compute/src/cuda/hmatrix.rs": "9929c84d252694e4c3a32ed2034c13a860e737e2949046588474bf9191ba2497",
+    "crates/sonium-compute/src/cuda/bem_incident.rs": "574ab041a9a91775aa1ae4dda4390d0a995426ba5042136c5b00edece37e1ec0",
+    "crates/sonium-compute/src/gmres.rs": "dbb669a782d084cfd6af6b2988f88bb1ea6c3f70ef3b06f1a4c0e8bdd7fb9e45",
+    "crates/sonium-compute/tests/gmres_zero_rhs.rs": "40be5aa346115adaea0c06d39be2f5e2a6d93a2eec9921d85ae59e8a7dd860cc",
+    "crates/sonium-compute/tests/parity.rs": "b9720d2765479248839127b2e004b529bf9f74383e6488b455ba1867b31be69f"
+  },
+  "fixture": {
+    "aca_tolerance": 1e-06,
+    "krylov_tolerance": 1e-09,
+    "independent_exact_tolerance": 1e-07,
+    "restart": 60,
+    "max_iterations": 600,
+    "preconditioner": "spatial cluster-block Jacobi",
+    "burton_miller": true
+  },
+  "runs_with_host_exact_certification": [
+    {
+      "dofs": 1280,
+      "low_rank_blocks": 1714,
+      "host_factor_compression_ratio": 1.047654734332817,
+      "pass_index": 0,
+      "iterations": 19,
+      "compressed_relative_residual": 3.0502329452108935e-10,
+      "exact_relative_residual": 1.2092504659997213e-08,
+      "allocations": 41,
+      "h2d_bytes": 352,
+      "d2h_bytes": 47052
+    },
+    {
+      "dofs": 1280,
+      "low_rank_blocks": 1714,
+      "host_factor_compression_ratio": 1.047654734332817,
+      "pass_index": 1,
+      "iterations": 17,
+      "compressed_relative_residual": 4.887253746953359e-10,
+      "exact_relative_residual": 1.2114447840801581e-08,
+      "allocations": 0,
+      "h2d_bytes": 320,
+      "d2h_bytes": 45868
+    },
+    {
+      "dofs": 1280,
+      "low_rank_blocks": 1714,
+      "host_factor_compression_ratio": 1.047654734332817,
+      "pass_index": 2,
+      "iterations": 17,
+      "compressed_relative_residual": 4.4297188204704255e-10,
+      "exact_relative_residual": 1.2152385432660711e-08,
+      "allocations": 0,
+      "h2d_bytes": 320,
+      "d2h_bytes": 45868
+    }
+  ],
+  "resident_solve_without_host_exact_certification": {
+    "iterations": 18,
+    "allocations": 0,
+    "h2d_bytes": 336,
+    "d2h_bytes": 5484
+  },
+  "validation": {
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_compute_bem_test_clippy": "passed with existing warnings",
+    "cpu_compute_library": "651 passed",
+    "cpu_iterative_library": "321 passed",
+    "large_memcheck": {
+      "status": "passed",
+      "complete": true,
+      "tests_passed": 3,
+      "errors": 0,
+      "elapsed_seconds": 7152.87,
+      "completion_recorded": "2026-10-22",
+      "scope": "Original test executable sonium_bem-a30a21dce996f4fc; predates resident field-output extension",
+      "log": "/tmp/bem-hmatrix-memcheck.log"
+    }
+  },
+  "outputs": {
+    "large_native": "\nrunning 1 test\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_large_retains_compression_and_certifies_repeated_incidents ... H-matrix n=1280 blocks=1714 ratio=1.047654734332817 pass=0 iterations=19 compressed=0.00000000030502329452108935 exact=0.000000012092504659997213 alloc=41 h2d=352 d2h=47052\nH-matrix n=1280 blocks=1714 ratio=1.047654734332817 pass=1 iterations=17 compressed=0.0000000004887253746953359 exact=0.000000012114447840801581 alloc=0 h2d=320 d2h=45868\nH-matrix n=1280 blocks=1714 ratio=1.047654734332817 pass=2 iterations=17 compressed=0.00000000044297188204704255 exact=0.000000012152385432660711 alloc=0 h2d=320 d2h=45868\nH-matrix resident solve iterations=18 alloc=0 h2d=336 d2h=5484\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 556 filtered out; finished in 67.10s\n\n",
+    "small_and_failure_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_failure_recovery_and_zero_sources ... ok\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_small_matches_independent_dense_surface_and_fields ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 555 filtered out; finished in 9.52s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "all_scalar_homogeneous_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest cuda_homogeneous_gmres_and_fgmres_all_scalars ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.60s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "adapter_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest cuda_fmm_residency::complex64_hmatrix_forward_transpose_and_hermitian_reuse_device_blocks ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 68 filtered out; finished in 0.62s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "admission_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest cuda::cublas::bem_incident::tests::incident_admission_rejects_missing_modules_without_transfers ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 734 filtered out; finished in 0.62s\n\n========= ERROR SUMMARY: 0 errors\n",
+    "spatial_inverse_host": "   Compiling sonium-bem v0.5.0 (/home/pierre/src/all_of_sonium/sonium/crates/sonium-bem)\n    Finished `test` profile [optimized + debuginfo] target(s) in 10.81s\n     Running unittests src/lib.rs (target/debug/deps/sonium_bem-a30a21dce996f4fc)\n\nrunning 1 test\ntest core::bem_solver::cuda::hmatrix::tests::hmatrix_cluster_inverse_respects_spatial_numbering_and_rejects_bad_blocks ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 556 filtered out; finished in 0.00s\n\n",
+    "large_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 3 tests\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_failure_recovery_and_zero_sources ... ok\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_large_retains_compression_and_certifies_repeated_incidents ... H-matrix n=1280 blocks=1714 ratio=1.047654734332817 pass=0 iterations=19 compressed=0.00000000030502329452108935 exact=0.000000012092504659997213 alloc=41 h2d=352 d2h=47052\nH-matrix n=1280 blocks=1714 ratio=1.047654734332817 pass=1 iterations=17 compressed=0.0000000004887253746953359 exact=0.000000012114447840801581 alloc=0 h2d=320 d2h=45868\nH-matrix n=1280 blocks=1714 ratio=1.047654734332817 pass=2 iterations=17 compressed=0.00000000044297188204704255 exact=0.000000012152385432660711 alloc=0 h2d=320 d2h=45868\nH-matrix resident solve iterations=18 alloc=0 h2d=336 d2h=5484\nok\ntest core::bem_solver::cuda::hmatrix::tests::native_hmatrix_small_matches_independent_dense_surface_and_fields ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 553 filtered out; finished in 7152.87s\n\n========= ERROR SUMMARY: 0 errors\n"
+  },
+  "performance_measurement": false,
+  "limitations": [
+    "Completed large memcheck validates its original executable snapshot, not the subsequent resident field-output extension.",
+    "Short correctness runs and latest large native run overlapped the long sanitizer in separate contexts; no timing comparison is claimed.",
+    "Host tree/ACA/self-block factorization and optional exact TBEM certification remain CPU work.",
+    "Host-factor ratio excludes orientation copies, indices, preconditioner and Krylov memory; no total GPU memory reduction is claimed.",
+    "Per-session budget estimates, frequency updates, block/adjoint solves, broader bases and device fields remain open.",
+    "Individual uncompressible blocks can be dense; no global dense matrix is constructed by this producer."
+  ]
+}

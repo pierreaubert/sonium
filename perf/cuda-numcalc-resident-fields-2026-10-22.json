@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-22",
+  "scope": "NumCalc resident CUDA field integration",
+  "sources_sha256": {
+    "crates/sonium-bem/src/numcalc/runner.rs": "db5865b017828c29ed2582dc5e8761250c543973699c54b95a6d8e201f606534",
+    "crates/sonium-bem/src/bin/numcalc.rs": "d663cd8ff4a459d6f9528ecdce230b20b9baec393a431c63390c34f7c1e8f215"
+  },
+  "native": {
+    "passed": 1,
+    "log": "/tmp/numcalc-native-fields.log",
+    "checks": [
+      "surface and two field points vs CPU at relative 1e-7",
+      "full/partial/empty/inverted ranges",
+      "legacy JSON provenance accepted",
+      "unsupported pressure field traces reject before allocation"
+    ]
+  },
+  "memcheck": {
+    "errors": 0,
+    "log": "/tmp/numcalc-native-fields-memcheck.log"
+  },
+  "cpu_bem": {
+    "passed": 541,
+    "ignored": 3
+  },
+  "cli": {
+    "exit": 0,
+    "frequencies": 3,
+    "surface_dofs": 4,
+    "execution": "cuda_jacobi",
+    "log": "/tmp/numcalc-native-fields-cli.log"
+  },
+  "checks": [
+    "root check and Clippy passed",
+    "CUDA CLI/lib Clippy passed"
+  ],
+  "limitations": [
+    "constant Tri3 dense systems below 1000 DOFs",
+    "evaluation grids require fixed velocity/impedance traces and off-surface points",
+    "seven-point field quadrature; no near-surface convergence claim",
+    "surface and field arrays downloaded for requested JSON export",
+    "no speedup claim"
+  ]
+}

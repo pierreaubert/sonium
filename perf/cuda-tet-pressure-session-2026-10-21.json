@@ -1,0 +1,171 @@
+{
+  "date": "2026-10-21",
+  "scope": "Retained affine tetrahedral P1/P2 pressure sessions with shifted AMG, FGMRES, CSR and element actions",
+  "working_tree": true,
+  "source_sha256": {
+    "crates/sonium-compute/src/cuda/fem_tet.rs": "07e9384c2c1867fbfa3aa28bddca92ae8f7eec2ac31f4ae31c036f4c7374253e",
+    "crates/sonium-compute/src/cuda/fem_tet/assembly.rs": "10e4a771c2d334581ed800818e54dbf51486c0e604eca05f321e883c07980511",
+    "crates/sonium-compute/src/cuda/kernels/fem_tet_p1.cu": "598ca9fca59e84fad68b4c1f0390b4de524d77165a6898a04ab7b1aa27399438",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_tet_solve.rs": "43a47741325528a111e55d6cb33d7601f1a01c7918c41040d6768993f97bde6a",
+    "crates/sonium-fem/src/physics/acoustics/pressure/device_tet_solve_tests.rs": "bb1d707cecdafc82572ba447d21f80d81b0b7e5f29e533de1a886e24ce871cb0",
+    "crates/sonium-fem/src/physics/acoustics/pressure/mod.rs": "e26352fdd8b54d3946ef59f2bb5bbcc77624da81b1c043b72c855916d084849b"
+  },
+  "fixture": {
+    "mesh": "unit_cube_tetrahedra(3)",
+    "dirichlet_face": "x=0",
+    "wavenumbers": [
+      [
+        4.0,
+        0.0
+      ],
+      [
+        4.1,
+        -0.02
+      ],
+      [
+        4.2,
+        -0.04
+      ]
+    ],
+    "initial_auxiliary_mass_shift": [
+      16.0,
+      16.0
+    ],
+    "rebuilt_auxiliary_mass_shift": [
+      18.0,
+      18.0
+    ],
+    "amg_smoother": "Jacobi",
+    "amg_coarse_size": 16,
+    "krylov": "FGMRES",
+    "relative_tolerance": 1e-10,
+    "restart": 60,
+    "max_iterations": 800
+  },
+  "runs": [
+    {
+      "local_dofs": 4,
+      "operator": "Csr",
+      "pass_index": 0,
+      "iterations": 23,
+      "allocations": 131,
+      "solution_l2_error": 2.6076704949114947e-10
+    },
+    {
+      "local_dofs": 4,
+      "operator": "Csr",
+      "pass_index": 1,
+      "iterations": 22,
+      "allocations": 0,
+      "solution_l2_error": 1.4009109526293255e-09
+    },
+    {
+      "local_dofs": 4,
+      "operator": "Csr",
+      "pass_index": 2,
+      "iterations": 22,
+      "allocations": 0,
+      "solution_l2_error": 1.5032024177689783e-09
+    },
+    {
+      "local_dofs": 10,
+      "operator": "Csr",
+      "pass_index": 0,
+      "iterations": 37,
+      "allocations": 128,
+      "solution_l2_error": 1.1844430426719532e-09
+    },
+    {
+      "local_dofs": 10,
+      "operator": "Csr",
+      "pass_index": 1,
+      "iterations": 36,
+      "allocations": 0,
+      "solution_l2_error": 6.058118121339368e-09
+    },
+    {
+      "local_dofs": 10,
+      "operator": "Csr",
+      "pass_index": 2,
+      "iterations": 36,
+      "allocations": 0,
+      "solution_l2_error": 5.620841120437411e-09
+    },
+    {
+      "local_dofs": 4,
+      "operator": "Element",
+      "pass_index": 0,
+      "iterations": 23,
+      "allocations": 128,
+      "solution_l2_error": 2.6076793968898634e-10
+    },
+    {
+      "local_dofs": 4,
+      "operator": "Element",
+      "pass_index": 1,
+      "iterations": 22,
+      "allocations": 0,
+      "solution_l2_error": 1.4009124758293173e-09
+    },
+    {
+      "local_dofs": 4,
+      "operator": "Element",
+      "pass_index": 2,
+      "iterations": 22,
+      "allocations": 0,
+      "solution_l2_error": 1.5032017521463969e-09
+    },
+    {
+      "local_dofs": 10,
+      "operator": "Element",
+      "pass_index": 0,
+      "iterations": 37,
+      "allocations": 128,
+      "solution_l2_error": 1.1844455707752265e-09
+    },
+    {
+      "local_dofs": 10,
+      "operator": "Element",
+      "pass_index": 1,
+      "iterations": 36,
+      "allocations": 0,
+      "solution_l2_error": 6.0581086499165725e-09
+    },
+    {
+      "local_dofs": 10,
+      "operator": "Element",
+      "pass_index": 2,
+      "iterations": 36,
+      "allocations": 0,
+      "solution_l2_error": 5.620838955055166e-09
+    }
+  ],
+  "numeric_update_assertions": {
+    "allocation_operations": 0,
+    "h2d_bytes": 0,
+    "d2h_bytes": 0
+  },
+  "additional_gates": [
+    "Independent FEM assembly manufactured solution",
+    "Updated Hermitian action versus independent constrained CSR",
+    "AMG shift rebuild and rejection of non-finite replacement",
+    "Injected numeric D2D-copy failure unpublishes output and blocks solve until successful update",
+    "Legacy P1/P2 persistent-solve compatibility"
+  ],
+  "native_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 3 tests\ntest physics::acoustics::pressure::device_tet::tests::native_tet_p2_persistent_solve ... ok\ntest physics::acoustics::pressure::device_tet::tests::native_tet_volume_persistent_solve ... ok\ntest physics::acoustics::pressure::device_tet_solve::tests::native_tet_sessions_p1_p2_csr_element_frequency_and_failure ... tet session N=4 mode=Csr pass=0 iterations=23 allocations=131 error=0.00000000026076704949114947\ntet session N=4 mode=Csr pass=1 iterations=22 allocations=0 error=0.0000000014009109526293255\ntet session N=4 mode=Csr pass=2 iterations=22 allocations=0 error=0.0000000015032024177689783\ntet session N=10 mode=Csr pass=0 iterations=37 allocations=128 error=0.0000000011844430426719532\ntet session N=10 mode=Csr pass=1 iterations=36 allocations=0 error=0.000000006058118121339368\ntet session N=10 mode=Csr pass=2 iterations=36 allocations=0 error=0.000000005620841120437411\ntet session N=4 mode=Element pass=0 iterations=23 allocations=128 error=0.00000000026076793968898634\ntet session N=4 mode=Element pass=1 iterations=22 allocations=0 error=0.0000000014009124758293173\ntet session N=4 mode=Element pass=2 iterations=22 allocations=0 error=0.0000000015032017521463969\ntet session N=10 mode=Element pass=0 iterations=37 allocations=128 error=0.0000000011844455707752265\ntet session N=10 mode=Element pass=1 iterations=36 allocations=0 error=0.0000000060581086499165725\ntet session N=10 mode=Element pass=2 iterations=36 allocations=0 error=0.000000005620838955055166\nok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1933 filtered out; finished in 20.12s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "validation": {
+    "compute_cpu": "650 passed",
+    "fem_cpu": "1921 passed, 1 ignored",
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_clippy": "passed; no new session warnings"
+  },
+  "limits": [
+    "Affine volume plus fixed prescribed-pressure constraints and natural homogeneous Neumann only; Robin/facet integration remains open",
+    "AMG hierarchy construction/rebuild remains host setup",
+    "Frequency updates retain an explicitly lagged auxiliary hierarchy",
+    "Element mode currently retains the CSR assembly/storage too for matched comparison; no memory saving claim",
+    "No complete-solve speedup claim; measurements here establish convergence and warm allocation/transfer behavior",
+    "Broader FEM physics and full priorities 1-4 remain incomplete"
+  ]
+}

@@ -2790,6 +2790,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonium-sim-motor"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde_json",
+ "sonium-fem",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "sonium-sim-pcfan"
 version = "0.5.0"
 dependencies = [

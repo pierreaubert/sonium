@@ -1,0 +1,59 @@
+{
+  "date": "2026-10-22",
+  "scope": "Retained one-level additive Schwarz and explicit GMRES/FGMRES Schwarz facade strategies.",
+  "source_sha256": {
+    "crates/sonium-solvers/src/solve.rs": "da7595a46a37c24c2fbb7507cc2a6a0047603f833b37865fc1d8c41dd7c1b4cb",
+    "crates/sonium-solvers/src/solve/cuda_session.rs": "5c3257165e54d342017c97aa562a9c7cfeed123451ce142abd1873861946629f",
+    "crates/sonium-solvers/src/solve/cuda_session/preconditioner.rs": "d3c1c2eaf1bbd98b586a61a8af13ffed2fb5f74c84f044d9cbcbfbe450d08dcd",
+    "crates/sonium-solvers/src/solve/cuda_session/update.rs": "78f3ff9a1a786eb64f7e98af416401a010576c5ef89381ff9cc1e2db1bb00f90",
+    "crates/sonium-solvers/src/solve/cuda_session/prepared.rs": "2aacc73df11db14b488cde7dbff5c689345fba936a0eb6c76591ceb580568630",
+    "crates/sonium-solvers/src/solve/cuda_session_tests.rs": "a5414cc05616938385277a7c71f299b688600fe1adfc9f3f1404ab555d2b4f1e",
+    "crates/sonium-solvers/src/solve/cuda_session_refresh_tests.rs": "737d49a5a649d3f8ce0defd72f85914507bccb4e9a5886d27b3cf3b4c2781fe2",
+    "crates/sonium-compute/src/preconditioner/chebyshev.rs": "3a47b8f8032034920d6b1f3a8e520e3f80fbe009f56a4f66daeac42a50a04330",
+    "crates/sonium-compute/src/preconditioner/matrix.rs": "ed07c433c26e1831186744a01554dc1db9b9cceca5079effa50d4fe0e3c6a627",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/chebyshev.rs": "1b89fb8ecc211b66d276f61ea096abad7b6755e45014d275e81654dfd3618007",
+    "crates/sonium-compute/src/cuda/cublas.rs": "53e30ccbbb9fcd6b15927cf67a596610dc818b7da3f129165b4694078cfa337f",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/cuda_ilu.rs": "227e4de67573595567ee711daf446d308789a37357ace799626657dd197fa1c2",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/ilu.rs": "d021f2abc4c0fe5f00d8e6bd5d2ccc71123019b6256240c5de0c5710438a00ce",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/lib.rs": "b92b6be33d5d32bf2f9974e6dc58f8287663eb7d3b270f107f182b3a89a3beb9",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/cuda_schwarz.rs": "15cb2ec4ad9a6a9d7000975667c66fc4942957aabeffdf5822caee2c0926da6b",
+    "crates/sonium-solvers/crates/sonium-solvers-preconditioners/src/schwarz.rs": "961a1a96eccc8699888a7d9f05a89ab491645fea66a100e45f2b5d0df55688ad"
+  },
+  "binary_sha256": {
+    "target/debug/deps/sonium_solvers-98cd8e88718c92bf": "d59fec7100cba9bd7b21ad609064f1d382d7dc8e70644cfd1affa104837a287a",
+    "target/debug/deps/sonium_solvers_preconditioners-f012f588996b91d9": "19465aeb73e087a754fff1e345c0d40d744c42f0080c2d510b04e92b505eb9db"
+  },
+  "result": "========= COMPUTE-SANITIZER\n\nrunning 7 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_chebyshev_rejects_nonreal_coefficients_before_upload ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 34.45s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "native_facade": "\nrunning 7 tests\ntest solve::cuda_session_refresh_tests::native_cuda_public_chebyshev_rejects_nonreal_coefficients_before_upload ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_all_strategies_and_scalars ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_canonical_duplicate_layout ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_rebuild_and_recovery ... ok\ntest solve::cuda_session_refresh_tests::native_cuda_public_numeric_refresh_terminal_sync_requires_recreate ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 124 filtered out; finished in 3.21s\n\n",
+  "native_parity": "\nrunning 1 test\ntest schwarz::cuda::tests::native_schwarz_matches_cpu_overlap_weights_and_refresh ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 0.39s\n\n",
+  "parity_memcheck": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest schwarz::cuda::tests::native_schwarz_matches_cpu_overlap_weights_and_refresh ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 251 filtered out; finished in 0.96s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "contract": {
+    "partition": "same CPU automatic count and graph partition policy; facade overlap depth 1",
+    "weights": "same CPU partition-of-unity 1/count weights",
+    "local_solver": "checked default ILU(0) on packed block-diagonal local matrices; dependency levels may process independent subdomains together",
+    "maps": "single sparse restriction and weighted assembly matrices; no dense global storage or full global map per subdomain",
+    "flexible": "FgmresSchwarz explicitly constructs flexible Krylov session; GmresSchwarz retains stationary GMRES",
+    "updates": "host setup/refactorization; retain maps/scratch when membership, weights and factor patterns agree; otherwise replace preconditioner",
+    "publication": "result scratch copied to caller only after restriction/local solve/assembly succeed; partial local factor refresh blocks application until repaired"
+  },
+  "validation": {
+    "cpu_preconditioner_tests": 241,
+    "cpu_facade_tests": 117,
+    "native_facade_tests": 7,
+    "native_parity_tests": 1,
+    "memcheck_errors": 0,
+    "parity_scope": "four scalars; 31-row nonsymmetric matrix; four subdomains; overlap depths 0,1,2; two coefficient scales and two RHS; repartition rejection and partial-refresh recovery",
+    "residency": "application zero allocation/H2D/D2H; compatible refresh zero device allocations and D2H; facade warm reuse and numeric refresh assertions pass",
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_test_clippy": "passed with existing warnings"
+  },
+  "limitations": [
+    "No speedup claim. Host construction currently factorizes CPU subdomains then refactorizes their packed local matrices for the device adapter.",
+    "Host partitioning, local factorization and numeric refactorization remain setup/update work.",
+    "One-level forward single-vector action only; attached coarse correction rejects. Block and adjoint variants remain open.",
+    "Raw-buffer quota accounting and dependency-depth performance remain open.",
+    "Auto facade dispatch remains rejected; full CUDA workflow coverage remains incomplete.",
+    "Separate older BEM scattering sanitizer remains pending."
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "date": "2026-10-22",
+  "scope": "Retained native dense BEM GMRES with numeric Jacobi refresh",
+  "working_tree_required": true,
+  "fixture": {
+    "panels": 80,
+    "basis": "constant discontinuous Tri3",
+    "scalar": "Complex64",
+    "boundaries": [
+      "pressure",
+      "velocity",
+      "velocity with admittance"
+    ],
+    "frequency_multipliers": [
+      1,
+      1.01,
+      1.02,
+      1.03
+    ],
+    "restart": 80,
+    "max_iterations": 400,
+    "tolerance": 1e-10,
+    "parity_tolerance": 1e-07
+  },
+  "rows": [
+    {
+      "pass_index": 0,
+      "iterations": 21,
+      "cpu_relative_residual": 2.7979628501240867e-11,
+      "allocations": 2,
+      "h2d_bytes": 13136,
+      "d2h_bytes": 7408
+    },
+    {
+      "pass_index": 1,
+      "iterations": 18,
+      "cpu_relative_residual": 3.9934908038725586e-11,
+      "allocations": 0,
+      "h2d_bytes": 13088,
+      "d2h_bytes": 5492
+    },
+    {
+      "pass_index": 2,
+      "iterations": 18,
+      "cpu_relative_residual": 4.839165553567363e-11,
+      "allocations": 0,
+      "h2d_bytes": 13088,
+      "d2h_bytes": 5488
+    },
+    {
+      "pass_index": 3,
+      "iterations": 18,
+      "cpu_relative_residual": 4.7626424197961134e-11,
+      "allocations": 0,
+      "h2d_bytes": 13088,
+      "d2h_bytes": 5492
+    }
+  ],
+  "validation": {
+    "native_test_passed": 1,
+    "final_memcheck_test_passed": 1,
+    "memcheck_errors": 0,
+    "cpu_bem_passed": 541,
+    "cpu_bem_ignored": 3,
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_bem_clippy": "passed with existing warnings; none in tbem_gmres"
+  },
+  "failure_checks": [
+    "Unavailable previous solution",
+    "Injected native launch failure hides result and requires zero-start recovery",
+    "Geometry change hides result; original geometry recovers",
+    "NaN incident RHS hides result",
+    "One-iteration nonconvergence hides result; restored controls recover"
+  ],
+  "limits": [
+    "Fixed geometry, DOF order and quadrature schedule",
+    "Dense limit fewer than 1000 DOFs",
+    "Point Jacobi not universally sufficient",
+    "Boundary coefficients and compact Krylov control still transferred",
+    "Assembly legacy allocations not fully pool-accounted",
+    "No GCRO-DR subspace recycling",
+    "No public application sweep integration yet",
+    "No performance speedup claimed"
+  ],
+  "source_sha256": {
+    "crates/sonium-bem/src/core/assembly/tbem_gmres.rs": "9057b00b2b275bf84a6a4cb37dbf0a81026f3c69bc779ef9f15e5adda4caa151",
+    "crates/sonium-bem/src/core/assembly/tbem_device.rs": "0487bc886b978784162ecebc32dd3c4a0e98a4f5081b5af983b68bfcc4cf425f",
+    "crates/sonium-bem/src/core/assembly/tbem.rs": "ce1888542d11ddd0b53e7b013ef067f8080952c3704b4ef2506b52f9762afc44",
+    "crates/sonium-compute/src/cuda/dense_diagonal.rs": "54f7c9135cd01c4047932850391a1e7349cddfc703d591be867c167e10fe8e5c"
+  },
+  "logs": [
+    "/tmp/tbem-gmres-native.log",
+    "/tmp/tbem-gmres-memcheck.log",
+    "/tmp/tbem-gmres-cpu.log",
+    "/tmp/tbem-gmres-root-check.log",
+    "/tmp/tbem-gmres-root-clippy.log",
+    "/tmp/tbem-gmres-cuda-clippy-final.log"
+  ]
+}

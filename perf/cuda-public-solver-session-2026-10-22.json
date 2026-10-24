@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-22",
+  "head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree_required": true,
+  "source_sha256": {
+    "crates/sonium-solvers/src/solve/cuda_session.rs": "6e62f3fa6f5d3f3679d50cc6c4fc3a6c047e61c1ac7186fd9e1731eaf0c2cde2",
+    "crates/sonium-solvers/src/solve/cuda_session_tests.rs": "9bf72f46475e9e9d2fe42c7adfec7a4ff332ce5b6ba4dce3335cc3b79209eca9",
+    "crates/sonium-solvers/src/solve.rs": "1d06e1539ff80d2a4d151694f358926d956ff4690897b2fcd4307a99db110315",
+    "crates/sonium-solvers/src/lib.rs": "57ae25f6fab47c904540c9619896756e3e28e4085d242850b7e18c31afd0c241"
+  },
+  "api": "CudaLinearSolveSession borrows caller-owned CUDA pool and owns fixed matrix, preconditioner, RHS and Krylov state; one-shot facade uses same implementation.",
+  "strategies": [
+    "Gmres",
+    "GmresJacobi",
+    "GmresAmg",
+    "Cg",
+    "CgAmg"
+  ],
+  "scalars": [
+    "f32",
+    "f64",
+    "Complex32",
+    "Complex64"
+  ],
+  "cases": 20,
+  "warm_device_allocations": 0,
+  "transfer_assertion": "With identical zero-start RHS and iterations, host solve transfers equal device solve transfers plus exactly one n-element RHS upload and one n-element solution download. Compact control/validation traffic remains in both.",
+  "certification": "Device Krylov independently recomputes original-system residual; host result also certifies against original CPU matrix and reports backward error.",
+  "admission_and_recovery": [
+    "missing previous solution",
+    "invalid RHS dimensions",
+    "nonfinite host RHS",
+    "foreign stream rejected before any kernel/library/copy operation",
+    "malformed CSR dimensions",
+    "additive duplicate CSR canonicalization",
+    "unsupported strategy",
+    "indefinite CG+AMG rejection",
+    "nonconvergence hides output",
+    "launch failure hides output and requires zero-start recovery",
+    "zero RHS"
+  ],
+  "native_regressions": "\nrunning 7 tests\ntest checkpoint_manifest::tests::cuda_dma_restore_survives_backend_recreation ... ok\ntest solve::cuda_pcg_tests::cuda_cg_amg_rejects_complex_symmetric_nonhermitian_input ... ok\ntest solve::cuda_pcg_tests::native_cuda_cg_amg_facade_and_persistent_sessions ... ok\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\ntest solve::finite_input_tests::cuda_jacobi_facade_certifies_original_system ... ok\ntest solve::finite_input_tests::cuda_spd_strategies_reject_indefinite_input_before_device_setup ... ok\n\ntest result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 117 filtered out; finished in 4.99s\n\n",
+  "memcheck": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest solve::cuda_session_tests::native_cuda_public_retained_sessions_all_strategies_and_scalars ... ok\ntest solve::cuda_session_tests::native_cuda_public_session_admission_and_failed_publication ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 122 filtered out; finished in 12.05s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "bug_found_and_fixed": "First memcheck detected foreign-stream RHS access before sparse-operator validation. The facade now validates stream, byte extent and dimensions before entering Krylov; regression asserts zero dispatch/copy work on rejection. Final memcheck passes. Lower-level generic solver stream contracts were not changed.",
+  "cpu_facade_tests": 117,
+  "checks": {
+    "cargo_check": "passed",
+    "cargo_clippy": "passed with existing warnings",
+    "cuda_lib_tests_clippy": "passed with existing warnings",
+    "public_api_doctest": "passed"
+  },
+  "limitations": [
+    "matrix values/structure and solver controls fixed for lifetime; rebuild session for changes",
+    "five explicit facade strategies only; Auto and arbitrary prepared preconditioners not admitted",
+    "AMG hierarchy construction remains host setup",
+    "one-shot convenience API still creates a pool per call; applications must retain new public sessions for cross-call reuse",
+    "no full device-memory quota coverage claim beyond existing operator/preconditioner allocation contracts",
+    "no elapsed-time speedup claim; concurrent GPU sanitizer work"
+  ],
+  "performance_claim": false
+}

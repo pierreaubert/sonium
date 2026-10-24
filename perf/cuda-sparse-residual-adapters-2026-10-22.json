@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-22",
+  "head": "bf781ac41d8bc590375420660c3044198e6c2125",
+  "working_tree_required": true,
+  "source_sha256": {
+    "crates/sonium-compute/src/operator.rs": "588d9de4264a402b6f738b1a00af28bcc71cff45fb8eb9e5ec5cb1213f3a7d94",
+    "crates/sonium-compute/tests/sparse_residual_adapters.rs": "f82e8ee0a55d5fc5bf1d62a6118b35e6ac96ad35ba61596b82518ad88f2ebddf"
+  },
+  "change": "Connect checked DeviceCsr, PooledDeviceCsr, PrebakedSpmv and PrebakedAdjointSpmv residuals to native update; AdjointDeviceCsr delegates checked forward residual instead of legacy default.",
+  "scalar_coverage": [
+    "f32",
+    "f64",
+    "Complex32",
+    "Complex64"
+  ],
+  "reference": "Independent 2x2 forward and conjugate-transpose residual; non-Hermitian complex matrices prevent orientation ambiguity.",
+  "retained_scope": [
+    "PrebakedSpmv from DeviceCsr",
+    "PrebakedSpmv from PooledDeviceCsr",
+    "PrebakedAdjointSpmv forward",
+    "PrebakedSpmv of stored Hermitian CSR"
+  ],
+  "warm_native_f64_counters": {
+    "library_operations": 1,
+    "kernel_launches": 1,
+    "allocations": 0,
+    "h2d_bytes": 0,
+    "d2h_bytes": 0
+  },
+  "unprepared_scope": "DeviceCsr/PooledDeviceCsr/AdjointDeviceCsr still construct descriptors per call; validation downloads remain. They are not zero-transfer persistent paths.",
+  "cpu_compute_tests": 651,
+  "memcheck": "========= COMPUTE-SANITIZER\n\nrunning 2 tests\ntest cpu_sparse_residual_adapters ... ok\ntest native_sparse_residual_adapters ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "retained_gmres_fgmres_regression": "\nrunning 1 test\ntest cuda_homogeneous_gmres_and_fgmres_all_scalars ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.36s\n\n",
+  "checks": {
+    "cargo_check": "passed",
+    "cargo_clippy": "passed with existing warnings",
+    "cuda_test_clippy": "passed with existing library warning, no new test warnings"
+  },
+  "performance_claim": false,
+  "remaining": "Legacy infallible residual methods and general DeviceOperator defaults are unchanged; this is sparse checked-adapter integration, not complete producer/adjoint-solve coverage."
+}

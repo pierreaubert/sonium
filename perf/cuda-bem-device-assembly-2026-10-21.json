@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-21",
+  "scope": "Native constant Tri3 device matrix/RHS assembly, not complete solve coverage",
+  "working_tree": true,
+  "source_sha256": {
+    "crates/sonium-bem/src/core/assembly/tbem_device.rs": "858d06dfb0d4c79f9c46d9c217dc7b16259d99f5405a20712aa09ef266a0d64b",
+    "crates/sonium-bem/src/core/assembly/tbem.rs": "fe4b7cf5fe1d7e217b3fc3de2d3ddcd0ee8e1067928b576fe9b0a75353894dbe",
+    "crates/sonium-compute/src/cuda/cublas.rs": "8e1e68faf36d14cbc08efe85c45d9646fdf70cf9769052eaf6d1b820d88b92e7",
+    "crates/sonium-compute/src/cuda/kernels/bem_kernels.cu": "4d6c900781f2f56c588ac6142488917b04b1ae6744c0a01ed5b64f920cedbeff"
+  },
+  "test": "native_device_tbem_mixed_boundaries_and_reuse",
+  "fixture": {
+    "panels": 80,
+    "passes": 3,
+    "boundary_conditions": [
+      "Pressure",
+      "Velocity",
+      "VelocityWithAdmittance",
+      "TransferAdmittance",
+      "TransferWithSurfaceAdmittance"
+    ],
+    "changed_input": "prescribed pressure"
+  },
+  "assertions": {
+    "matrix_relative_error_below": 1e-09,
+    "rhs_relative_error_below": 1e-09,
+    "warm_device_allocations": 0,
+    "warm_h2d_bytes": 12800,
+    "warm_d2h_bytes_max": 12
+  },
+  "native_memcheck_output": "========= COMPUTE-SANITIZER\n\nrunning 1 test\ntest core::assembly::tbem::cuda_path::device::tests::native_device_tbem_mixed_boundaries_and_reuse ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 550 filtered out; finished in 0.94s\n\n========= ERROR SUMMARY: 0 errors\n",
+  "remaining": [
+    "Device-input factorization and complete resident solve",
+    "Frequency changes and quadrature rebuild tests",
+    "Invalid route, failure injection and adjoint coverage",
+    "Higher-order and compressed production paths"
+  ]
+}

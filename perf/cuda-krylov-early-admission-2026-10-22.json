@@ -1,0 +1,48 @@
+{
+  "status": "validated_bounded_admission_fix",
+  "finding": "CSR operator state was omitted from native_execution despite being reported in operator_state.",
+  "changes": [
+    "Include operator and preconditioner states in native_execution.",
+    "Expose read-only validate_backend_krylov for preparation-time checks.",
+    "Run strict admission before GMRES facade preconditioner/device allocation and before prepared FGMRES callback."
+  ],
+  "source_sha256": {
+    "crates/sonium-solvers/crates/sonium-solvers-iterative/src/backend.rs": "1bda32cc107600c553db252d93172e037bc9dc090d9a9f94e892781e0d42b788",
+    "crates/sonium-solvers/crates/sonium-solvers-iterative/src/backend/admission_tests.rs": "11e809a1cb8e6d95e3b535791fa42a65484eaede3d2a5a9cfc0756424c361313",
+    "crates/sonium-solvers/crates/sonium-solvers-iterative/src/lib.rs": "37804d2e7d88071171ed7583b5733edbd76085cd3a4f159aba678e3a39c45aaa",
+    "crates/sonium-solvers/src/solve/cuda_session.rs": "bed7e9ffb65b7fd6ba0c291a6f64b1b3b1ffc08b0c8b8e4f68b9aa009c6e5a30",
+    "crates/sonium-solvers/src/solve/cuda_session/prepared.rs": "2aacc73df11db14b488cde7dbff5c689345fba936a0eb6c76591ceb580568630"
+  },
+  "validation": {
+    "tests": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 8.19s",
+      "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 325 filtered out; finished in 0.00s"
+    ],
+    "native": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 37.16s",
+      "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 120 filtered out; finished in 4.48s"
+    ],
+    "check": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 42.99s"
+    ],
+    "clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 10.65s"
+    ],
+    "iterative-cpu": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 5.57s",
+      "test result: ok. 327 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.95s"
+    ],
+    "facade-cpu": [
+      "    Finished `test` profile [optimized + debuginfo] target(s) in 19.72s",
+      "test result: ok. 117 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.10s"
+    ],
+    "cuda-clippy": [
+      "    Finished `dev` profile [optimized + debuginfo] target(s) in 18.93s"
+    ]
+  },
+  "limitations": [
+    "Synthetic capability reports test missing/fallback primitive combinations; native tests use available CUDA modules.",
+    "CSR/identity capability cells do not inspect arbitrary operator or preconditioner callbacks.",
+    "PCG preparation and transitive action-specific dependencies remain separate admission work."
+  ]
+}

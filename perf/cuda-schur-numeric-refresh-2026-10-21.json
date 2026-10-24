@@ -1,0 +1,78 @@
+{
+  "date": "2026-10-21",
+  "scope": "f64 retained Schur numeric refresh and production BDF integration",
+  "source_sha256": {
+    "crates/sonium-compute/src/preconditioner/saddle_point.rs": "4fc8eef856e95c2beaf57a376f53a00192b433a15810040167e88b67c1778591",
+    "crates/sonium-compute/tests/saddle_owned.rs": "b1923d2ec166d933be7dc1fae8a515a1df50c20ebe8a7c9307273ff9b8d92c1c",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda.rs": "76458218559f56479832bff5d2641d7df8a0e392ec31e7e4e6cc06e1bbfaaf0b",
+    "crates/sonium-fem/src/physics/fluid/stokes/bdf_cuda/tests.rs": "6a94cd1172130a9cdb3ddc0fb91540bdac0bc6596d8ec75b07cb11bf2822829d"
+  },
+  "compute_native": {
+    "tests_passed": 5,
+    "tests_failed": 0,
+    "memcheck_errors": 0,
+    "seconds": 0.8,
+    "coverage": [
+      "polynomial and Chebyshev fresh setup parity after three coefficient changes",
+      "single-column and two-column actions",
+      "non-finite and changed full-pattern rejection preserving usable state",
+      "failure after block uploads before diagonal uploads",
+      "backend recovery does not bypass invalid numeric state",
+      "scalar and block invalid actions preserve output",
+      "successful full refresh recovers with zero device allocations"
+    ]
+  },
+  "bdf_native": {
+    "tests_passed": 2,
+    "memcheck_errors": 0,
+    "seconds": 33.51,
+    "polynomial_pressure_iterations": [
+      78,
+      78,
+      78,
+      76
+    ],
+    "chebyshev_pressure_iterations": [
+      69,
+      69,
+      68,
+      63
+    ],
+    "amg_pressure_iterations": [
+      55,
+      55,
+      53,
+      50
+    ],
+    "polynomial_and_chebyshev_setup_builds_after_changed_steps": 1,
+    "prior_setup_builds": 3,
+    "changed_step_device_allocations": 0,
+    "velocity_pressure_history_relative_tolerance": 2e-06
+  },
+  "cpu_saddle_unit_tests": {
+    "passed": 9,
+    "failed": 0
+  },
+  "checks": [
+    "cargo check",
+    "cargo clippy",
+    "cargo clippy -p sonium-fem -p sonium-compute --features cuda --tests"
+  ],
+  "logs": [
+    "/tmp/schur-refresh-native.log",
+    "/tmp/schur-bdf-native.log",
+    "/tmp/schur-refresh-unit.log",
+    "/tmp/schur-refresh-check.log",
+    "/tmp/schur-refresh-clippy.log",
+    "/tmp/schur-refresh-cuda-clippy.log"
+  ],
+  "limits": [
+    "No elapsed-time speedup claim",
+    "External pressure AMG numeric updates rebuild setup",
+    "Refresh currently f64 only",
+    "Host block extraction, spectral estimate and numeric uploads remain",
+    "Host CSR patterns retained for exact refresh validation add host memory",
+    "Existing raw CSR/workspace allocations are not a whole-session pool quota guarantee",
+    "BDF assembly, RHS, histories and output remain host work"
+  ]
+}

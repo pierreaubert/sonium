@@ -1,0 +1,83 @@
+{
+  "date": "2026-10-22",
+  "scope": "CUDA routing for existing body-fitted treatment reanalysis and optimization/promotion library workflow",
+  "source_sha256": {
+    "crates/sonium-sim-room/src/treatment_projection.rs": "534075845fcc968ce73e9f5745ff6050d4d6c6d258a5d8ab143485dcdd26fd19",
+    "crates/sonium-sim-room/src/treatment_projection/cuda.rs": "bae9a38dbc4fee601a5171069957743b84f64c09b7a435bc926d0f8256949ef4",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda/multifrequency.rs": "d218dc16e3db97d4f2bb34b5dfba94419d771d888f917587f3fd48efea02012d",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda/tests.rs": "1095fce27376d90ae369590fa3af65e9c92b43f27a45910e465007ab70eb6079",
+    "crates/sonium-sim-room/src/treatment_optimization/cuda.rs": "1d941119f4a9896e9415e5afc1c62af6bdcd8e9625f50ed44271c3cc69c5eb07",
+    "crates/sonium-sim-room/src/treatment_optimization.rs": "7eff045144e47734c44302f92a791a084b1550411bb421c56f61a2a4cb70a67f"
+  },
+  "binary": {
+    "path": "target/debug/deps/sonium_sim_room-fe04168d8c708c2c",
+    "sha256": "2c509f02e8196faf2e0e6d7aacd094fecb4d4a7c37824e9def9b7d5bd7b60ab7"
+  },
+  "fixture": {
+    "source": "4x4 P1 triangular grid, 25 DOFs, GMRES ILU",
+    "target": "5x5 P1 triangular grid, 36 DOFs, configured GMRES Schwarz",
+    "band": "Three independently supplied Helmholtz wavenumbers; same metadata as prior band fixture",
+    "projection": "Two source and target treatment groups with compact-support interpolation, [0,1] maps to [0.25,0.75]",
+    "reference": "CPU direct source optimization and independent target baseline/projected solves",
+    "positive_handoff": "Explicit optimizer tolerance 1.0 for handoff smoke test; target non-regression tolerance 1e-6; not a production optimization convergence claim",
+    "negative_gates": [
+      "Target objective regression with zero tolerance",
+      "Topology mismatch before GPU work",
+      "Injected target D2D failure prevents promotion, then recovery",
+      "One-iteration source optimization with tolerance 1e-14 rejects as unconverged"
+    ],
+    "reuse": "Target baseline/projected reanalysis allocates zero backend buffers after warm-up"
+  },
+  "results": {
+    "native": "3 passed: existing single/band tests plus new handoff",
+    "memcheck": "New handoff test passed, 0 errors",
+    "cpu": "331 passed, 1 ignored",
+    "pipeline": "12 passed",
+    "check": "passed",
+    "clippy": "passed with existing warnings",
+    "cuda_clippy": "passed with existing warnings",
+    "inventory": "22 packages; 1358 source units; freshness passed",
+    "registry": "40 retained-dispatch rows, zero complete; validator and 10 audit tests passed"
+  },
+  "logs": {
+    "build": {
+      "path": "/tmp/treatment-projection-build.log",
+      "sha256": "f265e1006fa64649f91aec06e6df2c434f817d2b56b2f01d1d40fb7a3930ddb0"
+    },
+    "native": {
+      "path": "/tmp/treatment-projection-native.log",
+      "sha256": "3fbaaf895a3464fa4916ee533f613f56646982ac2321d417b597947541481b7d"
+    },
+    "memcheck": {
+      "path": "/tmp/treatment-projection-memcheck.log",
+      "sha256": "b5d4980befb72ff824d575953669bcfeaaabc30073aef2eeac817248fcd990d6"
+    },
+    "cpu": {
+      "path": "/tmp/treatment-projection-cpu.log",
+      "sha256": "f3f2b6c2e3b6b2f8d126766601f864b672755ac3876b62172825037247d7da79"
+    },
+    "pipeline": {
+      "path": "/tmp/treatment-projection-pipeline.log",
+      "sha256": "d37823548059b15bb87317d5972ba813dc614750d8cb1f44fff0f3a4e07204c4"
+    },
+    "check": {
+      "path": "/tmp/treatment-projection-check.log",
+      "sha256": "d9186ade429fb40a941373cea03be43e858f1b5d0f136b6eeb95f6b8d64ff606"
+    },
+    "clippy": {
+      "path": "/tmp/treatment-projection-clippy.log",
+      "sha256": "c23646cacc208f2f7b2c589e44e784a8603411aaeab0cf051c52d64dda04bfb1"
+    },
+    "cuda_clippy": {
+      "path": "/tmp/treatment-projection-cuda-clippy.log",
+      "sha256": "444f745b13f2dd1135f3ecfc9a0b221196dd39ecf3e84442ef6fb6d59bb50fe7"
+    }
+  },
+  "limitations": [
+    "No performance comparison or speedup claim",
+    "Projection geometry and promotion checks remain host work",
+    "Native fixture is bounded P1 2D with supplied frequency metadata/wavenumbers; not mesh-convergence or measured-room validation",
+    "No treatment CLI existed in inspected application; no new CLI introduced",
+    "Broader CUDA workflow coverage remains incomplete"
+  ]
+}

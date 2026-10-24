@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-22",
+  "scope": "Common retained constant discontinuous Tri3 CUDA scattering dispatch",
+  "working_tree_required": true,
+  "native_tests_passed": 4,
+  "cpu_bem_tests": {
+    "passed": 541,
+    "ignored": 3
+  },
+  "checks": {
+    "root_check": "passed",
+    "root_clippy": "passed with existing warnings",
+    "cuda_bem_clippy": "passed with existing warnings; none in scattering dispatcher files"
+  },
+  "coverage": [
+    "Explicit TBEM and Auto small direct LU",
+    "H-matrix GMRES with Jacobi and cluster-block Jacobi",
+    "MLFMM GMRES with Jacobi and leaf-block Jacobi",
+    "Plane and point incident changes; CPU surface and three field points",
+    "Previous-solution reuse and zero warm device allocations",
+    "NaN source and injected launch failure unpublish output; zero-start recovery",
+    "Unsupported representation and incompatible solver reject before device allocation",
+    "Auto 1280-panel H-matrix has low-rank blocks; exact residual below 1e-6 and CPU parity below 1e-5",
+    "320-panel MLFMM leaf size 4 has far translations; CPU parity below 1e-5",
+    "Auto 1000-panel dense limit rejection before allocation"
+  ],
+  "limits": [
+    "Fixed geometry/frequency/material/basis/formulation common contract",
+    "Application entrypoint migration remains open",
+    "Compressed setup and optional exact residual certification are host work",
+    "Host field parity uses explicit solution download",
+    "Source descriptor growth may allocate",
+    "Pool quota does not account for every underlying allocation",
+    "No performance speedup claimed"
+  ],
+  "source_sha256": {
+    "crates/sonium-bem/src/core/bem_solver_cuda_scattering.rs": "e09f7bb821f9a362f53d0cc327be8721c17c6143d7175d74ec29538345c308c6",
+    "crates/sonium-bem/src/core/bem_solver_cuda_scattering_tests.rs": "c41c2980beba6461d14ad7b678cbaf469eccb931c126330c7735cb4dda8f619b"
+  },
+  "logs": [
+    "/tmp/scattering-native-final.log",
+    "/tmp/scattering-cpu.log",
+    "/tmp/scattering-root-check.log",
+    "/tmp/scattering-root-clippy.log",
+    "/tmp/scattering-clippy-final.log"
+  ],
+  "memcheck": {
+    "status": "running; not yet passed",
+    "log": "/tmp/scattering-memcheck.log",
+    "session_id": 32911,
+    "scope": "all four native dispatcher tests"
+  }
+}
