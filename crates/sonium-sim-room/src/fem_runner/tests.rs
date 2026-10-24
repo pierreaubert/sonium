@@ -1558,6 +1558,7 @@ fn test_fem_run_diagnostics_aggregates_frequency_stats() {
     };
     let mut diagnostics = FemRunDiagnostics::new("cpu", &cfg);
     diagnostics.record_frequency(FemFrequencyStats {
+        block_solve: Default::default(),
         frequency_hz: 50.0,
         symmetry_mode: Some(1),
         matrix_ms: 1.0,
@@ -1581,6 +1582,7 @@ fn test_fem_run_diagnostics_aggregates_frequency_stats() {
         synchronization_calls: 0,
     });
     diagnostics.record_frequency(FemFrequencyStats {
+        block_solve: Default::default(),
         frequency_hz: 60.0,
         symmetry_mode: None,
         matrix_ms: 1.5,

@@ -43,6 +43,9 @@ pub struct FemDiagnosticsMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FemFrequencyDiagnosticsMetadata {
     pub frequency_hz: f64,
+    /// CUDA block attempt, distinct from scalar recovery and backend fallback.
+    #[serde(default)]
+    pub block_solve: crate::fem_runner::FemBlockSolveOutcome,
     pub symmetry_mode: Option<usize>,
     pub matrix_ms: f64,
     pub preconditioner_ms: f64,
@@ -340,6 +343,7 @@ impl From<&FemFrequencyStats> for FemFrequencyDiagnosticsMetadata {
     fn from(stats: &FemFrequencyStats) -> Self {
         Self {
             frequency_hz: stats.frequency_hz,
+            block_solve: stats.block_solve.clone(),
             symmetry_mode: stats.symmetry_mode,
             matrix_ms: stats.matrix_ms,
             preconditioner_ms: stats.preconditioner_ms,
@@ -763,6 +767,7 @@ mod tests {
                 device_total_memory_bytes: None,
             }),
             frequency_stats: vec![FemFrequencyStats {
+                block_solve: Default::default(),
                 frequency_hz: 50.0,
                 symmetry_mode: Some(1),
                 matrix_ms: 1.0,
@@ -834,6 +839,25 @@ mod tests {
         let boundary_flux = evidence.frequency_stats[0].boundary_flux.as_ref().unwrap();
         assert_eq!(boundary_flux.samples[0].boundary_tag, 7);
         assert_eq!(boundary_flux.total_power_w, 0.3125);
+    }
+
+    #[test]
+    fn block_outcome_metadata_preserves_recovery_and_legacy_records() {
+        use crate::fem_runner::FemBlockSolveOutcome;
+        let mut diagnostics = converged_fem_diagnostics();
+        for outcome in [
+            FemBlockSolveOutcome::Accepted { correction_steps: 1 },
+            FemBlockSolveOutcome::Rejected { reason: "corrections exhausted".into() },
+        ] {
+            diagnostics.frequency_stats[0].block_solve = outcome.clone();
+            let metadata = FemFrequencyDiagnosticsMetadata::from(&diagnostics.frequency_stats[0]);
+            let mut value = serde_json::to_value(&metadata).unwrap();
+            let decoded: FemFrequencyDiagnosticsMetadata = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(decoded.block_solve, outcome);
+            value.as_object_mut().unwrap().remove("block_solve");
+            let legacy: FemFrequencyDiagnosticsMetadata = serde_json::from_value(value).unwrap();
+            assert_eq!(legacy.block_solve, FemBlockSolveOutcome::NotAttempted);
+        }
     }
 
     #[test]

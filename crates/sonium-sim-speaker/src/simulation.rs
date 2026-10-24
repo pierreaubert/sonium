@@ -3041,6 +3041,14 @@ pub fn run_simulation_cuda_adjoint_with_report(
             solver_config.hmatrix_threshold, n_dofs
         )));
     }
+    // Keep adjoint Krylov storage across numeric operator updates.
+    let krylov_pool = sonium_compute::MemoryPool::new(
+        backend,
+        sonium_compute::MemoryPoolConfig::default(),
+    )
+    .map_err(|error| SimulationError::new(format!("CUDA adjoint Krylov pool failed: {error}")))?;
+    let backend = krylov_pool.backend();
+    let mut workspace = sonium_compute::GmresWorkspace::new(n_dofs);
     let (row_ptr, col_idx) = dense_csr_structure(n_dofs)?;
     let mut assembly_workspace = CudaTbemAssemblyWorkspace::new(
         &elements,
@@ -3051,7 +3059,7 @@ pub fn run_simulation_cuda_adjoint_with_report(
             model.simulation.air_density,
             false,
         ),
-        &backend,
+        backend,
     )
     .map_err(|error| {
         SimulationError::new(format!(
@@ -3104,7 +3112,7 @@ pub fn run_simulation_cuda_adjoint_with_report(
         let beta = physics.burton_miller_beta_scaled(solver_config.beta_scale);
         let assembly_start = Instant::now();
         let system = assembly_workspace
-            .assemble(&elements, &nodes, &physics, beta, &backend)
+            .assemble(&elements, &nodes, &physics, beta, backend)
             .map_err(|error| {
                 SimulationError::new(format!(
                     "CUDA adjoint resident TBEM assembly failed at {frequency:.1} Hz: {error}"
@@ -3148,7 +3156,7 @@ pub fn run_simulation_cuda_adjoint_with_report(
             .collect();
         if let Some(matrix) = matrix.as_mut() {
             matrix
-                .try_copy_values_from_host(&backend, &adjoint_values)
+                .try_copy_values_from_host(backend, &adjoint_values)
                 .map_err(|error| {
                     SimulationError::new(format!(
                         "CUDA adjoint CSR value update failed at {frequency:.1} Hz: {error}"
@@ -3157,7 +3165,7 @@ pub fn run_simulation_cuda_adjoint_with_report(
             matrix_value_updates += 1;
         } else {
             let device_matrix = sonium_compute::DeviceCsr::try_from_host(
-                &backend,
+                backend,
                 n_dofs,
                 n_dofs,
                 &row_ptr,
@@ -3170,7 +3178,7 @@ pub fn run_simulation_cuda_adjoint_with_report(
                 ))
             })?;
             matrix = Some(
-                sonium_compute::PersistentDeviceCsr::try_from_device_csr(&backend, device_matrix)
+                sonium_compute::PersistentDeviceCsr::try_from_device_csr(backend, device_matrix)
                     .map_err(|error| {
                     SimulationError::new(format!(
                         "CUDA adjoint CSR descriptor setup failed: {error}"
@@ -3180,7 +3188,7 @@ pub fn run_simulation_cuda_adjoint_with_report(
         }
         if let Some(preconditioner) = preconditioner.as_mut() {
             preconditioner
-                .try_update_dense_host(&backend, &adjoint_values)
+                .try_update_dense_host(backend, &adjoint_values)
                 .map_err(|error| {
                     SimulationError::new(format!(
                         "CUDA adjoint block-Jacobi update failed at {frequency:.1} Hz: {error}"
@@ -3190,7 +3198,7 @@ pub fn run_simulation_cuda_adjoint_with_report(
         } else {
             preconditioner = Some(
                 sonium_compute::BlockJacobiBackend::try_from_dense_host(
-                    &backend,
+                    backend,
                     &adjoint_values,
                     n_dofs,
                     gpu_block_size,
@@ -3217,8 +3225,9 @@ pub fn run_simulation_cuda_adjoint_with_report(
         let preconditioner = preconditioner.as_ref().ok_or_else(|| {
             SimulationError::new("CUDA adjoint preconditioner was not initialized")
         })?;
-        let status = sonium_compute::gmres_backend_preconditioned(
-            &backend,
+        let status = sonium_compute::gmres::gmres_backend_preconditioned_pooled_with_workspace(
+            &krylov_pool,
+            &mut workspace,
             matrix,
             preconditioner,
             &rhs_device,
@@ -3306,7 +3315,7 @@ pub fn run_simulation_cuda_adjoint_with_report(
 
     let transfer = backend.transfer_stats();
     let memory = backend.memory_stats();
-    let mut capability_matrix = GpuCapabilityMatrix::from_backend(&backend);
+    let mut capability_matrix = GpuCapabilityMatrix::from_backend(backend);
     capability_matrix.adjoint_solve = adjoint_capability;
     let report = GpuAdjointReport {
         schema_version: GpuAdjointReport::SCHEMA_VERSION,
@@ -3565,6 +3574,20 @@ where
         )));
     }
 
+    // Retain Krylov scratch across the frequency sweep. This pool accounts for
+    // solver scratch only; existing operator/assembly allocations remain separate.
+    let krylov_pool = sonium_compute::MemoryPool::new(
+        backend,
+        sonium_compute::MemoryPoolConfig::default(),
+    )
+    .map_err(|error| SimulationError::new(format!("GPU Krylov pool failed: {error}")))?;
+    let backend = krylov_pool.backend();
+    let mut final_workspace = sonium_compute::GmresWorkspace::<B, Complex64>::new(n_dofs);
+    let mut refinement_workspace =
+        sonium_compute::gmres_ir::GmresIrWorkspace::<B, Complex64>::new(&krylov_pool);
+    let mut metal_workspace =
+        sonium_compute::GmresWorkspace::<B, num_complex::Complex32>::new(n_dofs);
+
     let (row_ptr, col_idx) = dense_csr_structure(n_dofs)?;
     // Block-Jacobi over fixed diagonal blocks at production sizes;
     // block_size = 1 below the cut reproduces point Jacobi exactly.
@@ -3644,6 +3667,8 @@ where
     // The small coupled network uses Complex64 because CUDA's native sparse
     // and reduction path is Complex64. The large BEM inner solve remains the
     // mixed Complex32/f64-gated path above.
+    let mut coupled_workspace =
+        sonium_compute::GmresWorkspace::<B, Complex64>::new(model.drivers().len());
     let mut coupled_matrix64: Option<sonium_compute::PersistentDeviceCsr<B, Complex64>> = None;
     // The coupled N-port network is driver-count sized (single digits), so
     // point Jacobi stays: block inverses would buy nothing here.
@@ -3777,7 +3802,7 @@ where
         );
         let beta = physics.burton_miller_beta_scaled(solver_config.beta_scale);
         let assembly_start = Instant::now();
-        let assembled = assemble(&elements, &nodes, &physics, beta, &backend)?;
+        let assembled = assemble(&elements, &nodes, &physics, beta, backend)?;
         let derivative_system = assembled.wavenumber_derivative;
         let system = assembled.value;
         assembly_ms += assembly_start.elapsed().as_millis() as u64;
@@ -3790,7 +3815,7 @@ where
         let values64 = system.matrix.as_slice();
         if let Some(matrix) = matrix32.as_mut() {
             matrix
-                .try_copy_values_from_host_cast(&backend, values64)
+                .try_copy_values_from_host_cast(backend, values64)
                 .map_err(|error| {
                     SimulationError::new(format!(
                         "GPU CSR value update failed at {frequency:.1} Hz: {error}"
@@ -3799,7 +3824,7 @@ where
             matrix_value_updates += 1;
         } else {
             let matrix = sonium_compute::DeviceCsr::try_from_host_cast(
-                &backend, n_dofs, n_dofs, &row_ptr, &col_idx, values64,
+                backend, n_dofs, n_dofs, &row_ptr, &col_idx, values64,
             )
             .map_err(|error| {
                 SimulationError::new(format!(
@@ -3807,7 +3832,7 @@ where
                 ))
             })?;
             matrix32 = Some(
-                sonium_compute::PersistentDeviceCsr::try_from_device_csr(&backend, matrix)
+                sonium_compute::PersistentDeviceCsr::try_from_device_csr(backend, matrix)
                     .map_err(|error| {
                         SimulationError::new(format!(
                             "GPU CSR prebake failed at {frequency:.1} Hz: {error}"
@@ -3818,7 +3843,7 @@ where
 
         if let Some(preconditioner) = preconditioner.as_mut() {
             preconditioner
-                .try_update_dense_host_cast(&backend, values64)
+                .try_update_dense_host_cast(backend, values64)
                 .map_err(|error| {
                     SimulationError::new(format!(
                         "GPU block-Jacobi update failed at {frequency:.1} Hz: {error}"
@@ -3828,7 +3853,7 @@ where
         } else {
             preconditioner = Some(
                 sonium_compute::BlockJacobiBackend::<B, num_complex::Complex32>::try_from_dense_host_cast(
-                    &backend,
+                    backend,
                     values64,
                     n_dofs,
                     gpu_block_size,
@@ -3843,7 +3868,7 @@ where
         if has_typed_driver || backend_kind == SimulationBackend::Cuda {
             if let Some(matrix) = typed_matrix64.as_mut() {
                 matrix
-                    .try_copy_values_from_host(&backend, values64)
+                    .try_copy_values_from_host(backend, values64)
                     .map_err(|error| {
                         SimulationError::new(format!(
                             "GPU typed Complex64 CSR value update failed at {frequency:.1} Hz: {error}"
@@ -3851,7 +3876,7 @@ where
                     })?;
             } else {
                 let matrix = sonium_compute::DeviceCsr::try_from_host(
-                    &backend, n_dofs, n_dofs, &row_ptr, &col_idx, values64,
+                    backend, n_dofs, n_dofs, &row_ptr, &col_idx, values64,
                 )
                 .map_err(|error| {
                     SimulationError::new(format!(
@@ -3859,7 +3884,7 @@ where
                     ))
                 })?;
                 typed_matrix64 = Some(
-                    sonium_compute::PersistentDeviceCsr::try_from_device_csr(&backend, matrix)
+                    sonium_compute::PersistentDeviceCsr::try_from_device_csr(backend, matrix)
                         .map_err(|error| {
                             SimulationError::new(format!(
                                 "GPU typed Complex64 CSR prebake failed at {frequency:.1} Hz: {error}"
@@ -3869,7 +3894,7 @@ where
             }
             if let Some(preconditioner) = typed_preconditioner64.as_mut() {
                 preconditioner
-                    .try_update_dense_host(&backend, values64)
+                    .try_update_dense_host(backend, values64)
                     .map_err(|error| {
                         SimulationError::new(format!(
                             "GPU typed Complex64 block-Jacobi update failed at {frequency:.1} Hz: {error}"
@@ -3878,7 +3903,7 @@ where
             } else {
                 typed_preconditioner64 = Some(
                     sonium_compute::BlockJacobiBackend::try_from_dense_host(
-                        &backend,
+                        backend,
                         values64,
                         n_dofs,
                         gpu_block_size,
@@ -3981,7 +4006,7 @@ where
                 SimulationError::new("GPU typed block workspace was not initialized")
             })?;
             let block_status = sonium_compute::gmres_backend_block_preconditioned_with_workspace(
-                &backend,
+                backend,
                 typed_matrix,
                 typed_preconditioner,
                 typed_block_rhs,
@@ -4034,7 +4059,8 @@ where
                 }
             }
             let coupling = solve_gpu_linear_driver_network(
-                &backend,
+                &krylov_pool,
+                &mut coupled_workspace,
                 model,
                 frequency,
                 &z_rad,
@@ -4084,8 +4110,9 @@ where
                     "GPU typed Complex64 RHS upload failed at {frequency:.1} Hz: {error}"
                 ))
             })?;
-            let status = sonium_compute::gmres_backend_preconditioned(
-                &backend,
+            let status = sonium_compute::gmres::gmres_backend_preconditioned_pooled_with_workspace(
+                &krylov_pool,
+                &mut final_workspace,
                 typed_matrix,
                 typed_preconditioner,
                 rhs64,
@@ -4125,8 +4152,8 @@ where
             backend.try_copy_h2d(&final_rhs64, rhs).map_err(|error| {
                 SimulationError::new(format!("GPU refinement RHS upload failed: {error}"))
             })?;
-            let status = sonium_compute::gmres_ir_backend_preconditioned(
-                &backend,
+            let status = sonium_compute::gmres_ir::gmres_ir_backend_preconditioned_with_workspace(
+                &mut refinement_workspace,
                 typed_matrix64
                     .as_ref()
                     .ok_or_else(|| SimulationError::new("GPU refinement f64 operator missing"))?,
@@ -4208,8 +4235,9 @@ where
             let solution = x32.as_mut().ok_or_else(|| {
                 SimulationError::new("GPU prescribed solution buffer was not initialized")
             })?;
-            let status = sonium_compute::gmres_backend_preconditioned(
-                &backend,
+            let status = sonium_compute::gmres::gmres_backend_preconditioned_pooled_with_workspace(
+                &krylov_pool,
+                &mut metal_workspace,
                 matrix,
                 preconditioner,
                 rhs32_device,
@@ -4377,7 +4405,7 @@ where
         let surface_velocity = build_surface_velocity(&elements);
         let field_start = Instant::now();
         let mut gpu_field = evaluate_speaker_field_gpu(
-            &backend,
+            backend,
             &field_geometry,
             &mut field_pressure,
             &mut field_velocity,
@@ -4447,7 +4475,7 @@ where
                     .as_mut()
                     .ok_or_else(|| SimulationError::new("CUDA correction matrix missing"))?;
                 matrix
-                    .try_copy_values_from_host(&backend, cpu_system.matrix.as_slice())
+                    .try_copy_values_from_host(backend, cpu_system.matrix.as_slice())
                     .map_err(|e| {
                         SimulationError::new(format!("CUDA reference operator upload failed: {e}"))
                     })?;
@@ -4456,7 +4484,7 @@ where
                     SimulationError::new("CUDA correction preconditioner missing")
                 })?;
                 preconditioner
-                    .try_update_dense_host(&backend, cpu_system.matrix.as_slice())
+                    .try_update_dense_host(backend, cpu_system.matrix.as_slice())
                     .map_err(|e| {
                         SimulationError::new(format!(
                             "CUDA reference preconditioner update failed: {e}"
@@ -4464,7 +4492,8 @@ where
                     })?;
                 preconditioner_updates += 1;
                 let (corrected, _) = solve_gpu_coupled_rhs(
-                    &backend,
+                    &krylov_pool,
+                    &mut final_workspace,
                     matrix,
                     preconditioner,
                     &cpu_system.rhs,
@@ -4483,7 +4512,7 @@ where
                     &cpu_system.rhs,
                 );
                 gpu_field = evaluate_speaker_field_gpu(
-                    &backend,
+                    backend,
                     &field_geometry,
                     &mut field_pressure,
                     &mut field_velocity,
@@ -4762,7 +4791,8 @@ fn solve_gpu_coupled_rhs<
     B: sonium_compute::Backend,
     P: sonium_compute::DevicePreconditioner<B, Complex64>,
 >(
-    backend: &B,
+    pool: &sonium_compute::MemoryPool<B>,
+    workspace: &mut sonium_compute::GmresWorkspace<B, Complex64>,
     matrix: &sonium_compute::PersistentDeviceCsr<B, Complex64>,
     preconditioner: &P,
     rhs: &[Complex64],
@@ -4770,6 +4800,7 @@ fn solve_gpu_coupled_rhs<
     x64: &mut B::Buffer<Complex64>,
     config: &SolverConfig,
 ) -> Result<(Vec<Complex64>, f64), SimulationError> {
+    let backend = pool.backend();
     if !complex_values_are_finite(rhs) {
         return Err(SimulationError::new(
             "GPU typed-coupling RHS contains a non-finite value",
@@ -4778,8 +4809,9 @@ fn solve_gpu_coupled_rhs<
     backend
         .try_copy_h2d(rhs, rhs64)
         .map_err(|error| SimulationError::new(format!("GPU coupled RHS upload failed: {error}")))?;
-    let status = sonium_compute::gmres_backend_preconditioned(
-        backend,
+    let status = sonium_compute::gmres::gmres_backend_preconditioned_pooled_with_workspace(
+        pool,
+        workspace,
         matrix,
         preconditioner,
         rhs64,
@@ -4816,7 +4848,8 @@ fn solve_gpu_coupled_rhs<
 #[cfg(any(feature = "cuda", feature = "metal"))]
 #[allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 fn solve_gpu_linear_driver_network<B: sonium_compute::Backend>(
-    backend: &B,
+    pool: &sonium_compute::MemoryPool<B>,
+    workspace: &mut sonium_compute::GmresWorkspace<B, Complex64>,
     model: &LoudspeakerModel,
     frequency: f64,
     z_rad: &[Vec<Complex64>],
@@ -4828,6 +4861,7 @@ fn solve_gpu_linear_driver_network<B: sonium_compute::Backend>(
     matrix_value_updates: &mut usize,
     preconditioner_updates: &mut usize,
 ) -> Result<TypedDriverCoupling, SimulationError> {
+    let backend = pool.backend();
     let drivers = model.drivers();
     let driver_count = drivers.len();
     if driver_count == 0
@@ -4938,7 +4972,8 @@ fn solve_gpu_linear_driver_network<B: sonium_compute::Backend>(
         );
     }
     let (velocities_rms, _) = solve_gpu_coupled_rhs(
-        backend,
+        pool,
+        workspace,
         matrix_slot
             .as_ref()
             .ok_or_else(|| SimulationError::new("GPU coupled matrix was not initialized"))?,
@@ -8494,6 +8529,77 @@ pub(crate) mod tests {
 
     #[cfg(feature = "cuda")]
     #[test]
+    fn native_typed_network_retains_krylov_across_frequency_updates() {
+        let backend = match sonium_compute::CudaBackend::new_default() {
+            Ok(backend) => backend,
+            Err(error) => {
+                assert!(
+                    std::env::var("SONIUM_REQUIRE_CUDA").as_deref() != Ok("1"),
+                    "{error}"
+                );
+                return;
+            }
+        };
+        let pool =
+            sonium_compute::MemoryPool::new(backend, sonium_compute::MemoryPoolConfig::default())
+                .unwrap();
+        let mut model = tiny_model();
+        let study = sonium_sim_speaker_modeling::SpeakerDriverStudy::detailed_frequency_domain_driver();
+        let driver = sonium_sim_speaker_modeling::DriverModel::from_study(&study).unwrap();
+        model.woofer.radius = study.geometry.diaphragm_radius_m;
+        model.tweeter.radius = study.geometry.diaphragm_radius_m;
+        model.woofer.driver_model = Some(driver.clone());
+        model.tweeter.driver_model = Some(driver);
+        let radiation = vec![
+            vec![Complex64::new(0.2, 0.1), Complex64::new(0.03, 0.01)],
+            vec![Complex64::new(0.03, 0.01), Complex64::new(0.4, 0.3)],
+        ];
+        let mut workspace = sonium_compute::GmresWorkspace::new(model.drivers().len());
+        let (mut matrix, mut preconditioner, mut rhs, mut solution) = (None, None, None, None);
+        let (mut matrix_updates, mut preconditioner_updates) = (0, 0);
+        let config = SolverConfig::default();
+        for (index, frequency) in [1000.0, 1000.0, 1200.0, 1200.0, 1000.0]
+            .into_iter()
+            .enumerate()
+        {
+            let before = pool.backend().begin_runtime_stats();
+            let actual = solve_gpu_linear_driver_network(
+                &pool,
+                &mut workspace,
+                &model,
+                frequency,
+                &radiation,
+                &config,
+                &mut matrix,
+                &mut preconditioner,
+                &mut rhs,
+                &mut solution,
+                &mut matrix_updates,
+                &mut preconditioner_updates,
+            )
+            .unwrap();
+            let stats = pool.backend().runtime_stats_since(before);
+            if index > 0 {
+                assert_eq!(stats.allocation_operations, 0, "{stats:?}");
+            }
+            let expected =
+                solve_coupled_driver_network_generic_with_control(&model, frequency, &radiation, None)
+                    .unwrap();
+            for (actual, expected) in actual
+                .velocities_bem_all
+                .iter()
+                .zip(&expected.velocities_bem_all)
+            {
+                assert!(relative_complex_difference(*actual, *expected) < 1e-5);
+            }
+            assert!(workspace.cached_buffer_count().unwrap() > 0);
+        }
+        assert_eq!(matrix_updates, 4);
+        assert_eq!(preconditioner_updates, 4);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
     fn typed_gpu_network_contract_matches_cpu_reference_backend() {
         let mut model = tiny_model();
         let study =
@@ -8508,7 +8614,15 @@ pub(crate) mod tests {
             vec![Complex64::new(0.03, 0.01), Complex64::new(0.4, 0.3)],
         ];
         let config = SolverConfig::default();
-        let cpu_backend = sonium_compute::CpuBackend::new();
+        let pool = sonium_compute::MemoryPool::new(
+            sonium_compute::CpuBackend::new(),
+            sonium_compute::MemoryPoolConfig {
+                // The CPU test backend does not report a device memory capacity.
+                max_bytes: Some(32 * 1024 * 1024),
+            },
+        )
+        .unwrap();
+        let mut workspace = sonium_compute::GmresWorkspace::new(model.drivers().len());
         let mut matrix = None;
         let mut preconditioner = None;
         let mut rhs = None;
@@ -8516,7 +8630,8 @@ pub(crate) mod tests {
         let mut matrix_updates = 0;
         let mut preconditioner_updates = 0;
         let accelerator = solve_gpu_linear_driver_network(
-            &cpu_backend,
+            &pool,
+            &mut workspace,
             &model,
             1_000.0,
             &radiation,

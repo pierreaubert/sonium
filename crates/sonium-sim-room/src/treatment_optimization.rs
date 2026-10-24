@@ -19,6 +19,12 @@
 //! reduced-order guard; physical FEM/modal decay calibration remains a
 //! separate promotion requirement.
 
+#[cfg(feature = "cuda")]
+mod cuda;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use cuda::{CudaMultiFrequencyRoomTreatmentSession, CudaRoomTreatmentSession};
+
 use num_complex::Complex64;
 use sonium_fem::assembly::HelmholtzAssembler;
 use sonium_fem::optimization::{DensityFilter, DensityFilterError, MmaConstraint, MmaOptimizer};
@@ -431,6 +437,17 @@ fn seat_variance_objective(
         .iter()
         .map(|listener| listener.evaluate(state))
         .collect::<Vec<_>>();
+    let (objective, pressure_gradients) = seat_variance_pressures(&pressures);
+    let mut state_gradient = vec![Complex64::new(0.0, 0.0); state.len()];
+    for (listener, pressure_gradient) in listeners.iter().zip(pressure_gradients) {
+        for &(dof, weight) in &listener.entries {
+            state_gradient[dof] += weight.conj() * pressure_gradient;
+        }
+    }
+    (objective, state_gradient)
+}
+
+fn seat_variance_pressures(pressures: &[Complex64]) -> (f64, Vec<Complex64>) {
     let log_powers = pressures
         .iter()
         .map(|pressure| (pressure.norm_sqr() + PRESSURE_FLOOR).ln())
@@ -445,16 +462,16 @@ fn seat_variance_objective(
         .map(|residual| residual * residual)
         .sum::<f64>()
         / residuals.len() as f64;
-
-    let mut state_gradient = vec![Complex64::new(0.0, 0.0); state.len()];
-    for ((listener, pressure), residual) in listeners.iter().zip(&pressures).zip(&residuals) {
-        let pressure_gradient = *pressure
-            * (2.0 * residual / (pressures.len() as f64 * (pressure.norm_sqr() + PRESSURE_FLOOR)));
-        for &(dof, weight) in &listener.entries {
-            state_gradient[dof] += weight.conj() * pressure_gradient;
-        }
-    }
-    (objective, state_gradient)
+    let pressure_gradients = pressures
+        .iter()
+        .zip(&residuals)
+        .map(|(pressure, residual)| {
+            *pressure
+                * (2.0 * residual
+                    / (pressures.len() as f64 * (pressure.norm_sqr() + PRESSURE_FLOOR)))
+        })
+        .collect();
+    (objective, pressure_gradients)
 }
 
 fn conjugate_transpose(matrix: &CsrMatrix<Complex64>) -> CsrMatrix<Complex64> {
@@ -529,6 +546,14 @@ impl RoomTreatmentProblem {
         &self,
         config: &RoomTreatmentConfig,
     ) -> Result<RoomTreatmentResult, RoomTreatmentError> {
+        self.optimize_with_evaluator(config, |treatments| self.objective_gradient(treatments))
+    }
+
+    fn optimize_with_evaluator(
+        &self,
+        config: &RoomTreatmentConfig,
+        mut evaluate: impl FnMut(&[f64]) -> Result<(f64, Vec<f64>), RoomTreatmentError>,
+    ) -> Result<RoomTreatmentResult, RoomTreatmentError> {
         if config.max_iterations == 0
             || !config.tolerance.is_finite()
             || config.tolerance <= 0.0
@@ -560,7 +585,7 @@ impl RoomTreatmentProblem {
                 || Ok(design_treatments.clone()),
                 |filter| filter.apply(&design_treatments),
             )?;
-            let (objective, filtered_gradient) = self.objective_gradient(&treatments)?;
+            let (objective, filtered_gradient) = evaluate(&treatments)?;
             objective_history.push(objective);
             let needs_filtered_update =
                 config.density_filter.is_some() || config.spatial_constraint.is_some();
@@ -1797,10 +1822,19 @@ impl MultiFrequencyRoomTreatmentProblem {
             ))??);
         }
 
+        self.aggregate_evaluations(treatments, objective, &evaluations)
+    }
+
+    fn aggregate_evaluations(
+        &self,
+        treatments: &[f64],
+        objective: &TreatmentObjectiveConfig,
+        evaluations: &[FrequencyEvaluation],
+    ) -> Result<TreatmentEvaluation, RoomTreatmentError> {
         let count = self.treatment_operators.len();
         let mut breakdown = TreatmentObjectiveBreakdown::default();
         let mut gradient = vec![0.0; count];
-        for (frequency, evaluation) in self.frequencies.iter().zip(&evaluations) {
+        for (frequency, evaluation) in self.frequencies.iter().zip(evaluations) {
             let weight = frequency.weight;
             breakdown.target += weight * evaluation.target;
             breakdown.variance += weight * evaluation.variance;
@@ -1833,6 +1867,16 @@ impl MultiFrequencyRoomTreatmentProblem {
     pub fn optimize(
         &self,
         config: &MultiFrequencyRoomTreatmentConfig,
+    ) -> Result<MultiFrequencyRoomTreatmentResult, RoomTreatmentError> {
+        self.optimize_with_evaluator(config, |treatments| {
+            self.evaluate(treatments, &config.objective, config.max_frequency_lanes)
+        })
+    }
+
+    fn optimize_with_evaluator(
+        &self,
+        config: &MultiFrequencyRoomTreatmentConfig,
+        mut evaluate: impl FnMut(&[f64]) -> Result<TreatmentEvaluation, RoomTreatmentError>,
     ) -> Result<MultiFrequencyRoomTreatmentResult, RoomTreatmentError> {
         if config.max_iterations == 0
             || !config.tolerance.is_finite()
@@ -1881,8 +1925,7 @@ impl MultiFrequencyRoomTreatmentProblem {
                 || Ok(design_treatments.clone()),
                 |filter| filter.apply(&design_treatments),
             )?;
-            let evaluation =
-                self.evaluate(&treatments, &config.objective, config.max_frequency_lanes)?;
+            let evaluation = evaluate(&treatments)?;
             objective_history.push(evaluation.objective);
             breakdown_history.push(evaluation.breakdown);
             let mut decay_constraints = if let Some(decay_constraint) = &config.decay_constraint {
@@ -1999,6 +2042,21 @@ fn production_objective_and_state_gradient(
         .iter()
         .map(|listener| listener.evaluate(state))
         .collect::<Vec<_>>();
+    let (terms, pressure_gradients) = production_pressures(&pressures, objective, target_level_db);
+    let mut state_gradient = vec![Complex64::new(0.0, 0.0); state.len()];
+    for (listener, pressure_gradient) in listeners.iter().zip(pressure_gradients) {
+        for &(dof, weight) in &listener.entries {
+            state_gradient[dof] += weight.conj() * pressure_gradient;
+        }
+    }
+    (terms, state_gradient)
+}
+
+fn production_pressures(
+    pressures: &[Complex64],
+    objective: &TreatmentObjectiveConfig,
+    target_level_db: f64,
+) -> ((f64, f64, f64), Vec<Complex64>) {
     let seats = pressures.len() as f64;
     let log_reference = 2.0 * objective.reference_pressure.ln();
     let powers = pressures
@@ -2034,19 +2092,15 @@ fn production_objective_and_state_gradient(
     variance *= objective.variance_weight / seats;
     min_level *= objective.min_level_weight / seats;
 
-    let mut state_gradient = vec![Complex64::new(0.0, 0.0); state.len()];
-    for (((listener, pressure), &power), &level_gradient) in listeners
+    let gradients = pressures
         .iter()
-        .zip(&pressures)
         .zip(&powers)
         .zip(&level_gradients)
-    {
-        let pressure_gradient = *pressure * (level_gradient * DB_PER_LN / power);
-        for &(dof, weight) in &listener.entries {
-            state_gradient[dof] += weight.conj() * pressure_gradient;
-        }
-    }
-    ((target, variance, min_level), state_gradient)
+        .map(|((pressure, &power), &level_gradient)| {
+            *pressure * (level_gradient * DB_PER_LN / power)
+        })
+        .collect();
+    ((target, variance, min_level), gradients)
 }
 
 #[cfg(test)]

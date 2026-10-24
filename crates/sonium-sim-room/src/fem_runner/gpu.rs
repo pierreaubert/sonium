@@ -35,11 +35,20 @@ use sonium_compute::CudaBackend;
 use sonium_compute::MetalBackend;
 use sonium_compute::gmres::{BackendCsr, BackendPreconditioner};
 #[cfg(feature = "cuda")]
-use sonium_compute::gmres::{GmresBackendConfig, GmresBackendStatus, gmres_backend_preconditioned};
-use sonium_compute::gmres_ir::{GmresIrConfig, gmres_ir_backend_preconditioned};
+use sonium_compute::gmres::{
+    GmresBackendConfig, GmresBackendStatus, GmresWorkspace,
+    gmres_backend_preconditioned_pooled_with_workspace,
+};
+use sonium_compute::gmres_ir::GmresIrConfig;
+#[cfg(feature = "metal")]
+use sonium_compute::gmres_ir::gmres_ir_backend_preconditioned;
+#[cfg(feature = "cuda")]
+use sonium_compute::gmres_ir::{GmresIrWorkspace, gmres_ir_backend_preconditioned_with_workspace};
 use sonium_compute::{Backend, BufferElement, MixedPrecisionPolicy};
 #[cfg(feature = "cuda")]
 use sonium_compute::{BlockGmresConfig, CudaFailureInjectionPoint, DeviceOperator};
+#[cfg(feature = "cuda")]
+use sonium_compute::{MemoryPool, MemoryPoolConfig};
 use sonium_xem::Point3D;
 
 fn ensure_device_not_cancelled(
@@ -304,7 +313,9 @@ const GPU_F32_MAX_ITERATIONS: usize = 300;
 #[cfg(feature = "cuda")]
 const GPU_F32_TOLERANCE: f32 = 1.0e-6;
 #[cfg(feature = "cuda")]
-const GPU_F32_PROMOTED_RESIDUAL_TOLERANCE: f64 = 1.0e-4;
+// Certification must meet the requested solve accuracy. A looser promoted
+// gate can accept a drifted f32 recurrence without running residual correction.
+const GPU_F32_PROMOTED_RESIDUAL_TOLERANCE: f64 = GPU_F32_TOLERANCE as f64;
 #[cfg(feature = "cuda")]
 const GPU_F32_RESIDUAL_CORRECTION_STEPS: usize = 6;
 #[cfg(feature = "cuda")]
@@ -349,29 +360,23 @@ fn gpu_alloc_and_upload<B: Backend, T: BufferElement + Copy>(
 #[cfg(feature = "cuda")]
 fn promoted_f32_residual_on_device(
     backend: &CudaBackend,
-    a_promoted: &BackendCsr<CudaBackend, Complex64>,
+    a_promoted: &dyn DeviceOperator<CudaBackend, Complex64>,
     x_32: &<CudaBackend as Backend>::Buffer<Complex32>,
     b_32: &<CudaBackend as Backend>::Buffer<Complex32>,
     x_64: &mut <CudaBackend as Backend>::Buffer<Complex64>,
     b_64: &mut <CudaBackend as Backend>::Buffer<Complex64>,
     residual_64: &mut <CudaBackend as Backend>::Buffer<Complex64>,
-) -> f64 {
-    backend.cast_from_lower::<Complex64>(x_32, x_64);
-    backend.cast_from_lower::<Complex64>(b_32, b_64);
-    backend.spmv_csr::<Complex64>(
-        a_promoted.m,
-        a_promoted.n,
-        &a_promoted.row_ptr,
-        &a_promoted.col_idx,
-        &a_promoted.values,
-        x_64,
-        residual_64,
-    );
-    backend.axpy(Complex64::new(-1.0, 0.0), b_64, residual_64);
+) -> sonium_compute::BackendResult<f64> {
+    backend.try_cast_from_lower::<Complex64>(x_32, x_64)?;
+    backend.try_cast_from_lower::<Complex64>(b_32, b_64)?;
+    a_promoted.try_apply(backend, x_64, residual_64)?;
+    backend.try_axpy(Complex64::new(-1.0, 0.0), b_64, residual_64)?;
 
-    let residual_norm = backend.nrm2::<Complex64>(residual_64);
-    let rhs_norm = backend.nrm2::<Complex64>(b_64);
-    if rhs_norm == 0.0 {
+    let residual_norm = backend
+        .try_nrm2_with_mode::<Complex64>(sonium_compute::ReductionMode::Fast, residual_64)?;
+    let rhs_norm =
+        backend.try_nrm2_with_mode::<Complex64>(sonium_compute::ReductionMode::Fast, b_64)?;
+    Ok(if rhs_norm == 0.0 {
         if residual_norm == 0.0 {
             0.0
         } else {
@@ -379,7 +384,7 @@ fn promoted_f32_residual_on_device(
         }
     } else {
         residual_norm / rhs_norm
-    }
+    })
 }
 
 #[cfg(feature = "cuda")]
@@ -393,9 +398,9 @@ struct F32ResidualCorrectionScratch<'a> {
 
 #[cfg(feature = "cuda")]
 struct F32ResidualCorrectionProblem<'a> {
-    backend: &'a CudaBackend,
-    a32: &'a BackendCsr<CudaBackend, Complex32>,
-    a64: &'a BackendCsr<CudaBackend, Complex64>,
+    pool: &'a MemoryPool<CudaBackend>,
+    a32: &'a dyn DeviceOperator<CudaBackend, Complex32>,
+    a64: &'a dyn DeviceOperator<CudaBackend, Complex64>,
     precond: &'a dyn BackendPreconditioner<CudaBackend, Complex32>,
     cfg: &'a GmresBackendConfig<Complex32>,
 }
@@ -406,16 +411,18 @@ fn solve_f32_with_residual_correction(
     rhs32: &<CudaBackend as Backend>::Buffer<Complex32>,
     x0_32: Option<&<CudaBackend as Backend>::Buffer<Complex32>>,
     x32: &mut <CudaBackend as Backend>::Buffer<Complex32>,
+    workspace: &mut GmresWorkspace<CudaBackend, Complex32>,
     scratch: &mut F32ResidualCorrectionScratch<'_>,
 ) -> Result<(GmresBackendStatus<Complex32>, f64), String> {
-    let backend = problem.backend;
-    let mut status = gmres_backend_preconditioned::<
+    let backend = problem.pool.backend();
+    let mut status = gmres_backend_preconditioned_pooled_with_workspace::<
         CudaBackend,
-        BackendCsr<CudaBackend, Complex32>,
+        dyn DeviceOperator<CudaBackend, Complex32>,
         dyn BackendPreconditioner<CudaBackend, Complex32>,
         Complex32,
     >(
-        backend,
+        problem.pool,
+        workspace,
         problem.a32,
         problem.precond,
         rhs32,
@@ -434,7 +441,8 @@ fn solve_f32_with_residual_correction(
         scratch.x64,
         scratch.rhs64,
         scratch.residual64,
-    );
+    )
+    .map_err(|error| error.to_string())?;
 
     for correction_step in 0..GPU_F32_RESIDUAL_CORRECTION_STEPS {
         if promoted_residual <= GPU_F32_PROMOTED_RESIDUAL_TOLERANCE {
@@ -444,13 +452,14 @@ fn solve_f32_with_residual_correction(
         backend.scale::<Complex64>(Complex64::new(-1.0, 0.0), scratch.residual64);
         backend.cast_to_lower::<Complex64>(scratch.residual64, scratch.residual32);
 
-        let correction_status = gmres_backend_preconditioned::<
+        let correction_status = gmres_backend_preconditioned_pooled_with_workspace::<
             CudaBackend,
-            BackendCsr<CudaBackend, Complex32>,
+            dyn DeviceOperator<CudaBackend, Complex32>,
             dyn BackendPreconditioner<CudaBackend, Complex32>,
             Complex32,
         >(
-            backend,
+            problem.pool,
+            workspace,
             problem.a32,
             problem.precond,
             scratch.residual32,
@@ -470,7 +479,8 @@ fn solve_f32_with_residual_correction(
             scratch.x64,
             scratch.rhs64,
             scratch.residual64,
-        );
+        )
+        .map_err(|error| error.to_string())?;
         log::debug!(
             "FEM (cuda f32-pure): residual correction {} estimated_res={:.2e} promoted_res {:.2e} -> {:.2e}",
             correction_step + 1,
@@ -493,23 +503,27 @@ fn solve_f32_with_residual_correction(
 #[allow(clippy::too_many_arguments)]
 fn solve_f32_sources_block(
     backend: &CudaBackend,
-    a_inner: &BackendCsr<CudaBackend, Complex32>,
-    a_outer: &BackendCsr<CudaBackend, Complex64>,
+    workspace: &mut sonium_compute::BlockGmresWorkspace<CudaBackend, Complex32>,
+    a_inner: &dyn DeviceOperator<CudaBackend, Complex32>,
+    a_outer: &dyn DeviceOperator<CudaBackend, Complex64>,
     precond: &dyn BackendPreconditioner<CudaBackend, Complex32>,
     rhs_assembler: &mut DeviceRhsBlockAssembler<CudaBackend, Complex32>,
     coefficients: &[Complex32],
     rhs_32: &mut <CudaBackend as Backend>::Buffer<Complex32>,
     x_32: &mut <CudaBackend as Backend>::Buffer<Complex32>,
+    correction_rhs: &mut <CudaBackend as Backend>::Buffer<Complex32>,
+    correction: &mut <CudaBackend as Backend>::Buffer<Complex32>,
     rhs_64: &mut <CudaBackend as Backend>::Buffer<Complex64>,
     x_64: &mut <CudaBackend as Backend>::Buffer<Complex64>,
     residual_64: &mut <CudaBackend as Backend>::Buffer<Complex64>,
+    norm_column: &mut <CudaBackend as Backend>::Buffer<Complex64>,
     listener_32: &mut DeviceListenerExtraction<CudaBackend, Complex32>,
     listener_64: &mut DeviceListenerExtraction<CudaBackend, Complex64>,
     rhs_count: usize,
     policy: MixedPrecisionPolicy,
-) -> Result<Option<(Vec<Vec<Complex64>>, Vec<GmresBackendStatus<Complex32>>, f64)>, String> {
-    rhs_assembler.assemble(backend, coefficients, rhs_32);
-    let status = sonium_compute::gmres_backend_block_preconditioned(
+) -> Result<(Vec<Vec<Complex64>>, Vec<GmresBackendStatus<Complex32>>, f64, usize), String> {
+    rhs_assembler.assemble(backend, coefficients, rhs_32).map_err(|error| error.to_string())?;
+    let mut status = sonium_compute::gmres_backend_block_preconditioned_with_workspace(
         backend,
         a_inner,
         precond,
@@ -521,48 +535,54 @@ fn solve_f32_sources_block(
             max_block_iterations: GPU_F32_BLOCK_MAX_ITERATIONS,
             tolerance: GPU_F32_TOLERANCE,
         },
+        workspace,
     )
     .map_err(|error| error.to_string())?;
-    if !status.converged {
-        return Ok(None);
+    // The f32 Arnoldi recurrence may stagnate just above the requested
+    // tolerance. Certify and correct the rounded system with promoted residuals
+    // rather than accepting a loose inner status or discarding its iterate.
+    backend.try_cast_from_lower::<Complex64>(rhs_32, rhs_64)
+        .map_err(|error| error.to_string())?;
+    let mut correction_steps = 0;
+    let promoted_residuals = loop {
+        backend.try_cast_from_lower::<Complex64>(x_32, x_64)
+            .map_err(|error| error.to_string())?;
+        a_outer.try_apply_colmajor(backend, rhs_count, x_64, residual_64)
+            .map_err(|error| error.to_string())?;
+        backend.try_axpy::<Complex64>(Complex64::new(-1.0, 0.0), rhs_64, residual_64)
+            .map_err(|error| error.to_string())?;
+        let residuals = super::device::block_relative_residuals(
+            backend, rhs_64, residual_64, norm_column,
+        ).map_err(|error| error.to_string())?;
+        if residuals.iter().all(|&r| r <= GPU_F32_PROMOTED_RESIDUAL_TOLERANCE) {
+            break residuals;
+        }
+        if correction_steps == GPU_F32_RESIDUAL_CORRECTION_STEPS {
+            return Err(format!("block residual corrections exhausted: {residuals:?}"));
+        }
+        // residual_64 contains A*x-b, so subtract the correction below.
+        backend.try_cast_to_lower::<Complex64>(residual_64, correction_rhs)
+            .map_err(|error| error.to_string())?;
+        let update = sonium_compute::gmres_backend_block_preconditioned_with_workspace(
+            backend, a_inner, precond, correction_rhs, None, correction, rhs_count,
+            &BlockGmresConfig {
+                max_block_iterations: GPU_F32_BLOCK_MAX_ITERATIONS,
+                tolerance: GPU_F32_TOLERANCE,
+            }, workspace,
+        ).map_err(|error| error.to_string())?;
+        backend.try_axpy::<Complex32>(Complex32::new(-1.0, 0.0), correction, x_32)
+            .map_err(|error| error.to_string())?;
+        for (total, current) in status.rhs.iter_mut().zip(&update.rhs) {
+            total.iterations += current.iterations;
+        }
+        correction_steps += 1;
+    };
+    for (column, &residual) in status.rhs.iter_mut().zip(&promoted_residuals) {
+        column.final_residual = residual as f32;
+        column.backward_error = residual as f32;
+        column.converged = true;
     }
-
-    // Recompute the true residual with the promoted operator before the
-    // batch is accepted.  This mirrors the scalar f32 path's gate but
-    // performs one block SpMM and one compact host transfer for all RHS.
-    backend.cast_from_lower::<Complex64>(rhs_32, rhs_64);
-    backend.cast_from_lower::<Complex64>(x_32, x_64);
-    DeviceOperator::apply_colmajor(a_outer, backend, rhs_count, x_64, residual_64);
-    backend.axpy::<Complex64>(Complex64::new(-1.0, 0.0), rhs_64, residual_64);
-    backend.synchronize().map_err(|error| error.to_string())?;
-
     let n = a_inner.n();
-    let mut rhs_host = vec![Complex64::new(0.0, 0.0); n * rhs_count];
-    let mut residual_host = vec![Complex64::new(0.0, 0.0); n * rhs_count];
-    backend.copy_d2h(rhs_64, &mut rhs_host);
-    backend.copy_d2h(residual_64, &mut residual_host);
-    let promoted_residuals: Vec<f64> = (0..rhs_count)
-        .map(|column| {
-            let start = column * n;
-            let rhs_norm = rhs_host[start..start + n]
-                .iter()
-                .map(|value| value.norm_sqr())
-                .sum::<f64>()
-                .sqrt();
-            let residual_norm = residual_host[start..start + n]
-                .iter()
-                .map(|value| value.norm_sqr())
-                .sum::<f64>()
-                .sqrt();
-            if rhs_norm > 0.0 {
-                residual_norm / rhs_norm
-            } else if residual_norm == 0.0 {
-                0.0
-            } else {
-                f64::INFINITY
-            }
-        })
-        .collect();
 
     let listener_values_32 = listener_32.evaluate_colmajor_to_host(backend, x_32, n, rhs_count);
     let listener_values_64 = listener_64.evaluate_colmajor_to_host(backend, x_64, n, rhs_count);
@@ -583,7 +603,7 @@ fn solve_f32_sources_block(
             .validate_gates(promoted_residuals[column], physical_error)
             .is_err()
         {
-            return Ok(None);
+            return Err(format!("block certification rejected column {column}: residual={}, physical_error={physical_error}", promoted_residuals[column]));
         }
         max_residual = max_residual.max(promoted_residuals[column]);
         accepted_values.push(
@@ -593,7 +613,7 @@ fn solve_f32_sources_block(
         );
     }
 
-    Ok(Some((accepted_values, status.rhs, max_residual)))
+    Ok((accepted_values, status.rhs, max_residual, correction_steps))
 }
 
 fn upload_real_basis_as_complex32<B: Backend>(
@@ -685,6 +705,7 @@ fn fill_shifted_values_32(
     }
 }
 
+#[cfg(feature = "metal")]
 fn update_helmholtz_values_32<B: Backend>(
     backend: &B,
     dst: &mut <B as Backend>::Buffer<Complex32>,
@@ -726,6 +747,7 @@ fn update_shifted_values_32<B: Backend>(
     );
 }
 
+#[cfg(feature = "metal")]
 fn update_helmholtz_values_64<B: Backend>(
     backend: &B,
     dst: &mut <B as Backend>::Buffer<Complex64>,
@@ -804,8 +826,8 @@ fn build_listener_interpolation(
 /// Run the FEM Helmholtz sweep on a CUDA backend. The shared CSR structure
 /// and source RHS/solution work buffers are allocated once; each frequency
 /// updates only A/P values and builds one preconditioner that is reused for
-/// all sources. Sources within a frequency are still solved sequentially so
-/// Krylov scratch memory is not multiplied by the source count.
+/// all sources. Pure-f32 sweeps use a retained block workspace; other
+/// precisions use the retained scalar solve and retry path.
 #[cfg(feature = "cuda")]
 pub fn run_fem_gpu(
     simulation: &RoomSimulation,
@@ -977,7 +999,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
         .cloned()
         .fold(f64::NEG_INFINITY, f64::max);
     let min_wavelength = simulation.speed_of_sound / max_freq;
-    let elements_per_meter = (ELEMENTS_PER_WAVELENGTH / min_wavelength).ceil() as usize;
+    let elements_per_meter = (mesh_config.elements_per_wavelength / min_wavelength).ceil() as usize;
 
     log::info!(
         "FEM (cuda): building mesh for max_freq={:.0} Hz, grading {:.1}x",
@@ -1056,6 +1078,16 @@ fn run_fem_gpu_report_with_cancellation_inner(
     let gpu_free_bytes = gpu_free_bytes as u64;
     let gpu_total_bytes = gpu_total_bytes as u64;
     let gpu_budget_bytes = (gpu_free_bytes as f64 * 0.8) as u64;
+    // The pool owns the existing backend; no second CUDA context is created.
+    // This quota covers retained Krylov scratch. Existing matrix and physical
+    // output allocations still use the sweep's aggregate memory admission.
+    let krylov_pool = MemoryPool::new(
+        backend,
+        MemoryPoolConfig::with_cap(usize::try_from(gpu_budget_bytes)?),
+    )?;
+    let backend = krylov_pool.backend();
+    let mut ir_workspace = GmresIrWorkspace::<_, Complex64>::new(&krylov_pool);
+
     log::info!(
         "FEM (cuda): CUDA device {cuda_device} memory: free {}, total {}, conservative budget {}",
         fmt_gib(gpu_free_bytes),
@@ -1067,6 +1099,9 @@ fn run_fem_gpu_report_with_cancellation_inner(
     let n_lps = simulation.listening_positions.len();
     let n_freqs = simulation.frequencies.len();
     let n_nodes = mesh.num_nodes();
+    // Reused across sources, frequencies, and promoted-residual corrections.
+    let mut f32_krylov_workspace = GmresWorkspace::new(n_nodes);
+    let mut f32_block_workspace = sonium_compute::BlockGmresWorkspace::with_fallback_pool(n_nodes, &krylov_pool);
 
     let mut pressures: Vec<Vec<Vec<Complex64>>> =
         vec![vec![vec![Complex64::new(0.0, 0.0); n_freqs]; n_lps]; n_sources];
@@ -1094,7 +1129,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
         .collect();
     let mut listener_32 = match precision {
         GpuPrecision::F32Pure => Some(DeviceListenerExtraction::<CudaBackend, Complex32>::new(
-            &backend,
+            backend,
             &listener_nodes,
             &listener_weights_32,
         )?),
@@ -1103,7 +1138,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
     // Keep one f64 listener extraction path even for f32 solves. It is
     // the physical-observable gate for the promoted f32 result.
     let mut listener_64 = Some(DeviceListenerExtraction::<CudaBackend, Complex64>::new(
-        &backend,
+        backend,
         &listener_nodes,
         &listener_weights_64,
     )?);
@@ -1170,7 +1205,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
         GpuPrecond::PolynomialJacobi { .. }
         | GpuPrecond::Chebyshev { .. }
         | GpuPrecond::Auto
-        | GpuPrecond::Amg => bytes_a_inner,
+        | GpuPrecond::Amg => 2 * bytes_a_inner,
         GpuPrecond::PointJacobi => 0,
     };
     let bytes_pointjacobi = (n_nodes * (8 + 4 + 4)) as u64;
@@ -1279,6 +1314,8 @@ fn run_fem_gpu_report_with_cancellation_inner(
     let rebuild_every = mesh_config.rebuild_precond_every.max(1);
     let mut cached_point_jacobi: Option<PointJacobiBackend<CudaBackend, Complex32>> = None;
     let mut cached_amg: Option<BackendAmgPreconditioner<CudaBackend, Complex32>> = None;
+    let mut cached_polynomial: Option<PolynomialJacobiBackend<'static, CudaBackend, Complex32>> = None;
+    let mut cached_chebyshev: Option<ChebyshevBackend<'static, CudaBackend, Complex32>> = None;
     // Sticky AMG-to-Chebyshev downgrade, armed by the first AMG setup
     // failure (e.g. a low-frequency coarse operator that is singular in
     // f32). Without it one bad rebuild aborts the whole sweep with zero
@@ -1293,22 +1330,24 @@ fn run_fem_gpu_report_with_cancellation_inner(
     let structure_upload_start = Instant::now();
     let row_ptrs_i32 = usize_indices_to_i32(&assembler.row_ptrs, "row_ptrs")?;
     let col_idx_i32 = usize_indices_to_i32(&assembler.col_indices, "col_indices")?;
-    let mut a_inner = BackendCsr::<CudaBackend, Complex32>::try_from_host_structure(
-        &backend,
+    let a_inner = BackendCsr::<CudaBackend, Complex32>::try_from_host_structure(
+        backend,
         n_nodes,
         n_nodes,
         &row_ptrs_i32,
         &col_idx_i32,
     )
     .map_err(|error| anyhow::anyhow!("CUDA structure allocation/upload failed for A32: {error}"))?;
-    let mut a_outer = BackendCsr::<CudaBackend, Complex64>::try_from_host_structure(
-        &backend,
+    let a_outer = BackendCsr::<CudaBackend, Complex64>::try_from_host_structure(
+        backend,
         n_nodes,
         n_nodes,
         &row_ptrs_i32,
         &col_idx_i32,
     )
     .map_err(|error| anyhow::anyhow!("CUDA structure allocation/upload failed for A64: {error}"))?;
+    let mut a_inner = sonium_compute::PersistentDeviceCsr::try_from_device_csr(backend, a_inner)?;
+    let mut a_outer = sonium_compute::PersistentDeviceCsr::try_from_device_csr(backend, a_outer)?;
     // P_inner is resident for every polynomial-family choice and for
     // Auto/AMG as well: an AMG setup failure downgrades the sweep to the
     // Chebyshev smoother, which needs the live P device CSR. One extra
@@ -1320,7 +1359,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
         | GpuPrecond::Auto
         | GpuPrecond::Amg => Some(
             BackendCsr::<CudaBackend, Complex32>::try_from_host_structure(
-                &backend,
+                backend,
                 n_nodes,
                 n_nodes,
                 &row_ptrs_i32,
@@ -1340,13 +1379,13 @@ fn run_fem_gpu_report_with_cancellation_inner(
     );
 
     let basis_upload_start = Instant::now();
-    let k_basis_32 = upload_real_basis_as_complex32(&backend, &assembler.k_values, "K")?;
-    let m_basis_32 = upload_real_basis_as_complex32(&backend, &assembler.m_values, "M")?;
+    let k_basis_32 = upload_real_basis_as_complex32(backend, &assembler.k_values, "K")?;
+    let m_basis_32 = upload_real_basis_as_complex32(backend, &assembler.m_values, "M")?;
     let boundary_basis_32 =
-        upload_boundary_basis_as_complex32(&backend, &assembler.boundary_values)?;
+        upload_boundary_basis_as_complex32(backend, &assembler.boundary_values)?;
     let k_basis_64_opt = match precision {
         GpuPrecision::F64Outer => Some(upload_real_basis_as_complex64(
-            &backend,
+            backend,
             &assembler.k_values,
             "K",
         )?),
@@ -1354,7 +1393,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
     };
     let m_basis_64_opt = match precision {
         GpuPrecision::F64Outer => Some(upload_real_basis_as_complex64(
-            &backend,
+            backend,
             &assembler.m_values,
             "M",
         )?),
@@ -1362,7 +1401,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
     };
     let boundary_basis_64_opt = match precision {
         GpuPrecision::F64Outer => Some(upload_boundary_basis_as_complex64(
-            &backend,
+            backend,
             &assembler.boundary_values,
         )?),
         GpuPrecision::F32Pure => None,
@@ -1390,31 +1429,31 @@ fn run_fem_gpu_report_with_cancellation_inner(
     );
 
     let mut rhs_dev_32_opt = match precision {
-        GpuPrecision::F32Pure => Some(gpu_alloc(&backend, n_nodes, "rhs f32")?),
+        GpuPrecision::F32Pure => Some(gpu_alloc(backend, n_nodes, "rhs f32")?),
         GpuPrecision::F64Outer => None,
     };
     let mut x_dev_32_opt = match precision {
-        GpuPrecision::F32Pure => Some(gpu_alloc(&backend, n_nodes, "x f32")?),
+        GpuPrecision::F32Pure => Some(gpu_alloc(backend, n_nodes, "x f32")?),
         GpuPrecision::F64Outer => None,
     };
-    let mut rhs_dev_64 = gpu_alloc(&backend, n_nodes, "rhs/residual f64")?;
-    let mut x_dev_64 = gpu_alloc(&backend, n_nodes, "x/residual f64")?;
+    let mut rhs_dev_64 = gpu_alloc(backend, n_nodes, "rhs/residual f64")?;
+    let mut x_dev_64 = gpu_alloc(backend, n_nodes, "x/residual f64")?;
     let mut f32_residual_dev_opt = match precision {
-        GpuPrecision::F32Pure => Some(gpu_alloc(&backend, n_nodes, "residual scratch f32")?),
+        GpuPrecision::F32Pure => Some(gpu_alloc(backend, n_nodes, "residual scratch f32")?),
         GpuPrecision::F64Outer => None,
     };
     let mut f32_correction_dev_opt = match precision {
-        GpuPrecision::F32Pure => Some(gpu_alloc(&backend, n_nodes, "correction scratch f32")?),
+        GpuPrecision::F32Pure => Some(gpu_alloc(backend, n_nodes, "correction scratch f32")?),
         GpuPrecision::F64Outer => None,
     };
     let mut residual_dev_64_opt = match precision {
-        GpuPrecision::F32Pure => Some(gpu_alloc(&backend, n_nodes, "residual scratch f64")?),
+        GpuPrecision::F32Pure => Some(gpu_alloc(backend, n_nodes, "residual scratch f64")?),
         GpuPrecision::F64Outer => None,
     };
     let mut prev_x_32_opt = match precision {
         GpuPrecision::F32Pure => Some(
             (0..n_sources)
-                .map(|src| gpu_alloc(&backend, n_nodes, &format!("prev x f32 src {src}")))
+                .map(|src| gpu_alloc(backend, n_nodes, &format!("prev x f32 src {src}")))
                 .collect::<Result<Vec<_>>>()?,
         ),
         GpuPrecision::F64Outer => None,
@@ -1423,7 +1462,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
         GpuPrecision::F32Pure => None,
         GpuPrecision::F64Outer => Some(
             (0..n_sources)
-                .map(|src| gpu_alloc(&backend, n_nodes, &format!("prev x f64 src {src}")))
+                .map(|src| gpu_alloc(backend, n_nodes, &format!("prev x f64 src {src}")))
                 .collect::<Result<Vec<_>>>()?,
         ),
     };
@@ -1460,7 +1499,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
                         // scatter and must not apply that weight again.
                         .map(|&(node, _, _)| (node, 1.0_f32))
                         .collect();
-                    DeviceRhsAssembler::<CudaBackend, Complex32>::new(&backend, n_nodes, &entries)
+                    DeviceRhsAssembler::<CudaBackend, Complex32>::new(backend, n_nodes, &entries)
                 })
                 .collect::<Result<Vec<_>>>()?,
         ),
@@ -1476,7 +1515,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
                         .iter()
                         .map(|&(node, _, _)| (node, 1.0_f64))
                         .collect();
-                    DeviceRhsAssembler::<CudaBackend, Complex64>::new(&backend, n_nodes, &entries)
+                    DeviceRhsAssembler::<CudaBackend, Complex64>::new(backend, n_nodes, &entries)
                 })
                 .collect::<Result<Vec<_>>>()?,
         ),
@@ -1504,7 +1543,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
             })
             .collect::<Vec<_>>();
         Some(DeviceRhsBlockAssembler::<CudaBackend, Complex32>::new(
-            &backend, n_nodes, &entries,
+            backend, n_nodes, &entries,
         )?)
     } else {
         None
@@ -1515,13 +1554,13 @@ fn run_fem_gpu_report_with_cancellation_inner(
         .sum::<usize>();
     let mut rhs_block_coefficients_32 = vec![Complex32::new(0.0, 0.0); block_coefficient_len];
     let mut rhs_block_dev_32_opt = if precision == GpuPrecision::F32Pure {
-        Some(gpu_alloc(&backend, n_nodes * n_sources, "batched RHS f32")?)
+        Some(gpu_alloc(backend, n_nodes * n_sources, "batched RHS f32")?)
     } else {
         None
     };
     let mut x_block_dev_32_opt = if precision == GpuPrecision::F32Pure {
         Some(gpu_alloc(
-            &backend,
+            backend,
             n_nodes * n_sources,
             "batched solution f32",
         )?)
@@ -1530,7 +1569,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
     };
     let mut rhs_block_dev_64_opt = if precision == GpuPrecision::F32Pure {
         Some(gpu_alloc(
-            &backend,
+            backend,
             n_nodes * n_sources,
             "batched RHS f64 gate",
         )?)
@@ -1539,7 +1578,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
     };
     let mut x_block_dev_64_opt = if precision == GpuPrecision::F32Pure {
         Some(gpu_alloc(
-            &backend,
+            backend,
             n_nodes * n_sources,
             "batched solution f64 gate",
         )?)
@@ -1548,13 +1587,19 @@ fn run_fem_gpu_report_with_cancellation_inner(
     };
     let mut residual_block_dev_64_opt = if precision == GpuPrecision::F32Pure {
         Some(gpu_alloc(
-            &backend,
+            backend,
             n_nodes * n_sources,
             "batched residual f64 gate",
         )?)
     } else {
         None
     };
+    let mut block_correction_rhs = if precision == GpuPrecision::F32Pure {
+        Some(gpu_alloc(backend, n_nodes * n_sources, "block correction RHS")?)
+    } else { None };
+    let mut block_correction = if precision == GpuPrecision::F32Pure {
+        Some(gpu_alloc(backend, n_nodes * n_sources, "block correction")?)
+    } else { None };
     let setup_transfer_stats = FemTransferStats::from(backend.transfer_stats());
     backend.reset_transfer_stats();
     for (freq_idx, &freq) in simulation.frequencies.iter().enumerate() {
@@ -1568,7 +1613,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
         // Chebyshev smoother (see the AMG arm below); the downgrade is
         // sticky because the coarse operator stays singular across the
         // low-frequency band that triggered it.
-        let active_precond = if amg_setup_fallback {
+        let mut active_precond = if amg_setup_fallback {
             GpuPrecond::Chebyshev {
                 degree: GPU_AMG_SETUP_FALLBACK_CHEBYSHEV_DEGREE,
             }
@@ -1582,8 +1627,8 @@ fn run_fem_gpu_report_with_cancellation_inner(
             GpuPrecond::Auto | GpuPrecond::Amg => {
                 cached_amg.is_none() || freq_idx % rebuild_every == 0
             }
-            // These preconditioners borrow the live P_inner device CSR.
-            // Keep rebuilding until we introduce an owned/frozen P cache.
+            // Polynomial coefficients track the live shifted operator every
+            // frequency; owned descriptors and application scratch stay cached.
             GpuPrecond::PolynomialJacobi { .. } | GpuPrecond::Chebyshev { .. } => true,
         };
 
@@ -1618,40 +1663,37 @@ fn run_fem_gpu_report_with_cancellation_inner(
         // frequency-dependent A/P values by device-side linear
         // combinations instead of assembling full host CSR value arrays.
         let upload_start = Instant::now();
-        update_helmholtz_values_32(
-            &backend,
-            &mut a_inner.values,
-            &k_basis_32,
-            &m_basis_32,
-            &boundary_basis_32,
-            k_sq,
-            &boundary_coeffs,
-        );
+        let mut terms32 = Vec::with_capacity(1 + boundary_basis_32.len());
+        terms32.push((Complex32::new(-k_sq.re as f32, -k_sq.im as f32), &m_basis_32));
+        for (tag, values) in &boundary_basis_32 {
+            if let Some(coeff) = boundary_coeffs.get(tag) {
+                terms32.push((Complex32::new(coeff.re as f32, coeff.im as f32), values));
+            }
+        }
+        a_inner.try_combine_values(backend, &k_basis_32, &terms32)?;
         match precision {
             GpuPrecision::F32Pure => {
-                backend.cast_from_lower::<Complex64>(&a_inner.values, &mut a_outer.values);
+                a_outer.try_cast_values_from_lower(backend, &a_inner.matrix().values)?;
             }
             GpuPrecision::F64Outer => {
-                update_helmholtz_values_64(
-                    &backend,
-                    &mut a_outer.values,
-                    k_basis_64_opt
-                        .as_ref()
-                        .expect("F64Outer mode requires K f64 basis"),
-                    m_basis_64_opt
-                        .as_ref()
-                        .expect("F64Outer mode requires M f64 basis"),
-                    boundary_basis_64_opt
-                        .as_ref()
-                        .expect("F64Outer mode requires boundary f64 basis"),
-                    k_sq,
-                    &boundary_coeffs,
-                );
+                let boundaries = boundary_basis_64_opt.as_ref()
+                    .expect("F64Outer mode requires boundary f64 basis");
+                let mut terms64 = Vec::with_capacity(1 + boundaries.len());
+                terms64.push((-k_sq, m_basis_64_opt.as_ref()
+                    .expect("F64Outer mode requires M f64 basis")));
+                for (tag, values) in boundaries {
+                    if let Some(&coeff) = boundary_coeffs.get(tag) {
+                        terms64.push((coeff, values));
+                    }
+                }
+                a_outer.try_combine_values(backend,
+                    k_basis_64_opt.as_ref().expect("F64Outer mode requires K f64 basis"),
+                    &terms64)?;
             }
         }
         if let Some(p_inner) = p_inner_opt.as_mut() {
             update_shifted_values_32(
-                &backend,
+                backend,
                 &mut p_inner.values,
                 &k_basis_32,
                 &m_basis_32,
@@ -1660,6 +1702,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
         }
         backend.synchronize()?;
         let upload_time = upload_start.elapsed();
+
 
         let mut rhs_time = Duration::ZERO;
         let mut solve_time = Duration::ZERO;
@@ -1675,26 +1718,134 @@ fn run_fem_gpu_report_with_cancellation_inner(
         };
         let mut boundary_power_by_tag = BTreeMap::new();
 
-        // Batch the common pure-f32/point-Jacobi case.  Stronger
-        // preconditioners and any failed f64 acceptance gate fall back to
-        // the established per-source retry ladder below.
-        let mut batch_succeeded = false;
-        if precision == GpuPrecision::F32Pure
-            && n_sources > 1
-            && precond == GpuPrecond::PointJacobi
-            && !solver_nonconvergence_injection
-        {
-            if rebuild_gpu_precond {
+        let preconditioner_start = Instant::now();
+        if active_precond == GpuPrecond::PointJacobi && rebuild_gpu_precond {
+            if let Some(pj) = cached_point_jacobi.as_mut() {
+                pj.try_update_diagonal(backend, &p_diag_32)
+                    .map_err(|error| anyhow::anyhow!("CUDA Point-Jacobi update failed: {error}"))?;
+            } else {
                 cached_point_jacobi = Some(
                     PointJacobiBackend::<CudaBackend, Complex32>::try_from_diagonal(
-                        &backend, &p_diag_32,
+                        backend, &p_diag_32,
                     )
                     .map_err(|error| anyhow::anyhow!("CUDA Point-Jacobi setup failed: {error}"))?,
                 );
             }
-            let pj = cached_point_jacobi
+        }
+        if matches!(active_precond, GpuPrecond::Auto | GpuPrecond::Amg) && rebuild_gpu_precond {
+            let p_host = CsrMatrix::from_raw_parts(
+                n_nodes,
+                n_nodes,
+                assembler.row_ptrs.clone(),
+                assembler.col_indices.clone(),
+                p_values_host_32.clone(),
+            );
+            match BackendAmgPreconditioner::<CudaBackend, Complex32>::try_from_csr_with_cuda_coarse_lu(
+                backend,
+                &p_host,
+                gpu_amg_config(),
+            ) {
+                Ok(amg) => {
+                    log::debug!(
+                        "FEM (cuda): AMG(P) levels={} setup+upload={}",
+                        amg.num_levels(),
+                        fmt_duration(preconditioner_start.elapsed()),
+                    );
+                    cached_amg = Some(amg);
+                }
+                Err(error) => {
+                    // A failed refresh must not leave the old hierarchy eligible
+                    // after the sweep has explicitly selected its fallback.
+                    cached_amg = None;
+                    amg_setup_fallback = true;
+                    active_precond = GpuPrecond::Chebyshev {
+                        degree: GPU_AMG_SETUP_FALLBACK_CHEBYSHEV_DEGREE,
+                    };
+                    log::warn!(
+                        "FEM (cuda): AMG setup failed at {freq:.1} Hz ({error}); using Chebyshev({}) for the remaining sweep",
+                        GPU_AMG_SETUP_FALLBACK_CHEBYSHEV_DEGREE,
+                    );
+                    diagnostics.set_execution_profile(
+                        "cuda",
+                        "cuda",
+                        precision.label(),
+                        &format!(
+                            "amg-setup-fallback:chebyshev-{}",
+                            GPU_AMG_SETUP_FALLBACK_CHEBYSHEV_DEGREE
+                        ),
+                    );
+                }
+            }
+        }
+        if let GpuPrecond::PolynomialJacobi { degree } = active_precond {
+            let matrix = p_inner_opt
                 .as_ref()
-                .expect("batched PointJacobi preconditioner must be initialized");
+                .expect("polynomial Jacobi requires P_inner");
+            if let Some(polynomial) = cached_polynomial.as_mut() {
+                polynomial.try_update_numeric(backend, &matrix.values, &p_diag_32)?;
+            } else {
+                let owned =
+                    sonium_compute::PersistentDeviceCsr::try_clone_from_device_csr(backend, matrix)?;
+                cached_polynomial = Some(
+                    PolynomialJacobiBackend::try_from_owned_csr(
+                        backend,
+                        owned,
+                        &p_diag_32,
+                        degree,
+                        Complex32::new(POLY_JACOBI_DAMPING, 0.0),
+                    )
+                    .map_err(|error| anyhow::anyhow!("CUDA polynomial-Jacobi setup failed: {error}"))?,
+                );
+            }
+        }
+        if let GpuPrecond::Chebyshev { degree } = active_precond {
+            let matrix = p_inner_opt.as_ref().expect("Chebyshev requires P_inner");
+            if let Some(chebyshev) = cached_chebyshev.as_mut() {
+                chebyshev.try_update_from_csr_host(
+                    backend,
+                    &matrix.values,
+                    &row_ptrs_i32,
+                    &col_idx_i32,
+                    &p_values_host_32,
+                )?;
+            } else {
+                let owned =
+                    sonium_compute::PersistentDeviceCsr::try_clone_from_device_csr(backend, matrix)?;
+                cached_chebyshev = Some(
+                    ChebyshevBackend::try_from_owned_csr_host(
+                        backend,
+                        owned,
+                        &row_ptrs_i32,
+                        &col_idx_i32,
+                        &p_values_host_32,
+                        degree,
+                        CHEBYSHEV_EIGENVALUE_RATIO,
+                    )
+                    .map_err(|error| anyhow::anyhow!("CUDA Chebyshev setup failed: {error}"))?,
+                );
+            }
+        }
+        let preconditioner_time = preconditioner_start.elapsed();
+
+        // All admitted preconditioners expose device block actions. Rejected
+        // block certification uses the same preconditioner in scalar recovery.
+        let mut batch_succeeded = false;
+        let mut block_solve = FemBlockSolveOutcome::NotAttempted;
+        if precision == GpuPrecision::F32Pure
+            && n_sources > 1
+            && !solver_nonconvergence_injection
+        {
+            let block_preconditioner: &dyn BackendPreconditioner<CudaBackend, Complex32> =
+                match active_precond {
+                    GpuPrecond::PointJacobi => cached_point_jacobi.as_ref()
+                        .expect("point Jacobi initialized before block solve"),
+                    GpuPrecond::Auto | GpuPrecond::Amg => cached_amg.as_ref()
+                        .expect("AMG initialized before block solve"),
+                    GpuPrecond::PolynomialJacobi { .. } => cached_polynomial.as_ref()
+                        .expect("polynomial Jacobi initialized before block solve"),
+                    GpuPrecond::Chebyshev { .. } => cached_chebyshev.as_ref()
+                        .expect("Chebyshev initialized before block solve"),
+                };
             let mut coefficient_offset = 0usize;
             for src_idx in 0..n_sources {
                 assemble_source_coefficients_into(
@@ -1714,10 +1865,11 @@ fn run_fem_gpu_report_with_cancellation_inner(
             }
             let batch_start = Instant::now();
             let result = solve_f32_sources_block(
-                &backend,
+                backend,
+                &mut f32_block_workspace,
                 &a_inner,
                 &a_outer,
-                pj,
+                block_preconditioner,
                 rhs_block_assembler_32
                     .as_mut()
                     .expect("batched f32 RHS assembler must be initialized"),
@@ -1728,6 +1880,8 @@ fn run_fem_gpu_report_with_cancellation_inner(
                 x_block_dev_32_opt
                     .as_mut()
                     .expect("batched f32 solution buffer must be initialized"),
+                block_correction_rhs.as_mut().expect("block correction RHS initialized"),
+                block_correction.as_mut().expect("block correction initialized"),
                 rhs_block_dev_64_opt
                     .as_mut()
                     .expect("batched f64 RHS gate buffer must be initialized"),
@@ -1737,6 +1891,9 @@ fn run_fem_gpu_report_with_cancellation_inner(
                 residual_block_dev_64_opt
                     .as_mut()
                     .expect("batched f64 residual gate buffer must be initialized"),
+                residual_dev_64_opt
+                    .as_mut()
+                    .expect("f32 residual norm scratch must be initialized"),
                 listener_32
                     .as_mut()
                     .expect("batched f32 listener extraction must be initialized"),
@@ -1748,7 +1905,8 @@ fn run_fem_gpu_report_with_cancellation_inner(
             );
             solve_time += batch_start.elapsed();
             match result {
-                Ok(Some((listener_values, statuses, residual))) => {
+                Ok((listener_values, statuses, residual, correction_steps)) => {
+                    block_solve = FemBlockSolveOutcome::Accepted { correction_steps };
                     total_outer += statuses
                         .iter()
                         .map(|status| status.iterations)
@@ -1791,13 +1949,8 @@ fn run_fem_gpu_report_with_cancellation_inner(
                     prev_solution_valid.fill(false);
                     batch_succeeded = true;
                 }
-                Ok(None) => {
-                    log::debug!(
-                        "FEM (cuda f32-pure): batched source solve rejected at {:.1} Hz; falling back to per-source retries",
-                        freq,
-                    );
-                }
                 Err(error) => {
+                    block_solve = FemBlockSolveOutcome::Rejected { reason: error.clone() };
                     log::debug!(
                         "FEM (cuda f32-pure): batched source solve failed at {:.1} Hz: {error}; falling back to per-source retries",
                         freq,
@@ -1861,7 +2014,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
                         rhs_assemblers_32
                             .as_mut()
                             .expect("F32Pure mode requires device RHS assembler")[src_idx]
-                            .assemble(&backend, &rhs_coefficients_32[src_idx], rhs_dev);
+                            .assemble(backend, &rhs_coefficients_32[src_idx], rhs_dev)?;
                         let x_dev = x_dev_32_opt
                             .as_mut()
                             .expect("F32Pure mode requires reusable f32 solution buffer");
@@ -1892,7 +2045,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
                             residual64,
                         };
                         let problem = F32ResidualCorrectionProblem {
-                            backend: &backend,
+                            pool: &krylov_pool,
                             a32: &a_inner,
                             a64: &a_outer,
                             precond: precond_dyn,
@@ -1903,6 +2056,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
                             rhs_dev,
                             x0_dev,
                             x_dev,
+                            &mut f32_krylov_workspace,
                             &mut scratch,
                         );
                         drop(scratch);
@@ -1920,14 +2074,14 @@ fn run_fem_gpu_report_with_cancellation_inner(
                                 let listener_values = listener_32
                                     .as_mut()
                                     .expect("F32Pure mode requires listener extraction")
-                                    .evaluate_to_host(&backend, x_dev);
+                                    .evaluate_to_host(backend, x_dev);
                                 for (dst, src) in lp_values_host.iter_mut().zip(listener_values) {
                                     *dst = Complex64::new(src.re as f64, src.im as f64);
                                 }
                                 let promoted_listener_values = listener_64
                                     .as_mut()
                                     .expect("f32 mode requires f64 listener extraction")
-                                    .evaluate_to_host(&backend, x_dev_64);
+                                    .evaluate_to_host(backend, x_dev_64);
                                 let physical_error = lp_values_host
                                     .iter()
                                     .zip(&promoted_listener_values)
@@ -1940,7 +2094,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
                                     f32_policy.validate_gates(promoted_residual, physical_error);
                                 if gates.is_ok() && wants_full_solution_evidence(mesh_config) {
                                     if let Err(error) = collect_device_solution_evidence(
-                                        &backend,
+                                        backend,
                                         &x_dev_64,
                                         &assembler,
                                         k_complex,
@@ -1991,7 +2145,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
                         rhs_assemblers_64
                             .as_mut()
                             .expect("F64Outer mode requires device RHS assembler")[src_idx]
-                            .assemble(&backend, &rhs_coefficients_64[src_idx], rhs_dev);
+                            .assemble(backend, &rhs_coefficients_64[src_idx], rhs_dev)?;
                         let x_dev = &mut *x_dev_64;
                         let x0_dev = if use_warm_start && prev_solution_valid[src_idx] {
                             Some(
@@ -2003,14 +2157,14 @@ fn run_fem_gpu_report_with_cancellation_inner(
                         } else {
                             None
                         };
-                        let r = gmres_ir_backend_preconditioned::<
+                        let r = gmres_ir_backend_preconditioned_with_workspace::<
                             CudaBackend,
-                            BackendCsr<CudaBackend, Complex64>,
-                            BackendCsr<CudaBackend, Complex32>,
+                            sonium_compute::PersistentDeviceCsr<CudaBackend, Complex64>,
+                            sonium_compute::PersistentDeviceCsr<CudaBackend, Complex32>,
                             dyn BackendPreconditioner<CudaBackend, Complex32>,
                             Complex64,
                         >(
-                            &backend,
+                            &mut ir_workspace,
                             &a_outer,
                             &a_inner,
                             precond_dyn,
@@ -2032,7 +2186,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
                                 }
                                 if status.converged && wants_full_solution_evidence(mesh_config) {
                                     if let Err(error) = collect_device_solution_evidence(
-                                        &backend,
+                                        backend,
                                         x_dev,
                                         &assembler,
                                         k_complex,
@@ -2067,7 +2221,7 @@ fn run_fem_gpu_report_with_cancellation_inner(
                                 lp_values_host = listener_64
                                     .as_mut()
                                     .expect("F64Outer mode requires listener extraction")
-                                    .evaluate_to_host(&backend, x_dev);
+                                    .evaluate_to_host(backend, x_dev);
                                 Ok((
                                     status.converged,
                                     status.outer_iterations,
@@ -2189,16 +2343,6 @@ fn run_fem_gpu_report_with_cancellation_inner(
 
             match active_precond {
                 GpuPrecond::PointJacobi => {
-                    if rebuild_gpu_precond {
-                        cached_point_jacobi = Some(
-                            PointJacobiBackend::<CudaBackend, Complex32>::try_from_diagonal(
-                                &backend, &p_diag_32,
-                            )
-                            .map_err(|error| {
-                                anyhow::anyhow!("CUDA Point-Jacobi setup failed: {error}")
-                            })?,
-                        );
-                    }
                     let pj = cached_point_jacobi
                         .as_ref()
                         .expect("PointJacobi preconditioner cache populated before solve");
@@ -2206,124 +2350,25 @@ fn run_fem_gpu_report_with_cancellation_inner(
                         solve_and_record(src_idx, source, pj)?;
                     }
                 }
-                GpuPrecond::PolynomialJacobi { degree } => {
-                    let p_inner = p_inner_opt
-                        .as_ref()
-                        .expect("PolyJacobi mode requires P_inner; bug if missing");
-                    let pj = PolynomialJacobiBackend::<CudaBackend, Complex32>::try_new(
-                        &backend,
-                        p_inner,
-                        &p_diag_32,
-                        degree,
-                        Complex32::new(POLY_JACOBI_DAMPING, 0.0),
-                    )
-                    .map_err(|error| {
-                        anyhow::anyhow!("CUDA polynomial-Jacobi setup failed: {error}")
-                    })?;
+                GpuPrecond::PolynomialJacobi { .. } => {
+                    let pj = cached_polynomial.as_ref()
+                        .expect("polynomial Jacobi initialized before scalar solve");
                     for (src_idx, source) in simulation.sources.iter().enumerate() {
-                        solve_and_record(src_idx, source, &pj)?;
+                        solve_and_record(src_idx, source, pj)?;
                     }
                 }
-                GpuPrecond::Chebyshev { degree } => {
-                    let p_inner = p_inner_opt
-                        .as_ref()
-                        .expect("Chebyshev mode requires P_inner; bug if missing");
-                    let cheb = ChebyshevBackend::<CudaBackend, Complex32>::try_from_csr_host(
-                        &backend,
-                        p_inner,
-                        &row_ptrs_i32,
-                        &col_idx_i32,
-                        &p_values_host_32,
-                        degree,
-                        CHEBYSHEV_EIGENVALUE_RATIO,
-                    )
-                    .map_err(|error| anyhow::anyhow!("CUDA Chebyshev setup failed: {error}"))?;
-                    log::debug!(
-                        "FEM (cuda): Chebyshev(P) degree={} lambda_max={:.3e} ratio={:.1}",
-                        cheb.degree(),
-                        cheb.lambda_max(),
-                        cheb.eigenvalue_ratio(),
-                    );
+                GpuPrecond::Chebyshev { .. } => {
+                    let cheb = cached_chebyshev.as_ref()
+                        .expect("Chebyshev initialized before scalar solve");
                     for (src_idx, source) in simulation.sources.iter().enumerate() {
-                        solve_and_record(src_idx, source, &cheb)?;
+                        solve_and_record(src_idx, source, cheb)?;
                     }
                 }
                 GpuPrecond::Auto | GpuPrecond::Amg => {
-                    if rebuild_gpu_precond {
-                        let setup_start = Instant::now();
-                        let p_host = CsrMatrix::from_raw_parts(
-                            n_nodes,
-                            n_nodes,
-                            assembler.row_ptrs.clone(),
-                            assembler.col_indices.clone(),
-                            p_values_host_32.clone(),
-                        );
-                        let amg_config = gpu_amg_config();
-                        match BackendAmgPreconditioner::<CudaBackend, Complex32>::try_from_csr_with_cuda_coarse_lu(
-                            &backend, &p_host, amg_config,
-                        ) {
-                            Ok(amg) => {
-                                log::debug!(
-                                    "FEM (cuda): AMG(P) levels={} setup+upload={}",
-                                    amg.num_levels(),
-                                    fmt_duration(setup_start.elapsed()),
-                                );
-                                cached_amg = Some(amg);
-                            }
-                            Err(error) => {
-                                // The low-frequency coarse operator can be
-                                // singular in f32 (zero pivot in the dense
-                                // cuSOLVER factor). Downgrade the rest of
-                                // the sweep to the Chebyshev smoother —
-                                // which needs no factorization — instead
-                                // of aborting with zero data, and record
-                                // the downgrade in diagnostics.
-                                amg_setup_fallback = true;
-                                log::warn!(
-                                    "FEM (cuda): AMG setup failed at {:.1} Hz ({}); falling back to Chebyshev({}) smoother for the rest of this sweep",
-                                    freq,
-                                    error,
-                                    GPU_AMG_SETUP_FALLBACK_CHEBYSHEV_DEGREE,
-                                );
-                                diagnostics.set_execution_profile(
-                                    "cuda",
-                                    "cuda",
-                                    precision.label(),
-                                    &format!(
-                                        "amg-setup-fallback:chebyshev-{}",
-                                        GPU_AMG_SETUP_FALLBACK_CHEBYSHEV_DEGREE
-                                    ),
-                                );
-                                let p_inner = p_inner_opt.as_ref().expect(
-                                    "Chebyshev fallback requires P_inner; bug if missing",
-                                );
-                                let cheb = ChebyshevBackend::<CudaBackend, Complex32>::try_from_csr_host(
-                                    &backend,
-                                    p_inner,
-                                    &row_ptrs_i32,
-                                    &col_idx_i32,
-                                    &p_values_host_32,
-                                    GPU_AMG_SETUP_FALLBACK_CHEBYSHEV_DEGREE,
-                                    CHEBYSHEV_EIGENVALUE_RATIO,
-                                )
-                                .map_err(|error| {
-                                    anyhow::anyhow!("CUDA Chebyshev fallback setup failed: {error}")
-                                })?;
-                                for (src_idx, source) in simulation.sources.iter().enumerate() {
-                                    solve_and_record(src_idx, source, &cheb)?;
-                                }
-                            }
-                        }
-                    } else {
-                        log::debug!(
-                            "FEM (cuda): reusing AMG(P) preconditioner at freq {:.1} Hz",
-                            freq,
-                        );
-                    }
-                    if let Some(amg) = cached_amg.as_ref() {
-                        for (src_idx, source) in simulation.sources.iter().enumerate() {
-                            solve_and_record(src_idx, source, amg)?;
-                        }
+                    let amg = cached_amg.as_ref()
+                        .expect("AMG initialized before scalar solve");
+                    for (src_idx, source) in simulation.sources.iter().enumerate() {
+                        solve_and_record(src_idx, source, amg)?;
                     }
                 }
             }
@@ -2350,10 +2395,11 @@ fn run_fem_gpu_report_with_cancellation_inner(
                 (None, None, None)
             };
         diagnostics.record_frequency(FemFrequencyStats {
+            block_solve,
             frequency_hz: freq,
             symmetry_mode: None,
             matrix_ms: duration_ms(matrix_time),
-            preconditioner_ms: duration_ms(upload_time),
+            preconditioner_ms: duration_ms(upload_time + preconditioner_time),
             rhs_ms: duration_ms(rhs_time),
             solve_ms: duration_ms(solve_time),
             iterations: total_outer,
@@ -2913,7 +2959,7 @@ fn run_fem_metal_report_with_cancellation(
             let rhs_dt = rhs_t.elapsed();
 
             let solve_t = Instant::now();
-            rhs_assemblers[src_idx].assemble(&backend, &rhs_coefficients[src_idx], &mut rhs_dev_64);
+            rhs_assemblers[src_idx].assemble(&backend, &rhs_coefficients[src_idx], &mut rhs_dev_64)?;
             let x0_dev = if use_warm_start && prev_solution_valid[src_idx] {
                 Some(&prev_x_64[src_idx])
             } else {
@@ -3161,6 +3207,7 @@ fn run_fem_metal_report_with_cancellation(
                 (None, None, None)
             };
         diagnostics.record_frequency(FemFrequencyStats {
+            block_solve: Default::default(),
             frequency_hz: freq,
             symmetry_mode: None,
             matrix_ms: duration_ms(matrix_time),

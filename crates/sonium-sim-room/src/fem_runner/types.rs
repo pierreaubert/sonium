@@ -13,9 +13,30 @@ use sonium_solvers::iterative::GcroDrSubspace;
 use sonium_xem::{Point3D, RoomGeometry, RoomSimulation, Source};
 use std::time::Duration;
 
+/// Outcome of the CUDA block-source attempt before scalar recovery.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum FemBlockSolveOutcome {
+    /// No block-source solve was requested by the selected route.
+    #[default]
+    NotAttempted,
+    /// The block result passed convergence and promoted certification.
+    Accepted {
+        /// Promoted-residual correction solves after the initial block attempt.
+        correction_steps: usize,
+    },
+    /// The block attempt failed and the producer used scalar recovery.
+    Rejected {
+        /// Numerical rejection or checked backend failure from the attempt.
+        reason: String,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct FemFrequencyStats {
     pub frequency_hz: f64,
+    /// Block-source outcome, independent of subsequent scalar retry stages.
+    pub block_solve: FemBlockSolveOutcome,
     /// Symmetry parity mode index, or `None` for a full-domain solve.
     pub symmetry_mode: Option<usize>,
     pub matrix_ms: f64,

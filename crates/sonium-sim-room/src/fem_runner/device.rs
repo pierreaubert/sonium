@@ -7,8 +7,45 @@
 
 use anyhow::{Context, Result, anyhow};
 use sonium_compute::{
-    Backend, BufferElement, DeviceBufferLike, DeviceCsr, DeviceOperator, DeviceScalar,
+    Backend, BufferElement, DeviceBufferLike, DeviceCsr, DeviceScalar, PersistentDeviceCsr,
 };
+
+/// Reduce block residuals without downloading full vectors on CUDA.
+#[cfg(any(feature = "cuda", test))]
+pub(crate) fn block_relative_residuals<B: Backend>(
+    backend: &B,
+    rhs: &B::Buffer<num_complex::Complex64>,
+    residual: &B::Buffer<num_complex::Complex64>,
+    column: &mut B::Buffer<num_complex::Complex64>,
+) -> Result<Vec<f64>> {
+    use sonium_compute::{BufferView, ReductionMode};
+
+    let n = column.len();
+    anyhow::ensure!(n > 0, "block residual column must be nonempty");
+    anyhow::ensure!(
+        rhs.len() == residual.len() && rhs.len().is_multiple_of(n),
+        "block residual dimensions do not match"
+    );
+    let destination = BufferView::new(n, 0, n, 1)?;
+    (0..rhs.len() / n)
+        .map(|index| {
+            let source = BufferView::new(rhs.len(), index * n, n, 1)?;
+            backend.try_copy_views_d2d(rhs, source, column, destination)?;
+            let rhs_norm = backend.try_nrm2_with_mode(ReductionMode::Fast, column)?;
+            backend.try_copy_views_d2d(residual, source, column, destination)?;
+            let residual_norm = backend.try_nrm2_with_mode(ReductionMode::Fast, column)?;
+            Ok(if !rhs_norm.is_finite() || !residual_norm.is_finite() {
+                f64::INFINITY
+            } else if rhs_norm > 0.0 {
+                residual_norm / rhs_norm
+            } else if residual_norm == 0.0 {
+                0.0
+            } else {
+                f64::INFINITY
+            })
+        })
+        .collect()
+}
 
 /// Device-resident sparse source scatter.
 ///
@@ -17,7 +54,7 @@ use sonium_compute::{
 /// coefficients already include their source-basis weights, so that path
 /// supplies unit-valued scatter entries to avoid applying a weight twice.
 pub(crate) struct DeviceRhsAssembler<B: Backend, T: DeviceScalar> {
-    basis: DeviceCsr<B, T>,
+    basis: PersistentDeviceCsr<B, T>,
     coefficients: B::Buffer<T>,
 }
 
@@ -30,7 +67,7 @@ pub(crate) struct DeviceRhsAssembler<B: Backend, T: DeviceScalar> {
 /// already include source-basis weights.
 #[cfg(any(feature = "cuda", test))]
 pub(crate) struct DeviceRhsBlockAssembler<B: Backend, T: DeviceScalar> {
-    basis: DeviceCsr<B, T>,
+    basis: PersistentDeviceCsr<B, T>,
     coefficients: B::Buffer<T>,
     n_dofs: usize,
     rhs: usize,
@@ -107,7 +144,7 @@ impl<B: Backend, T: DeviceScalar> DeviceRhsBlockAssembler<B, T> {
             .map_err(|error| anyhow!(error))?;
 
         Ok(Self {
-            basis,
+            basis: PersistentDeviceCsr::try_from_device_csr(backend, basis)?,
             coefficients,
             n_dofs,
             rhs,
@@ -115,11 +152,23 @@ impl<B: Backend, T: DeviceScalar> DeviceRhsBlockAssembler<B, T> {
     }
 
     /// Compute all source RHS vectors into one column-major device buffer.
-    pub(crate) fn assemble(&mut self, backend: &B, coefficients: &[T], rhs: &mut B::Buffer<T>) {
-        assert_eq!(coefficients.len(), self.coefficients.len());
-        assert_eq!(rhs.len(), self.n_dofs * self.rhs);
-        backend.copy_h2d(coefficients, &mut self.coefficients);
-        self.basis.apply(backend, &self.coefficients, rhs);
+    pub(crate) fn assemble(
+        &mut self,
+        backend: &B,
+        coefficients: &[T],
+        rhs: &mut B::Buffer<T>,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            coefficients.len() == self.coefficients.len(),
+            "RHS coefficient count mismatch"
+        );
+        anyhow::ensure!(
+            rhs.len() == self.n_dofs * self.rhs,
+            "RHS block length mismatch"
+        );
+        backend.try_copy_h2d(coefficients, &mut self.coefficients)?;
+        self.basis.try_apply(backend, &self.coefficients, rhs)?;
+        Ok(())
     }
 }
 
@@ -161,29 +210,41 @@ impl<B: Backend, T: DeviceScalar> DeviceRhsAssembler<B, T> {
         let coefficients = backend
             .raw_alloc::<T>(entries.len())
             .map_err(|error| anyhow!(error))?;
-        backend.copy_h2d(&row_ptr, &mut row_ptr_dev);
-        backend.copy_h2d(&ordered_cols, &mut col_idx_dev);
-        backend.copy_h2d(&ordered_values, &mut values_dev);
+        backend.try_copy_h2d(&row_ptr, &mut row_ptr_dev)?;
+        backend.try_copy_h2d(&ordered_cols, &mut col_idx_dev)?;
+        backend.try_copy_h2d(&ordered_values, &mut values_dev)?;
 
         Ok(Self {
-            basis: DeviceCsr {
-                m: n_dofs,
-                n: entries.len(),
-                nnz: ordered_values.len(),
-                row_ptr: row_ptr_dev,
-                col_idx: col_idx_dev,
-                values: values_dev,
-            },
+            basis: PersistentDeviceCsr::try_from_device_csr(
+                backend,
+                DeviceCsr {
+                    m: n_dofs,
+                    n: entries.len(),
+                    nnz: ordered_values.len(),
+                    row_ptr: row_ptr_dev,
+                    col_idx: col_idx_dev,
+                    values: values_dev,
+                },
+            )?,
             coefficients,
         })
     }
 
     /// Compute `rhs <- basis * coefficients` without downloading a nodal RHS.
-    pub(crate) fn assemble(&mut self, backend: &B, coefficients: &[T], rhs: &mut B::Buffer<T>) {
-        assert_eq!(coefficients.len(), self.coefficients.len());
-        assert_eq!(rhs.len(), self.basis.m);
-        backend.copy_h2d(coefficients, &mut self.coefficients);
-        self.basis.apply(backend, &self.coefficients, rhs);
+    pub(crate) fn assemble(
+        &mut self,
+        backend: &B,
+        coefficients: &[T],
+        rhs: &mut B::Buffer<T>,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            coefficients.len() == self.coefficients.len(),
+            "RHS coefficient count mismatch"
+        );
+        anyhow::ensure!(rhs.len() == self.basis.m(), "RHS length mismatch");
+        backend.try_copy_h2d(coefficients, &mut self.coefficients)?;
+        self.basis.try_apply(backend, &self.coefficients, rhs)?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -339,6 +400,67 @@ mod tests {
     use num_complex::Complex64;
     use sonium_compute::CpuBackend;
 
+    fn check_block_relative_residuals<B: Backend>(
+        backend: &B,
+        counters: impl Fn() -> [u64; 3],
+    ) {
+        let n = 257;
+        let mut rhs = vec![Complex64::new(0.0, 0.0); n * 3];
+        let mut residual = rhs.clone();
+        rhs[0] = Complex64::new(3.0, 4.0);
+        residual[0] = Complex64::new(0.3, 0.4);
+        residual[2 * n] = Complex64::new(1.0, 0.0);
+        let mut b = backend.raw_alloc::<Complex64>(rhs.len()).unwrap();
+        let mut r = backend.raw_alloc::<Complex64>(rhs.len()).unwrap();
+        let mut scratch = backend.raw_alloc::<Complex64>(n).unwrap();
+        backend.try_copy_h2d(&rhs, &mut b).unwrap();
+        backend.try_copy_h2d(&residual, &mut r).unwrap();
+        for _ in 0..2 {
+            let before = counters();
+            let values = block_relative_residuals(backend, &b, &r, &mut scratch).unwrap();
+            let after = counters();
+            assert!((values[0] - 0.1).abs() < 1.0e-14);
+            assert_eq!(values[1], 0.0);
+            assert_eq!(values[2], f64::INFINITY);
+            assert_eq!(after[0], before[0]);
+            assert_eq!(after[1], before[1]);
+            // At most two scalar norms per column, never N-sized downloads.
+            assert!(after[2] - before[2] <= 6 * 16);
+        }
+        rhs[0] = Complex64::new(f64::NAN, 0.0);
+        backend.try_copy_h2d(&rhs, &mut b).unwrap();
+        // Checked backends may reject a non-finite norm before returning it;
+        // either outcome must prevent acceptance of the block.
+        if let Ok(values) = block_relative_residuals(backend, &b, &r, &mut scratch) {
+            assert_eq!(values[0], f64::INFINITY);
+        }
+        let mut wrong_shape = backend.raw_alloc::<Complex64>(n - 1).unwrap();
+        assert!(block_relative_residuals(backend, &b, &r, &mut wrong_shape).is_err());
+    }
+
+    #[test]
+    fn block_residual_norms_handle_zero_and_nonfinite_columns() {
+        check_block_relative_residuals(&CpuBackend::new(), || [0; 3]);
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_block_residual_norms_do_not_download_vectors() {
+        let backend = match sonium_compute::CudaBackend::new(0) {
+            Ok(backend) => backend,
+            Err(error) => {
+                assert!(std::env::var_os("SONIUM_SIM_ROOM_REQUIRE_CUDA").is_none(),
+                    "CUDA required for block norms: {error}");
+                return;
+            }
+        };
+        check_block_relative_residuals(&backend, || {
+            let stats = backend.runtime_stats();
+            [stats.allocation_operations as u64, stats.transfer.h2d_bytes as u64,
+                stats.transfer.d2h_bytes as u64]
+        });
+    }
+
     #[test]
     fn rhs_basis_accumulates_on_device_for_arbitrary_entry_order() {
         let backend = CpuBackend::new();
@@ -350,20 +472,26 @@ mod tests {
         .unwrap();
         assert_eq!(assembler.entry_count(), 3);
         let mut rhs = backend.raw_alloc::<Complex64>(3).unwrap();
-        assembler.assemble(
-            &backend,
-            &[
-                Complex64::new(2.0, 0.0),
-                Complex64::new(1.0, 0.0),
-                Complex64::new(4.0, 0.0),
-            ],
-            &mut rhs,
-        );
+        assembler
+            .assemble(
+                &backend,
+                &[
+                    Complex64::new(2.0, 0.0),
+                    Complex64::new(1.0, 0.0),
+                    Complex64::new(4.0, 0.0),
+                ],
+                &mut rhs,
+            )
+            .unwrap();
         let mut host = [Complex64::new(0.0, 0.0); 3];
         backend.copy_d2h(&rhs, &mut host);
         assert_eq!(host[0], Complex64::new(0.5, 0.0));
         assert_eq!(host[1], Complex64::new(0.0, 0.0));
         assert_eq!(host[2], Complex64::new(3.5, 0.0));
+        assert!(assembler.assemble(&backend, &[], &mut rhs).is_err());
+        let mut unchanged = [Complex64::new(0.0, 0.0); 3];
+        backend.copy_d2h(&rhs, &mut unchanged);
+        assert_eq!(unchanged, host);
     }
 
     #[cfg(feature = "cuda")]
@@ -394,8 +522,18 @@ mod tests {
         let mut assembler =
             DeviceRhsAssembler::<CudaBackend, Complex64>::new(&backend, 3, &nodes).unwrap();
         let mut rhs = backend.raw_alloc::<Complex64>(3).unwrap();
-        assembler.assemble(&backend, &coefficients, &mut rhs);
+        assembler
+            .assemble(&backend, &coefficients, &mut rhs)
+            .unwrap();
         backend.synchronize().unwrap();
+
+        let before = backend.runtime_stats();
+        assembler
+            .assemble(&backend, &coefficients, &mut rhs)
+            .unwrap();
+        let after = backend.runtime_stats();
+        assert_eq!(after.allocation_operations, before.allocation_operations);
+        assert_eq!(after.transfer.d2h_bytes, before.transfer.d2h_bytes);
 
         let mut uploaded = [Complex64::new(0.0, 0.0); 3];
         backend.copy_d2h(&assembler.coefficients, &mut uploaded);
@@ -452,16 +590,18 @@ mod tests {
         )
         .unwrap();
         let mut rhs = backend.raw_alloc::<Complex64>(6).unwrap();
-        assembler.assemble(
-            &backend,
-            &[
-                Complex64::new(2.0, 0.0),
-                Complex64::new(1.0, 0.0),
-                Complex64::new(4.0, 0.0),
-                Complex64::new(3.0, 0.0),
-            ],
-            &mut rhs,
-        );
+        assembler
+            .assemble(
+                &backend,
+                &[
+                    Complex64::new(2.0, 0.0),
+                    Complex64::new(1.0, 0.0),
+                    Complex64::new(4.0, 0.0),
+                    Complex64::new(3.0, 0.0),
+                ],
+                &mut rhs,
+            )
+            .unwrap();
         let mut host = [Complex64::new(0.0, 0.0); 6];
         backend.copy_d2h(&rhs, &mut host);
         assert_eq!(

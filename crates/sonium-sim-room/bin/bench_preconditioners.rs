@@ -813,6 +813,7 @@ mod tests {
     #[test]
     fn frequency_stats_json_keeps_solver_decision_diagnostics() {
         let stats = FemFrequencyStats {
+            block_solve: Default::default(),
             frequency_hz: 410.6,
             symmetry_mode: Some(1),
             matrix_ms: 1.0,

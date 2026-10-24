@@ -81,7 +81,7 @@ default = []
 # Enable the optional CUDA GPU paths for `generate-roomeq-data --backend cuda`
 # and dense BLR TBEM assembly (`--dense --dense-backend cuda`). Requires the
 # CUDA toolkit + NVIDIA driver at build/run time.
-cuda = ["sonium-bem/cuda", "sonium-compute/cuda", "sonium-solvers/cuda"]
+cuda = ["sonium-fem/cuda", "sonium-bem/cuda", "sonium-compute/cuda", "sonium-solvers/cuda"]
 
 # Enable the optional Apple Silicon Metal GPU path for the dense BLR TBEM
 # assembly (`generate-roomeq-data --dense --dense-backend metal`). macOS only;

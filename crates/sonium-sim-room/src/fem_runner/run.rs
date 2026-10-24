@@ -2063,6 +2063,7 @@ fn run_fem_full_report_with_field_state(
         let total_iterations: usize = stats.iter().map(|s| s.iterations).sum();
         let max_residual: f64 = stats.iter().map(|s| s.residual).fold(0.0f64, f64::max);
         diagnostics.record_frequency(FemFrequencyStats {
+            block_solve: Default::default(),
             frequency_hz: freq,
             symmetry_mode: None,
             matrix_ms: duration_ms(matrix_time),
@@ -2942,6 +2943,7 @@ pub(super) fn run_fem_symmetric_report(
                     prev_solutions[local_src_idx] = Some(solution);
                 }
                 mode_stats.push(FemFrequencyStats {
+                    block_solve: Default::default(),
                     frequency_hz: freq,
                     symmetry_mode: Some(mode_idx),
                     matrix_ms: duration_ms(matrix_time),

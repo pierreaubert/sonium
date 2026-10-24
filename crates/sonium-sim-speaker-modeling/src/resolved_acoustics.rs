@@ -1,5 +1,8 @@
 //! Resolved axisymmetric rear-cavity, port, finite-baffle, and exterior fields.
 
+#[cfg(all(test, feature = "cuda"))]
+mod cuda_tests;
+
 use crate::conventions::StudyMetadata;
 use crate::field_export::{
     ExportedSnapshot, FieldExportError, ProjectedCellVector, ProjectionProvenance,

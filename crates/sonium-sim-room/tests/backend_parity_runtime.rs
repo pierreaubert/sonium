@@ -282,6 +282,7 @@ fn write_sr1_evidence(
                 "preconditioner_age": stats.preconditioner_age,
                 "preconditioner_rebuild_reason": stats.preconditioner_rebuild_reason,
                 "fallback_stage": stats.fallback_stage,
+                "block_solve": stats.block_solve,
                 "transfer": {
                     "h2d_operations": transfer.h2d_operations,
                     "h2d_bytes": transfer.h2d_bytes,
@@ -717,6 +718,52 @@ fn cuda_fem_matches_cpu_backend_with_checked_parity_budget() {
 #[cfg(feature = "cuda")]
 #[test]
 fn cuda_fem_block_rhs_publishes_physical_ledgers() {
+    check_cuda_block_physical_ledgers(GpuPrecond::PointJacobi, "SONIUM_SIM_ROOM_SR1_ARTIFACT", 6.0);
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+fn cuda_fem_amg_block_rhs_publishes_physical_ledgers() {
+    check_cuda_block_physical_ledgers(GpuPrecond::Amg, "SONIUM_SIM_ROOM_AMG_BLOCK_ARTIFACT", 6.0);
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+fn cuda_fem_amg_block_refined_mesh_publishes_physical_ledgers() {
+    check_cuda_block_physical_ledgers(
+        GpuPrecond::Amg,
+        "SONIUM_SIM_ROOM_AMG_BLOCK_REFINED_ARTIFACT",
+        12.0,
+    );
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+fn cuda_fem_polynomial_block_rhs_publishes_physical_ledgers() {
+    check_cuda_block_physical_ledgers(
+        GpuPrecond::PolynomialJacobi { degree: 3 },
+        "SONIUM_SIM_ROOM_POLYNOMIAL_BLOCK_ARTIFACT",
+        6.0,
+    );
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+fn cuda_fem_chebyshev_block_rhs_publishes_physical_ledgers() {
+    check_cuda_block_physical_ledgers(
+        GpuPrecond::Chebyshev { degree: 3 },
+        "SONIUM_SIM_ROOM_CHEBYSHEV_BLOCK_ARTIFACT",
+        6.0,
+    );
+}
+
+#[cfg(feature = "cuda")]
+fn check_cuda_block_physical_ledgers(
+    preconditioner: GpuPrecond,
+    artifact_env: &str,
+    resolution: f64,
+) {
+    let _ = env_logger::builder().is_test(true).try_init();
     let _backend = match sonium_compute::CudaBackend::new(0) {
         Ok(backend) => backend,
         Err(error) => {
@@ -727,14 +774,17 @@ fn cuda_fem_block_rhs_publishes_physical_ledgers() {
             return;
         }
     };
-    let simulation = accelerator_fixture();
-    let mesh_config = accelerator_mesh_config();
+    // Exercise retained block scratch across numeric updates and a scheduled
+    // preconditioner rebuild. CPU parity checks every source and frequency.
+    let simulation = accelerator_resident_fixture();
+    let mut mesh_config = accelerator_mesh_config();
+    mesh_config.elements_per_wavelength = resolution;
     let (cpu, cpu_diagnostics) = run_fem_with_mesh_report(&simulation, &mesh_config).unwrap();
     let (cuda, diagnostics) = match run_fem_gpu_report(
         &simulation,
         &mesh_config,
         GpuPrecision::F32Pure,
-        GpuPrecond::PointJacobi,
+        preconditioner,
         0,
     ) {
         Ok(result) => result,
@@ -754,8 +804,71 @@ fn cuda_fem_block_rhs_publishes_physical_ledgers() {
         diagnostics.execution.as_ref().unwrap().precision,
         "f32-pure"
     );
+    assert_eq!(
+        diagnostics.execution.as_ref().unwrap().fallback_status,
+        "none"
+    );
     assert_physical_parity(&cpu_diagnostics, &diagnostics);
     assert_reciprocal_output(&cuda);
+    assert_eq!(diagnostics.frequency_stats.len(), 4);
+    assert!(
+        diagnostics.frequency_stats.iter().all(|stats| matches!(
+            stats.block_solve,
+            sonium_sim_room::fem_runner::FemBlockSolveOutcome::Accepted { .. }
+        )),
+        "block results must pass certification without producer scalar recovery: {:?}",
+        diagnostics
+            .frequency_stats
+            .iter()
+            .map(|stats| &stats.block_solve)
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        diagnostics
+            .frequency_stats
+            .iter()
+            .all(|stats| stats.max_residual <= 1.0e-6)
+    );
+    if preconditioner == GpuPrecond::PointJacobi {
+        assert!(
+            diagnostics.frequency_stats.iter().any(|stats| matches!(
+                stats.block_solve,
+                sonium_sim_room::fem_runner::FemBlockSolveOutcome::Accepted {
+                    correction_steps: 1..
+                }
+            )),
+            "fixture must exercise promoted block correction"
+        );
+        let cold_allocations = diagnostics.frequency_stats[0].allocation_operations;
+        assert!(
+            diagnostics.frequency_stats[1..]
+                .iter()
+                // Allow one extra Krylov vector and two reduction pointer buffers
+                // as convergence demand grows; Jacobi scratch must remain cached.
+                .all(|stats| stats.allocation_operations <= 3
+                    && stats.allocation_operations < cold_allocations),
+            "warm block solves must reuse scratch: {:?}",
+            diagnostics
+                .frequency_stats
+                .iter()
+                .map(|stats| stats.allocation_operations)
+                .collect::<Vec<_>>()
+        );
+    }
+    if matches!(preconditioner, GpuPrecond::PolynomialJacobi { .. } | GpuPrecond::Chebyshev { .. }) {
+        let allowance = if matches!(preconditioner, GpuPrecond::PolynomialJacobi { .. }) { 3 } else { 0 };
+        assert!(diagnostics.frequency_stats[1..].iter().all(|stats| stats.allocation_operations <= allowance),
+            "numeric polynomial refresh must retain device storage: {:?}",
+            diagnostics.frequency_stats.iter().map(|stats| stats.allocation_operations).collect::<Vec<_>>());
+    }
+    if preconditioner == GpuPrecond::Amg {
+        for index in [1, 3] {
+            let stats = &diagnostics.frequency_stats[index];
+            assert_eq!(stats.preconditioner_age, 1);
+            assert_eq!(stats.preconditioner_rebuild_reason, "cached");
+            assert_eq!(stats.allocation_operations, 0, "cached AMG/block solve must reuse device storage");
+        }
+    }
     assert!(
         diagnostics
             .frequency_stats
@@ -766,10 +879,82 @@ fn cuda_fem_block_rhs_publishes_physical_ledgers() {
         compare_backend_outputs("cpu-f64", &cpu, "cuda-f32-block-rhs", &cuda, 0.0, 1.0e-12)
             .unwrap();
     report.require_within(2.0e-2, 5.0e-2).unwrap();
-    if let Some(path) = std::env::var_os("SONIUM_SIM_ROOM_SR1_ARTIFACT") {
+    if let Some(path) = std::env::var_os(artifact_env) {
         write_sr1_evidence(
             std::path::Path::new(&path),
             "f32-pure-block-rhs",
+            &diagnostics,
+            &report,
+        );
+    }
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+fn cuda_fem_f32_scalar_four_frequency_reuses_krylov_workspace() {
+    if let Err(error) = sonium_compute::CudaBackend::new(0) {
+        assert!(
+            std::env::var_os("SONIUM_SIM_ROOM_REQUIRE_CUDA").is_none(),
+            "CUDA is required for this evidence lane: {error}"
+        );
+        eprintln!("no CUDA device — skipping: {error}");
+        return;
+    }
+    let simulation = accelerator_resident_fixture();
+    let mesh_config = accelerator_resident_mesh_config();
+    assert!(!mesh_config.block_source_solve);
+    let (cpu, cpu_diagnostics) = run_fem_with_mesh_report(&simulation, &mesh_config).unwrap();
+    let (cuda, diagnostics) = run_fem_gpu_report(
+        &simulation,
+        &mesh_config,
+        GpuPrecision::F32Pure,
+        GpuPrecond::Auto.resolve_for_cuda(),
+        0,
+    )
+    .expect("persistent scalar FP32 room sweep must converge");
+    diagnostics.validate().unwrap();
+    assert_physical_parity(&cpu_diagnostics, &diagnostics);
+    assert_reciprocal_output(&cuda);
+    assert_eq!(diagnostics.frequency_stats.len(), 4);
+    assert!(
+        diagnostics
+            .frequency_stats
+            .iter()
+            .all(|stats| stats.converged)
+    );
+    assert_eq!(
+        diagnostics
+            .frequency_stats
+            .iter()
+            .map(|stats| stats.preconditioner_age)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2, 3]
+    );
+    let report = compare_backend_outputs(
+        "cpu-f64",
+        &cpu,
+        "cuda-f32-persistent-scalar",
+        &cuda,
+        0.0,
+        1e-12,
+    )
+    .unwrap();
+    assert_eq!(report.sample_count, 16);
+    report.require_within(0.25, 0.25).unwrap();
+    assert!(
+        diagnostics.frequency_stats.iter().all(|stats| stats.max_residual <= 1.0e-6),
+        "f32 promotion must certify the requested solve accuracy"
+    );
+    // The first frequency warms this fixture's largest Krylov demand.
+    // Matrix/RHS descriptors and scratch survive all numeric updates.
+    assert!(
+        diagnostics.frequency_stats.iter().skip(1).all(|stats| stats.allocation_operations == 0),
+        "scalar f32 correction must retain its sparse execution state"
+    );
+    if let Some(path) = std::env::var_os("SONIUM_SIM_ROOM_F32_RESIDENT_ARTIFACT") {
+        write_sr1_evidence(
+            std::path::Path::new(&path),
+            "f32-resident-certified-4-frequency",
             &diagnostics,
             &report,
         );
@@ -831,6 +1016,14 @@ fn cuda_fem_four_frequency_resident_state_reuses_preconditioner() {
                 .is_some_and(|transfer| transfer.d2h_bytes > 0 && transfer.d2d_operations > 0)
             && stats.allocation_high_water_bytes > 0
     }));
+
+    // This fixed fixture warms the largest Krylov demand at its first frequency.
+    // Numeric updates must reuse both matrix/RHS descriptors and Krylov scratch.
+    assert!(
+        diagnostics.frequency_stats.iter().skip(1).all(|stats| stats.allocation_operations == 0),
+        "mixed-precision scratch should be retained across frequencies: {:?}",
+        diagnostics.frequency_stats.iter().map(|stats| stats.allocation_operations).collect::<Vec<_>>()
+    );
 
     let report = compare_backend_outputs(
         "cpu-f64",

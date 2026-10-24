@@ -7,6 +7,15 @@
 //! operator is deliberately geometry-only: callers must run a target FEM
 //! reanalysis before treating the projected field as physically validated.
 
+#[cfg(feature = "cuda")]
+mod cuda;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use cuda::{
+    optimize_and_promote_body_fitted_treatment_cuda, promote_projected_treatment_cuda,
+    reanalyze_projected_treatment_cuda,
+};
+
 use crate::treatment_optimization::{
     MultiFrequencyRoomTreatmentConfig, MultiFrequencyRoomTreatmentProblem,
     MultiFrequencyRoomTreatmentResult, TreatmentEvaluation, TreatmentObjectiveConfig,
@@ -376,8 +385,27 @@ pub fn reanalyze_projected_treatment(
     objective: &TreatmentObjectiveConfig,
     max_frequency_lanes: Option<usize>,
 ) -> Result<BodyFittedTreatmentReanalysis, TreatmentProjectionError> {
+    reanalyze_with_evaluator(
+        projection,
+        source_treatments,
+        target_problem.treatment_boundaries().len(),
+        baseline_target_treatments,
+        |design| {
+            target_problem
+                .evaluate(design, objective, max_frequency_lanes)
+                .map_err(|error| TreatmentProjectionError::Reanalysis(error.to_string()))
+        },
+    )
+}
+
+fn reanalyze_with_evaluator(
+    projection: &BodyFittedTreatmentProjection,
+    source_treatments: &[f64],
+    target_count: usize,
+    baseline_target_treatments: &[f64],
+    mut evaluate: impl FnMut(&[f64]) -> Result<TreatmentEvaluation, TreatmentProjectionError>,
+) -> Result<BodyFittedTreatmentReanalysis, TreatmentProjectionError> {
     let target_treatments = projection.project(source_treatments)?;
-    let target_count = target_problem.treatment_boundaries().len();
     if target_count != projection.target_count() {
         return Err(TreatmentProjectionError::DimensionMismatch(
             "projection target count does not match target FEM treatment count",
@@ -389,12 +417,8 @@ pub fn reanalyze_projected_treatment(
         ));
     }
 
-    let baseline = target_problem
-        .evaluate(baseline_target_treatments, objective, max_frequency_lanes)
-        .map_err(|error| TreatmentProjectionError::Reanalysis(error.to_string()))?;
-    let projected = target_problem
-        .evaluate(&target_treatments, objective, max_frequency_lanes)
-        .map_err(|error| TreatmentProjectionError::Reanalysis(error.to_string()))?;
+    let baseline = evaluate(baseline_target_treatments)?;
+    let projected = evaluate(&target_treatments)?;
 
     Ok(BodyFittedTreatmentReanalysis {
         target_treatments,
@@ -451,11 +475,7 @@ pub fn optimize_and_promote_body_fitted_treatment(
     let source = source_problem.optimize(source_config).map_err(|error| {
         TreatmentProjectionError::Reanalysis(format!("source optimization failed: {error}"))
     })?;
-    if !source.converged {
-        return Err(TreatmentProjectionError::Reanalysis(
-            "source treatment optimization did not converge".to_string(),
-        ));
-    }
+    require_converged_source(&source)?;
     let promotion = promote_projected_treatment(
         projection,
         &source.treatments,
@@ -466,6 +486,17 @@ pub fn optimize_and_promote_body_fitted_treatment(
         target_non_regression_tolerance,
     )?;
     Ok(BodyFittedTreatmentOptimizationResult { source, promotion })
+}
+
+fn require_converged_source(
+    source: &MultiFrequencyRoomTreatmentResult,
+) -> Result<(), TreatmentProjectionError> {
+    if !source.converged {
+        return Err(TreatmentProjectionError::Reanalysis(
+            "source treatment optimization did not converge".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

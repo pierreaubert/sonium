@@ -20,6 +20,7 @@ fn valid_fem_run_diagnostics() -> FemRunDiagnostics {
     };
     let mut diagnostics = FemRunDiagnostics::new("cpu", &cfg);
     diagnostics.record_frequency(FemFrequencyStats {
+        block_solve: Default::default(),
         frequency_hz: 50.0,
         symmetry_mode: None,
         matrix_ms: 1.0,
