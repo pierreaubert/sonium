@@ -21,4 +21,7 @@
 
 mod forms;
 
+#[cfg(feature = "cuda")]
+pub mod device;
+
 pub use forms::*;

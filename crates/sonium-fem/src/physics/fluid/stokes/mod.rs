@@ -19,6 +19,8 @@
 //!
 //! Uses Taylor-Hood P2-P1 elements (inf-sup stable, no stabilization needed).
 
+#[cfg(feature = "cuda")]
+mod bdf_cuda;
 pub mod drag_shape_opt;
 pub mod forms;
 pub mod materials;

@@ -9,4 +9,5 @@ pub mod eddy_current;
 pub mod electrostatic;
 pub mod magnetostatics;
 pub mod maxwell;
+pub mod rotating_machine;
 pub mod semiconductor;

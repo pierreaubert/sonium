@@ -69,11 +69,6 @@ fn unsupported_physics_and_order_reject_without_dispatch() {
             ..workload()
         });
     }
-    assert_rejected(FemWorkload {
-        scalar: FemScalar::Complex64,
-        action: FemAction::Transpose,
-        ..workload()
-    });
     for element in [
         FemElement::Quad,
         FemElement::Tetrahedron,
@@ -124,4 +119,204 @@ fn fallback_provenance_records_requested_and_actual_backend() {
             .fallback_reason
             .contains("CUDA workload unsupported")
     );
+}
+
+#[test]
+fn tetrahedral_pressure_rows_match_bounded_public_admission() {
+    use sonium_fem::backend::{FemCapabilityStatus, fem_cuda_capability_rows};
+    let rows = fem_cuda_capability_rows();
+    for order in [FemOrder::P1, FemOrder::P2] {
+        for action in [
+            FemAction::Forward,
+            FemAction::Transpose,
+            FemAction::Hermitian,
+        ] {
+            let cell = FemWorkload::native_cuda_tet(order, action);
+            let admission = admit_fem_cuda(cell).unwrap();
+            assert_eq!(admission.provenance.actual_backend, FemActualBackend::Cuda);
+            let matches: Vec<_> = rows.iter().filter(|row| row.id == cell.id()).collect();
+            assert_eq!(matches.len(), 1);
+            assert_eq!(matches[0].status, FemCapabilityStatus::Native);
+            assert!(matches[0].dispatch);
+            assert!(
+                matches[0]
+                    .evidence
+                    .as_ref()
+                    .unwrap()
+                    .contains("host tetrahedral")
+            );
+        }
+    }
+    let base = FemWorkload::native_cuda_tet(FemOrder::P1, FemAction::Forward);
+    for rejected in [
+        FemWorkload {
+            scalar: FemScalar::F64,
+            ..base
+        },
+        FemWorkload {
+            scalar: FemScalar::Complex32,
+            ..base
+        },
+        FemWorkload {
+            order: FemOrder::P2OrHigher,
+            ..base
+        },
+        FemWorkload {
+            mode: FemAssemblyMode::MatrixFree,
+            ..base
+        },
+        FemWorkload {
+            mode: FemAssemblyMode::PartialAssembly,
+            ..base
+        },
+        FemWorkload {
+            space: FemSpace::Hcurl,
+            ..base
+        },
+    ] {
+        assert_rejected(rejected);
+    }
+}
+
+#[test]
+fn complex_triangle_transpose_has_native_assembled_rows() {
+    use sonium_fem::backend::{FemCapabilityStatus, fem_cuda_capability_rows};
+    let rows = fem_cuda_capability_rows();
+    for workload in [
+        FemWorkload::native_cuda(FemScalar::Complex64, FemAction::Transpose),
+        FemWorkload::native_cuda_p2(FemScalar::Complex64, FemAction::Transpose),
+    ] {
+        let admission = admit_fem_cuda(workload).unwrap();
+        assert_eq!(admission.provenance.actual_backend, FemActualBackend::Cuda);
+        assert_eq!(admission.provenance.fallback, "none");
+        let matching: Vec<_> = rows.iter().filter(|row| row.id == workload.id()).collect();
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].status, FemCapabilityStatus::Native);
+        assert!(matching[0].dispatch);
+        assert!(
+            matching[0]
+                .evidence
+                .as_deref()
+                .unwrap()
+                .contains("retained CUDA")
+        );
+    }
+}
+
+#[test]
+fn hexahedral_pressure_rows_require_explicit_order_and_assembled_complex64() {
+    use sonium_fem::backend::{FemCapabilityStatus, fem_cuda_capability_rows};
+    let rows = fem_cuda_capability_rows();
+    for order in [FemOrder::P1, FemOrder::P2, FemOrder::P3] {
+        for action in [
+            FemAction::Forward,
+            FemAction::Transpose,
+            FemAction::Hermitian,
+        ] {
+            let workload = FemWorkload::native_cuda_hex(order, action);
+            let admission = admit_fem_cuda(workload).unwrap();
+            assert_eq!(admission.provenance.actual_backend, FemActualBackend::Cuda);
+            assert_eq!(admission.provenance.fallback, "none");
+            let matching: Vec<_> = rows.iter().filter(|row| row.id == workload.id()).collect();
+            assert_eq!(matching.len(), 1);
+            assert_eq!(matching[0].status, FemCapabilityStatus::Native);
+            assert!(matching[0].dispatch);
+            assert!(
+                matching[0]
+                    .evidence
+                    .as_deref()
+                    .unwrap()
+                    .contains("LOR auxiliary AMG")
+            );
+        }
+    }
+    let base = FemWorkload::native_cuda_hex(FemOrder::P3, FemAction::Forward);
+    for rejected in [
+        FemWorkload {
+            scalar: FemScalar::F64,
+            ..base
+        },
+        FemWorkload {
+            scalar: FemScalar::F32,
+            ..base
+        },
+        FemWorkload {
+            scalar: FemScalar::Complex32,
+            ..base
+        },
+        FemWorkload {
+            order: FemOrder::P2OrHigher,
+            ..base
+        },
+        FemWorkload {
+            mode: FemAssemblyMode::MatrixFree,
+            ..base
+        },
+        FemWorkload {
+            mode: FemAssemblyMode::PartialAssembly,
+            ..base
+        },
+        FemWorkload {
+            space: FemSpace::Hdiv,
+            ..base
+        },
+        FemWorkload {
+            element: FemElement::Tri3,
+            ..base
+        },
+        FemWorkload {
+            element: FemElement::Tetrahedron,
+            ..base
+        },
+        FemWorkload {
+            physics: FemPhysics::Other,
+            ..base
+        },
+    ] {
+        assert_rejected(rejected);
+    }
+    // The explicit cubic order must round-trip independently of the old bucket.
+    let value = serde_json::to_value(base).unwrap();
+    assert_eq!(value["order"], "p3");
+    assert_eq!(serde_json::from_value::<FemWorkload>(value).unwrap(), base);
+    assert_ne!(FemOrder::P3, FemOrder::P2OrHigher);
+}
+
+#[test]
+fn electrostatic_potential_admission_is_explicit_and_bounded() {
+    for element in [FemElement::Tri3, FemElement::Tetrahedron] {
+        for order in [FemOrder::P1, FemOrder::P2] {
+            for action in [
+                FemAction::Forward,
+                FemAction::Transpose,
+                FemAction::Hermitian,
+            ] {
+                let workload =
+                    FemWorkload::native_cuda_electrostatic_potential(element, order, action);
+                assert_eq!(workload.physics, FemPhysics::ElectrostaticPotential);
+                admit_fem_cuda(workload).unwrap();
+                for scalar in [FemScalar::F32, FemScalar::Complex32, FemScalar::Complex64] {
+                    assert_rejected(FemWorkload { scalar, ..workload });
+                }
+                for mode in [
+                    FemAssemblyMode::PartialAssembly,
+                    FemAssemblyMode::MatrixFree,
+                ] {
+                    assert_rejected(FemWorkload { mode, ..workload });
+                }
+                for space in [FemSpace::Hcurl, FemSpace::Hdiv, FemSpace::Dg] {
+                    assert_rejected(FemWorkload { space, ..workload });
+                }
+                for order in [FemOrder::P3, FemOrder::P2OrHigher] {
+                    assert_rejected(FemWorkload { order, ..workload });
+                }
+                for element in [FemElement::Quad, FemElement::Hexahedron] {
+                    assert_rejected(FemWorkload {
+                        element,
+                        ..workload
+                    });
+                }
+            }
+        }
+    }
 }

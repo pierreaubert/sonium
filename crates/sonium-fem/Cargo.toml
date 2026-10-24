@@ -202,5 +202,13 @@ meshlang = ["sonium-mesher/meshlang", "dep:meshlang-ast"]
 
 # GPU backends — forwarded to sonium-compute. Activates the
 # CUDA/Metal arms in `physics::stokes::navier_stokes::solve_iterative_via_backend`.
-cuda = ["sonium-compute/cuda"]
+cuda = ["sonium-compute/cuda", "sonium-solvers/cuda"]
 metal = ["sonium-compute/metal"]
+
+[[example]]
+name = "cuda_fem_compare"
+required-features = ["cuda"]
+
+[[example]]
+name = "cuda_tet_session_compare"
+required-features = ["cuda"]

@@ -96,7 +96,8 @@ impl MaxwellForm {
 
     /// Create with explicit coefficients (for normalized/dimensionless problems).
     ///
-    /// Assembles: `alpha * integral (curl E).(curl F) - beta * integral E.F`
+    /// Assembles `curl_curl_coeff * integral (curl E).(curl F)
+    /// + mass_coeff * integral E.F`; the mass coefficient includes its sign.
     pub fn from_coefficients(curl_curl_coeff: f64, mass_coeff: Complex64) -> Self {
         Self {
             // The integration path factors the mass term as `-omega^2 *

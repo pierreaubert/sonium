@@ -122,6 +122,8 @@ pub enum FemOrder {
     /// Quadratic order, covered by the bounded FEM1 production cell.
     P2,
     P2OrHigher,
+    /// Cubic order (Q3 for tensor-product hexahedra).
+    P3,
 }
 
 impl FemOrder {
@@ -129,6 +131,7 @@ impl FemOrder {
         match self {
             Self::P1 => "p1",
             Self::P2 => "p2",
+            Self::P3 => "p3",
             Self::P2OrHigher => "p2-or-higher",
         }
     }
@@ -146,6 +149,12 @@ pub enum FemPhysics {
     /// Small native-CUDA Taylor--Hood Stokes CSR action cell.
     Stokes,
     Other,
+    /// Steady scalar heat conduction with host assembly and retained CUDA solves.
+    HeatConduction,
+    /// Linear reduced scalar magnetic potential with positive permeability.
+    MagneticScalarPotential,
+    /// Linear scalar electrostatic potential with positive permittivity.
+    ElectrostaticPotential,
 }
 
 impl FemPhysics {
@@ -156,6 +165,9 @@ impl FemPhysics {
             Self::Maxwell => "maxwell",
             Self::Stokes => "stokes",
             Self::Other => "other-form",
+            Self::HeatConduction => "heat-conduction",
+            Self::MagneticScalarPotential => "magnetic-scalar-potential",
+            Self::ElectrostaticPotential => "electrostatic-potential",
         }
     }
 }
@@ -236,6 +248,98 @@ impl FemWorkload {
             physics: FemPhysics::Helmholtz,
             mode: FemAssemblyMode::Assembled,
             scalar,
+            action,
+        }
+    }
+
+    /// Describe a steady assembled f64 heat-conduction system.
+    ///
+    /// Tri3 and tetrahedron P1/P2 are admitted for all actions. Host form
+    /// assembly and boundary elimination feed the retained CUDA solver. This
+    /// does not admit thermal advection, nonlinear radiation or time stepping.
+    /// PCG requires positive conductivity and constraints removing the constant
+    /// nullspace; a pure Neumann system needs explicit nullspace treatment.
+    pub const fn native_cuda_heat_conduction(
+        element: FemElement,
+        order: FemOrder,
+        action: FemAction,
+    ) -> Self {
+        Self {
+            space: FemSpace::H1,
+            element,
+            order,
+            physics: FemPhysics::HeatConduction,
+            mode: FemAssemblyMode::Assembled,
+            scalar: FemScalar::F64,
+            action,
+        }
+    }
+
+    /// Describe an assembled linear scalar magnetic-potential CUDA solve.
+    ///
+    /// Admits f64 H1 Tri3/tetrahedron P1/P2 for all actions. Host permeability,
+    /// remanence assembly and constraints feed the retained CUDA solver. PCG
+    /// requires positive permeability and a constrained constant nullspace.
+    /// Nonlinear B-H, vector/axisymmetric formulations and device field recovery
+    /// have separate contracts and are not covered by this workload.
+    pub const fn native_cuda_magnetic_scalar_potential(
+        element: FemElement,
+        order: FemOrder,
+        action: FemAction,
+    ) -> Self {
+        Self {
+            physics: FemPhysics::MagneticScalarPotential,
+            ..Self::native_cuda_heat_conduction(element, order, action)
+        }
+    }
+
+    /// Describe an assembled linear electrostatic-potential CUDA solve.
+    ///
+    /// Admits f64 H1 Tri3/tetrahedron P1/P2 for all actions. Host forms and
+    /// symmetric boundary elimination feed the retained solver. PCG requires
+    /// positive permittivity and constraints removing the constant nullspace.
+    /// Nonlinear dielectric, floating-conductor and electromechanical coupling
+    /// require separate admission; this does not provide GPU form assembly.
+    pub const fn native_cuda_electrostatic_potential(
+        element: FemElement,
+        order: FemOrder,
+        action: FemAction,
+    ) -> Self {
+        Self {
+            physics: FemPhysics::ElectrostaticPotential,
+            ..Self::native_cuda_heat_conduction(element, order, action)
+        }
+    }
+
+    /// Describe an assembled Complex64 P1/P2 tetrahedral Helmholtz solve.
+    ///
+    /// Host assembly and constraint elimination feed `CudaFemSolveSession`.
+    /// Admission rejects `P2OrHigher`; this is not a GPU assembly capability.
+    pub const fn native_cuda_tet(order: FemOrder, action: FemAction) -> Self {
+        Self {
+            space: FemSpace::H1,
+            element: FemElement::Tetrahedron,
+            order,
+            physics: FemPhysics::Helmholtz,
+            mode: FemAssemblyMode::Assembled,
+            scalar: FemScalar::Complex64,
+            action,
+        }
+    }
+
+    /// Describe an assembled Complex64 Q1/Q2/Q3 hexahedral Helmholtz solve.
+    ///
+    /// `P1`, `P2` and `P3` denote tensor-product Q1, Q2 and Q3 here.
+    /// Host assembly and constraints feed `CudaFemSolveSession`; this contract
+    /// does not admit generic partial-assembly callbacks or `P2OrHigher`.
+    pub const fn native_cuda_hex(order: FemOrder, action: FemAction) -> Self {
+        Self {
+            space: FemSpace::H1,
+            element: FemElement::Hexahedron,
+            order,
+            physics: FemPhysics::Helmholtz,
+            mode: FemAssemblyMode::Assembled,
+            scalar: FemScalar::Complex64,
             action,
         }
     }
@@ -450,16 +554,19 @@ fn cuda_supports(workload: FemWorkload) -> bool {
         && workload.order == FemOrder::P1
         && workload.physics == FemPhysics::Helmholtz
         && workload.mode == FemAssemblyMode::Assembled
-        && matches!(
-            (workload.scalar, workload.action),
-            (
-                FemScalar::F64,
-                FemAction::Forward | FemAction::Transpose | FemAction::Hermitian
-            ) | (
-                FemScalar::Complex64,
-                FemAction::Forward | FemAction::Hermitian
-            )
-        );
+        && matches!(workload.scalar, FemScalar::F64 | FemScalar::Complex64);
+    let acoustic_tet = workload.space == FemSpace::H1
+        && workload.element == FemElement::Tetrahedron
+        && matches!(workload.order, FemOrder::P1 | FemOrder::P2)
+        && workload.physics == FemPhysics::Helmholtz
+        && workload.mode == FemAssemblyMode::Assembled
+        && workload.scalar == FemScalar::Complex64;
+    let acoustic_hex = workload.space == FemSpace::H1
+        && workload.element == FemElement::Hexahedron
+        && matches!(workload.order, FemOrder::P1 | FemOrder::P2 | FemOrder::P3)
+        && workload.physics == FemPhysics::Helmholtz
+        && workload.mode == FemAssemblyMode::Assembled
+        && workload.scalar == FemScalar::Complex64;
     let acoustic_matrix_free = workload.space == FemSpace::H1
         && workload.element == FemElement::Tri3
         && workload.order == FemOrder::P1
@@ -475,16 +582,7 @@ fn cuda_supports(workload: FemWorkload) -> bool {
         && workload.order == FemOrder::P2
         && workload.physics == FemPhysics::Helmholtz
         && workload.mode == FemAssemblyMode::Assembled
-        && matches!(
-            (workload.scalar, workload.action),
-            (
-                FemScalar::F64,
-                FemAction::Forward | FemAction::Transpose | FemAction::Hermitian
-            ) | (
-                FemScalar::Complex64,
-                FemAction::Forward | FemAction::Hermitian
-            )
-        );
+        && matches!(workload.scalar, FemScalar::F64 | FemScalar::Complex64);
     let structural = workload.space == FemSpace::H1
         && workload.element == FemElement::Tetrahedron
         && workload.order == FemOrder::P1
@@ -496,7 +594,7 @@ fn cuda_supports(workload: FemWorkload) -> bool {
             FemAction::Forward | FemAction::Transpose | FemAction::Hermitian
         );
     let maxwell = workload.space == FemSpace::Hcurl
-        && workload.element == FemElement::Tri3
+        && matches!(workload.element, FemElement::Tri3 | FemElement::Tetrahedron)
         && workload.order == FemOrder::P1
         && workload.physics == FemPhysics::Maxwell
         && workload.mode == FemAssemblyMode::Assembled
@@ -515,15 +613,78 @@ fn cuda_supports(workload: FemWorkload) -> bool {
             workload.action,
             FemAction::Forward | FemAction::Transpose | FemAction::Hermitian
         );
-    acoustic || acoustic_p2 || acoustic_matrix_free || structural || maxwell || stokes
+    let scalar_diffusion = matches!(
+        workload.physics,
+        FemPhysics::HeatConduction
+            | FemPhysics::MagneticScalarPotential
+            | FemPhysics::ElectrostaticPotential
+    ) && workload.space == FemSpace::H1
+        && matches!(workload.element, FemElement::Tri3 | FemElement::Tetrahedron)
+        && matches!(workload.order, FemOrder::P1 | FemOrder::P2)
+        && workload.mode == FemAssemblyMode::Assembled
+        && workload.scalar == FemScalar::F64;
+    scalar_diffusion
+        || acoustic
+        || acoustic_tet
+        || acoustic_hex
+        || acoustic_p2
+        || acoustic_matrix_free
+        || structural
+        || maxwell
+        || stokes
 }
 
 fn cuda_unsupported_reason(workload: FemWorkload) -> &'static str {
+    if workload.physics == FemPhysics::ElectrostaticPotential {
+        return "linear electrostatic-potential CUDA requires assembled f64 H1 Tri3/tetrahedron P1/P2; nonlinear, coupled and other representations are not admitted";
+    }
+    if workload.physics == FemPhysics::MagneticScalarPotential {
+        return "linear scalar magnetic-potential CUDA requires assembled f64 H1 Tri3/tetrahedron P1/P2; other formulations, spaces, scalars, orders and modes are not admitted";
+    }
+    if workload.physics == FemPhysics::HeatConduction {
+        return "steady heat-conduction CUDA requires assembled f64 H1 Tri3/tetrahedron P1/P2; other spaces, scalars, orders and modes are not admitted";
+    }
+    if workload.physics == FemPhysics::Helmholtz && workload.element == FemElement::Hexahedron {
+        if workload.space != FemSpace::H1 {
+            return "hexahedral Helmholtz CUDA requires H1 space";
+        }
+        if workload.scalar != FemScalar::Complex64 {
+            return "assembled hexahedral Helmholtz CUDA is bounded to Complex64";
+        }
+        if !matches!(workload.order, FemOrder::P1 | FemOrder::P2 | FemOrder::P3) {
+            return "assembled hexahedral Helmholtz CUDA requires explicit Q1/Q2/Q3 order";
+        }
+        return "generic hexahedral Helmholtz CUDA requires an assembled operator; specialized partial-assembly producers have separate contracts";
+    }
+    if workload.physics == FemPhysics::Helmholtz && workload.element == FemElement::Tetrahedron {
+        if workload.space != FemSpace::H1 {
+            return "tetrahedral Helmholtz CUDA requires H1 space";
+        }
+        if workload.scalar != FemScalar::Complex64 {
+            return "assembled tetrahedral Helmholtz CUDA is bounded to Complex64";
+        }
+        if !matches!(workload.order, FemOrder::P1 | FemOrder::P2) {
+            return "assembled tetrahedral Helmholtz CUDA is bounded to P1/P2";
+        }
+        return "generic tetrahedral Helmholtz CUDA requires an assembled operator; specialized element producers have separate contracts";
+    }
+    if workload.physics == FemPhysics::Maxwell {
+        if workload.scalar != FemScalar::Complex64 {
+            return "Maxwell CUDA is bounded to Complex64";
+        }
+        if workload.space != FemSpace::Hcurl {
+            return "Maxwell CUDA requires H(curl) space";
+        }
+        if !matches!(workload.element, FemElement::Tri3 | FemElement::Tetrahedron) {
+            return "Maxwell CUDA supports Tri3 and tetrahedron assembled operators";
+        }
+        if workload.order != FemOrder::P1 {
+            return "Maxwell CUDA supports lowest-order edge elements";
+        }
+        return "Maxwell CUDA requires assembled operators";
+    }
     if !matches!(workload.scalar, FemScalar::F64 | FemScalar::Complex64) {
         return "requested scalar path is not implemented by the CUDA FEM entrypoint";
-    }
-    if workload.scalar == FemScalar::Complex64 && workload.action == FemAction::Transpose {
-        return "Complex64 transpose is not exposed by the CUDA device-adjoint operator";
     }
     if workload.space != FemSpace::H1 {
         return "requested FEM function-space dispatcher is not implemented by CUDA";
@@ -636,7 +797,7 @@ fn unsupported_workload_row(workload: FemWorkload, reason: &'static str) -> FemC
 
 /// Return the bounded CUDA matrix used by the FEM1 artifact.
 pub fn fem_cuda_capability_rows() -> Vec<FemCapabilityRow> {
-    let mut rows = Vec::with_capacity(28);
+    let mut rows = Vec::with_capacity(44);
     for scalar in [FemScalar::F64, FemScalar::Complex64] {
         rows.push(native_row(
             FemWorkload::native_cuda(scalar, FemAction::Forward),
@@ -671,6 +832,16 @@ pub fn fem_cuda_capability_rows() -> Vec<FemCapabilityRow> {
         FemCapabilityStatus::NativeRealEquivalent,
         "real f64 Hermitian action is transpose-equivalent",
     ));
+    for workload in [
+        FemWorkload::native_cuda(FemScalar::Complex64, FemAction::Transpose),
+        FemWorkload::native_cuda_p2(FemScalar::Complex64, FemAction::Transpose),
+    ] {
+        rows.push(native_row(
+            workload,
+            FemCapabilityStatus::Native,
+            "host assembly and transpose canonicalization; retained CUDA CSR solve with caller-prepared preconditioning",
+        ));
+    }
     for scalar in [FemScalar::F64, FemScalar::Complex64] {
         for action in [
             FemAction::Forward,
@@ -688,22 +859,44 @@ pub fn fem_cuda_capability_rows() -> Vec<FemCapabilityRow> {
             ));
         }
     }
+    for order in [FemOrder::P1, FemOrder::P2] {
+        for action in [
+            FemAction::Forward,
+            FemAction::Transpose,
+            FemAction::Hermitian,
+        ] {
+            rows.push(native_row(
+                FemWorkload::native_cuda_tet(order, action),
+                FemCapabilityStatus::Native,
+                "host tetrahedral Helmholtz assembly and constraints; retained CUDA CSR solve with caller-prepared preconditioning",
+            ));
+        }
+    }
+    for order in [FemOrder::P1, FemOrder::P2, FemOrder::P3] {
+        for action in [
+            FemAction::Forward,
+            FemAction::Transpose,
+            FemAction::Hermitian,
+        ] {
+            rows.push(native_row(
+                FemWorkload::native_cuda_hex(order, action),
+                FemCapabilityStatus::Native,
+                "host hexahedral Helmholtz assembly and constraints; retained CUDA CSR solve with LOR auxiliary AMG",
+            ));
+        }
+    }
     for (id, reason) in [
-        (
-            "h1.tri3.p1.helmholtz.assembled.Complex64.transpose",
-            "Complex64 transpose is not exposed by DeviceAdjointOperator",
-        ),
         (
             "h1.quad.p1.helmholtz.assembled",
             "CUDA element assembly kernel is not implemented",
         ),
         (
-            "h1.tetrahedron.p1.helmholtz.assembled",
-            "CUDA element assembly kernel is not implemented",
+            "h1.tetrahedron.p1.helmholtz.assembled.f64",
+            "generic tetrahedral Helmholtz CUDA is bounded to Complex64",
         ),
         (
-            "h1.hexahedron.p1.helmholtz.assembled",
-            "CUDA element assembly kernel is not implemented",
+            "h1.hexahedron.p1.helmholtz.assembled.f64",
+            "generic hexahedral Helmholtz CUDA is bounded to Complex64",
         ),
         (
             "h1.tri3.p2-or-higher.helmholtz.assembled",
@@ -739,6 +932,48 @@ pub fn fem_cuda_capability_rows() -> Vec<FemCapabilityRow> {
         ),
     ] {
         rows.push(unsupported_row(id, reason));
+    }
+    rows
+}
+
+/// Return bounded linear scalar magnetostatic CUDA solve coverage.
+pub fn fem_cuda_magnetic_scalar_capability_rows() -> Vec<FemCapabilityRow> {
+    let mut rows = Vec::with_capacity(12);
+    for element in [FemElement::Tri3, FemElement::Tetrahedron] {
+        for order in [FemOrder::P1, FemOrder::P2] {
+            for action in [
+                FemAction::Forward,
+                FemAction::Transpose,
+                FemAction::Hermitian,
+            ] {
+                rows.push(native_row(
+                    FemWorkload::native_cuda_magnetic_scalar_potential(element, order, action),
+                    FemCapabilityStatus::Native,
+                    "host permeability/remanence assembly and constraints; retained CUDA PCG with symmetric AMG; layered potential/flux and repeated-source tests",
+                ));
+            }
+        }
+    }
+    rows
+}
+
+/// Return the steady heat-conduction CUDA solve coverage separately from acoustics.
+pub fn fem_cuda_thermal_capability_rows() -> Vec<FemCapabilityRow> {
+    let mut rows = Vec::with_capacity(12);
+    for element in [FemElement::Tri3, FemElement::Tetrahedron] {
+        for order in [FemOrder::P1, FemOrder::P2] {
+            for action in [
+                FemAction::Forward,
+                FemAction::Transpose,
+                FemAction::Hermitian,
+            ] {
+                rows.push(native_row(
+                    FemWorkload::native_cuda_heat_conduction(element, order, action),
+                    FemCapabilityStatus::Native,
+                    "host conduction assembly and constraints; retained CUDA PCG with symmetric AMG; analytical temperature/source and numeric-refresh tests",
+                ));
+            }
+        }
     }
     rows
 }
@@ -799,21 +1034,26 @@ pub fn fem_cuda_structural_capability_rows() -> Vec<FemCapabilityRow> {
 }
 
 /// Return the bounded CUDA matrix for the native H(curl) Maxwell action cell.
-/// The cell intentionally advertises only the Complex64 Tri3/P1 assembled
-/// action; geometry/quadrature kernels and other Maxwell element families
+/// The cells advertise Complex64 Tri3/Tet4 lowest-order assembled actions;
+/// geometry/quadrature kernels and other Maxwell element families
 /// remain fail-closed before assembly.
 pub fn fem_cuda_maxwell_capability_rows() -> Vec<FemCapabilityRow> {
-    let mut rows = Vec::with_capacity(10);
+    let mut rows = Vec::with_capacity(13);
     for action in [
         FemAction::Forward,
         FemAction::Transpose,
         FemAction::Hermitian,
     ] {
-        rows.push(native_row(
-            FemWorkload::native_cuda_maxwell(FemScalar::Complex64, action),
-            FemCapabilityStatus::Native,
-            "production MaxwellForm assembly plus native CUDA DeviceCsr action",
-        ));
+        for element in [FemElement::Tri3, FemElement::Tetrahedron] {
+            rows.push(native_row(
+                FemWorkload {
+                    element,
+                    ..FemWorkload::native_cuda_maxwell(FemScalar::Complex64, action)
+                },
+                FemCapabilityStatus::Native,
+                "host MaxwellForm assembly plus retained CUDA CSR and auxiliary-space solve",
+            ));
+        }
     }
     for (workload, reason) in [
         (
@@ -828,7 +1068,7 @@ pub fn fem_cuda_maxwell_capability_rows() -> Vec<FemCapabilityRow> {
                 element: FemElement::Quad,
                 ..FemWorkload::native_cuda_maxwell(FemScalar::Complex64, FemAction::Forward)
             },
-            "Maxwell CUDA cell is bounded to Tri3",
+            "Maxwell CUDA cells are bounded to Tri3 and tetrahedron",
         ),
         (
             FemWorkload {
@@ -1049,7 +1289,7 @@ mod tests {
     #[test]
     fn capability_rows_carry_requested_actual_and_fallback_fields() {
         let rows = fem_cuda_capability_rows();
-        assert_eq!(rows.len(), 28);
+        assert_eq!(rows.len(), 44);
         assert!(
             rows.iter()
                 .all(|row| row.requested_backend == FemBackend::Cuda)
@@ -1095,8 +1335,8 @@ mod tests {
     #[test]
     fn maxwell_capability_rows_are_bounded_and_fail_closed() {
         let rows = fem_cuda_maxwell_capability_rows();
-        assert_eq!(rows.len(), 10);
-        assert_eq!(rows.iter().filter(|row| row.dispatch).count(), 3);
+        assert_eq!(rows.len(), 13);
+        assert_eq!(rows.iter().filter(|row| row.dispatch).count(), 6);
         assert!(rows.iter().all(|row| {
             row.requested_backend == FemBackend::Cuda
                 && row.fallback == "none"
@@ -1107,13 +1347,32 @@ mod tests {
             FemAction::Transpose,
             FemAction::Hermitian,
         ] {
-            let admission = admit_fem_cuda(FemWorkload::native_cuda_maxwell(
-                FemScalar::Complex64,
-                action,
-            ))
-            .expect("bounded Maxwell action should be admitted");
-            assert_eq!(admission.provenance.actual_backend, FemActualBackend::Cuda);
-            assert_eq!(admission.provenance.fallback, "none");
+            for element in [FemElement::Tri3, FemElement::Tetrahedron] {
+                let workload = FemWorkload {
+                    element,
+                    ..FemWorkload::native_cuda_maxwell(FemScalar::Complex64, action)
+                };
+                let admission =
+                    admit_fem_cuda(workload).expect("bounded Maxwell action should be admitted");
+                assert_eq!(admission.provenance.actual_backend, FemActualBackend::Cuda);
+                assert_eq!(admission.provenance.fallback, "none");
+                for rejected in [
+                    FemWorkload {
+                        mode: FemAssemblyMode::MatrixFree,
+                        ..workload
+                    },
+                    FemWorkload {
+                        order: FemOrder::P2OrHigher,
+                        ..workload
+                    },
+                    FemWorkload {
+                        scalar: FemScalar::F64,
+                        ..workload
+                    },
+                ] {
+                    assert!(admit_fem_cuda(rejected).is_err());
+                }
+            }
         }
     }
 
@@ -1127,5 +1386,55 @@ mod tests {
                 && row.fallback == "none"
                 && (row.dispatch || row.fallback_reason.contains("before assembly"))
         }));
+    }
+    #[test]
+    fn thermal_capability_rows_match_bounded_admission() {
+        let rows = fem_cuda_thermal_capability_rows();
+        assert_eq!(rows.len(), 12);
+        let unique: std::collections::HashSet<_> = rows.iter().map(|r| &r.id).collect();
+        assert_eq!(unique.len(), rows.len());
+        for element in [FemElement::Tri3, FemElement::Tetrahedron] {
+            for order in [FemOrder::P1, FemOrder::P2] {
+                for action in [
+                    FemAction::Forward,
+                    FemAction::Transpose,
+                    FemAction::Hermitian,
+                ] {
+                    let workload = FemWorkload::native_cuda_heat_conduction(element, order, action);
+                    assert!(admit_fem_cuda(workload).is_ok());
+                    assert!(rows.iter().any(|r| r.id == workload.id() && r.dispatch));
+                }
+            }
+        }
+        assert!(
+            rows.iter()
+                .all(|r| r.fallback == "none" && r.evidence.is_some())
+        );
+    }
+
+    #[test]
+    fn magnetic_scalar_capability_rows_match_bounded_admission() {
+        let rows = fem_cuda_magnetic_scalar_capability_rows();
+        assert_eq!(rows.len(), 12);
+        let unique: std::collections::HashSet<_> = rows.iter().map(|r| &r.id).collect();
+        assert_eq!(unique.len(), rows.len());
+        for element in [FemElement::Tri3, FemElement::Tetrahedron] {
+            for order in [FemOrder::P1, FemOrder::P2] {
+                for action in [
+                    FemAction::Forward,
+                    FemAction::Transpose,
+                    FemAction::Hermitian,
+                ] {
+                    let workload =
+                        FemWorkload::native_cuda_magnetic_scalar_potential(element, order, action);
+                    assert!(admit_fem_cuda(workload).is_ok());
+                    assert!(rows.iter().any(|r| r.id == workload.id() && r.dispatch));
+                }
+            }
+        }
+        assert!(
+            rows.iter()
+                .all(|r| r.fallback == "none" && r.evidence.is_some())
+        );
     }
 }

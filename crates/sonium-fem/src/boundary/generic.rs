@@ -676,6 +676,24 @@ pub fn try_apply_homogeneous_dirichlet_dofs(
     apply_homogeneous_dirichlet_dofs_checked(system, dofs, 1.0, 0.0)
 }
 
+/// Apply homogeneous complex Dirichlet conditions to explicit DOFs.
+///
+/// Duplicate DOFs are coalesced before symmetric row and column elimination.
+///
+/// # Errors
+/// Rejects malformed systems and out-of-range DOFs before changing the system.
+pub fn try_apply_homogeneous_dirichlet_complex_dofs(
+    system: &mut FemSystem<Complex64>,
+    dofs: &[usize],
+) -> Result<(), BoundaryConditionError> {
+    apply_homogeneous_dirichlet_dofs_checked(
+        system,
+        dofs,
+        Complex64::new(1.0, 0.0),
+        Complex64::new(0.0, 0.0),
+    )
+}
+
 fn apply_homogeneous_dirichlet_dofs_checked<T>(
     system: &mut FemSystem<T>,
     dofs: &[usize],

@@ -32,6 +32,13 @@
 
 // Core Helmholtz assembly
 mod assembler;
+pub mod device_boundary;
+pub mod device_hex;
+#[cfg(feature = "cuda")]
+pub mod device_hex_solve;
+pub mod device_tet;
+#[cfg(feature = "cuda")]
+pub mod device_tet_solve;
 mod forms;
 
 // Boundary conditions

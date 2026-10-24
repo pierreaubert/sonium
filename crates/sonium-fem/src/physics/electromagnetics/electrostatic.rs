@@ -32,6 +32,12 @@ use num_complex::Complex64;
 use sonium_solvers::CsrMatrix;
 use thiserror::Error;
 
+#[cfg(feature = "cuda")]
+#[path = "electrostatic_cuda.rs"]
+mod cuda;
+#[cfg(feature = "cuda")]
+pub use cuda::{CudaElectrostaticCentroidField, CudaElectrostaticObservables};
+
 /// Vacuum permittivity ε₀ \[F/m\].
 pub const EPSILON_0: f64 = 8.854_187_817e-12;
 

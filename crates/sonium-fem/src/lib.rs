@@ -37,8 +37,9 @@ pub use backend::{
     FemAction, FemActualBackend, FemAdmission, FemAdmissionError, FemAssemblyMode, FemBackend,
     FemBackendProvenance, FemBackendRequest, FemCapabilityRow, FemCapabilityStatus, FemElement,
     FemOrder, FemPhysics, FemScalar, FemSpace, FemWorkload, admit_fem_cuda, admit_fem_workload,
-    fem_cuda_capability_rows, fem_cuda_maxwell_capability_rows, fem_cuda_stokes_capability_rows,
-    fem_cuda_structural_capability_rows,
+    fem_cuda_capability_rows, fem_cuda_magnetic_scalar_capability_rows,
+    fem_cuda_maxwell_capability_rows, fem_cuda_stokes_capability_rows,
+    fem_cuda_structural_capability_rows, fem_cuda_thermal_capability_rows,
 };
 pub use backend_selection::{
     BackendPreconditionerKind, BackendPressureSchurPreconditionerKind, CHEBYSHEV_EIGENVALUE_RATIO,

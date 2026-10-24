@@ -110,6 +110,9 @@ pub struct BdfWorkspace {
     /// Reusable setup for consecutive solves with an exactly identical
     /// monolithic matrix (notably the two affine pressure probes).
     pub(crate) linear_solver_cache: RefCell<Option<BdfCachedLinearSolver>>,
+    /// Retained CUDA linear state; host assembly and time history remain explicit.
+    #[cfg(feature = "cuda")]
+    pub(crate) cuda_solver_cache: RefCell<Option<super::bdf_cuda::BdfCudaSolver>>,
     /// Diagnostics from the most recent linear solve.
     last_linear_solve: RefCell<Option<BdfLinearSolveTelemetry>>,
     /// Right-hand sides for the two most recent solves. Consecutive affine
@@ -278,6 +281,8 @@ impl BdfWorkspace {
             element_velocity_topology,
             quad_order,
             linear_solver_cache: RefCell::new(None),
+            #[cfg(feature = "cuda")]
+            cuda_solver_cache: RefCell::new(None),
             last_linear_solve: RefCell::new(None),
             previous_linear_rhs: RefCell::new(None),
             last_linear_rhs: RefCell::new(None),
@@ -315,6 +320,10 @@ impl BdfWorkspace {
         self.pressure_pin = pressure_dof;
         self.pressure_pin_value = pressure_value;
         *self.linear_solver_cache.get_mut() = None;
+        #[cfg(feature = "cuda")]
+        {
+            *self.cuda_solver_cache.get_mut() = None;
+        }
         *self.last_linear_solve.get_mut() = None;
         *self.previous_linear_rhs.get_mut() = None;
         *self.last_linear_rhs.get_mut() = None;

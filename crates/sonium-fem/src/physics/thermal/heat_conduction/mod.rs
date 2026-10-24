@@ -19,3 +19,8 @@ pub mod time_stepping;
 pub use forms::*;
 pub use materials::*;
 pub use time_stepping::*;
+
+#[cfg(feature = "cuda")]
+mod device_time;
+#[cfg(feature = "cuda")]
+pub use device_time::CudaThermalTimeStepper;

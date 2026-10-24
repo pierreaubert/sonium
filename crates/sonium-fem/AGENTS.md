@@ -58,6 +58,7 @@ nonlinear/history operators, solver admission and validation; implementing
 - **Maxwell** (`physics/electromagnetics/maxwell/`): Curl-curl + edge mass, H(curl) Nedelec elements
 - **Magnetostatics** (`physics/electromagnetics/magnetostatics/`): Scalar potential, permanent magnet sources, BL extraction
 - **Eddy current** (`physics/electromagnetics/eddy_current/`): Frequency-domain A-formulation
+- **Rotating machine** (`physics/electromagnetics/rotating_machine/`): Planar nonlinear `A_z` (P1/P2, chord Newton), native CDT sliding-band motor mesh, current/voltage/PWM drive transients, solid-conductor eddy blocks, demagnetisation ratchet, Bertotti/measured-surface iron + copper losses, anisotropic thermal twin, centrifugal rotor stress. Validated against the eMotres/Motor_Ai_Simulation Python reference (same-mesh identity oracles + GEO_30MM operating-point pins in `tests/rotating_machine_*`)
 - **Thermal** (`physics/thermal/heat_conduction/`): Conduction, advection, convection, radiation
 - **Nonlinear solid** (`physics/solid/nonlinear_solid/`): Hyperelasticity, St. Venant-Kirchhoff
 - **Beam** (`physics/solid/beam/`): Euler-Bernoulli beam theory

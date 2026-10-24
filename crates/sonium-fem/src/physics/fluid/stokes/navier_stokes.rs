@@ -344,6 +344,9 @@ pub struct NavierStokesConfig {
     /// upload CSR + RHS to device, run `gmres_backend_preconditioned`
     /// with the polynomial Jacobi preconditioner, download the solution.
     /// CPU assembly is unchanged; only the linear-solve hot loop migrates.
+    /// Cached BDF f64 CUDA solves retain their context, sparse descriptors and
+    /// Krylov storage; identical matrices and controls also reuse preconditioning.
+    /// The BDF host state still supplies RHS/initial guesses and receives results.
     pub linear_solver_backend: LinearSolverBackend,
     /// Which GPU-friendly preconditioner the backend GMRES uses.
     /// Default is [`BackendPreconditionerKind::PolynomialJacobi`] with
@@ -373,6 +376,10 @@ pub struct NavierStokesConfig {
     pub linear_solver_schur_polynomial_damping: f64,
     /// Pressure-block solve used inside backend Jacobi/Schur.
     pub linear_solver_schur_preconditioner: BackendPressureSchurPreconditionerKind,
+    /// Use pressure-only AMG in retained CUDA f64 BDF solves (default false).
+    /// Excludes velocity identity rows from coarsening and uses device field views.
+    /// Profile before enabling: deeper AMG cycles can cost more despite fewer iterations.
+    pub linear_solver_bdf_pressure_only_amg: bool,
     /// Chebyshev degree for the pressure Schur solve inside backend
     /// Jacobi/Schur. Used when `linear_solver_schur_preconditioner`
     /// is `Chebyshev`.
@@ -469,6 +476,7 @@ impl Default for NavierStokesConfig {
             linear_solver_schur_polynomial_degree: 1,
             linear_solver_schur_polynomial_damping: 1.0,
             linear_solver_schur_preconditioner: BackendPressureSchurPreconditionerKind::Polynomial,
+            linear_solver_bdf_pressure_only_amg: false,
             linear_solver_schur_chebyshev_degree: 5,
             linear_solver_schur_chebyshev_eigenvalue_ratio: 30.0,
             linear_solver_chebyshev_degree: 5,
@@ -1573,9 +1581,13 @@ fn factorize_steady_direct(
     let factorization = match symbolic.lu.as_ref() {
         Some(analysis) => {
             sonium_solvers::direct::SparseLuFactorization::factorize_supernodal_with_symbolic(
-                matrix, analysis, pivot_threshold,
+                matrix,
+                analysis,
+                pivot_threshold,
             )
-            .or_else(|_| sonium_solvers::direct::SparseLuFactorization::factorize_supernodal(matrix))
+            .or_else(|_| {
+                sonium_solvers::direct::SparseLuFactorization::factorize_supernodal(matrix)
+            })
         }
         None => sonium_solvers::direct::SparseLuFactorization::factorize_supernodal(matrix),
     };
@@ -1639,15 +1651,8 @@ fn solve_shifted_newton_step(
 ) -> Option<Vec<f64>> {
     if ptc_beta > 0.0
         && let (Some(mass), Some(positions)) = (ptc_mass, ptc_positions)
-        && let Some(step) = solve_ptc_newton_step(
-            jacobian,
-            mass,
-            positions,
-            ptc_beta,
-            rhs,
-            is_bc,
-            symbolic,
-        )
+        && let Some(step) =
+            solve_ptc_newton_step(jacobian, mass, positions, ptc_beta, rhs, is_bc, symbolic)
     {
         return Some(step);
     }
@@ -1944,12 +1949,7 @@ fn anderson_picard_update(
     // substitution over the kept columns (in increasing order).
     let rhs: Vec<f64> = q_columns
         .iter()
-        .map(|q| {
-            q.iter()
-                .zip(current_residual)
-                .map(|(a, b)| a * b)
-                .sum()
-        })
+        .map(|q| q.iter().zip(current_residual).map(|(a, b)| a * b).sum())
         .collect();
     let kept_count = kept.len();
     let mut kept_gamma = vec![0.0; kept_count];
@@ -1970,10 +1970,7 @@ fn anderson_picard_update(
     }
     let mut next = damped.clone();
     for (i, &coefficient) in gamma.iter().enumerate() {
-        for (target, (dx, dg)) in next
-            .iter_mut()
-            .zip(d_state[i].iter().zip(&d_residual[i]))
-        {
+        for (target, (dx, dg)) in next.iter_mut().zip(d_state[i].iter().zip(&d_residual[i])) {
             *target -= coefficient * (dx + relaxation * dg);
         }
     }
@@ -2480,9 +2477,8 @@ where
     // tangent is published only when the active peak is unique and non-zero;
 
     // ties and the zero state remain deliberately fail-closed.
-    let publish_newton_linearization = config.use_newton_refinement
-        || config.anderson_depth > 0
-        || initial_velocity.is_some();
+    let publish_newton_linearization =
+        config.use_newton_refinement || config.anderson_depth > 0 || initial_velocity.is_some();
     // Per-iteration timing spans for performance work. Timers always run
     // (nanosecond cost); only the report line is gated.
     let profile_ns = std::env::var("SONIUM_NS_PROFILE").as_deref() == Ok("1");
@@ -2659,7 +2655,6 @@ where
                 super::turbulence::TurbulenceModel::Laminar
             ) || turbulence_mu_gradient.is_some());
 
-
         // The Picard (Oseen) system is consumed only by the Picard
         // update below and, on Newton-accepted iterations, by the
         // recorded Picard linearization. With a direct Newton step
@@ -2673,7 +2668,8 @@ where
         let mut rest_elapsed = std::time::Duration::ZERO;
         let mut merge_elapsed = std::time::Duration::ZERO;
         let mut assemble_elapsed = std::time::Duration::ZERO;
-        let mut csr = sonium_solvers::CsrMatrix::from_raw_parts(0, 0, vec![0], Vec::new(), Vec::new());
+        let mut csr =
+            sonium_solvers::CsrMatrix::from_raw_parts(0, 0, vec![0], Vec::new(), Vec::new());
         let mut rhs: Vec<f64> = Vec::new();
         let mut picard_assembled = false;
         macro_rules! ensure_picard {
@@ -2742,8 +2738,7 @@ where
                 AssembledTangent::Triplets(triplets) => {
                     let csr = triplets.to_csr();
                     if newton_scatter_plan.is_none() {
-                        newton_scatter_plan =
-                            Some(CsrScatterPlan::from_triplets(&triplets, &csr));
+                        newton_scatter_plan = Some(CsrScatterPlan::from_triplets(&triplets, &csr));
                     }
                     csr
                 }
@@ -2796,7 +2791,6 @@ where
             };
         }
 
-
         // Damped Newton refinement: when enabled and the exact tangent was
         // assembled above, correct the state with `J * step = -R` instead of
         // the Picard update. The correction is committed only after a
@@ -2820,8 +2814,8 @@ where
                 .map(|value| value * value)
                 .sum::<f64>()
                 .sqrt();
-            let scale = *newton_residual_scale
-                .get_or_insert_with(|| residual_norm.max(f64::MIN_POSITIVE));
+            let scale =
+                *newton_residual_scale.get_or_insert_with(|| residual_norm.max(f64::MIN_POSITIVE));
             let relative_residual = residual_norm / scale;
             final_residual = relative_residual;
             // Newton refines to `newton_tolerance` when it is tighter than
@@ -2951,19 +2945,22 @@ where
             let step_solution = if relative_residual < config.newton_tolerance {
                 None
             } else {
-                let neg_residual: Vec<f64> =
-                    linearization.state_residual.iter().map(|value| -value).collect();
+                let neg_residual: Vec<f64> = linearization
+                    .state_residual
+                    .iter()
+                    .map(|value| -value)
+                    .collect();
                 // The Schur complement only feeds the iterative Newton
                 // paths; a direct tangent solve never reads it.
                 let newton_schur_csr = (!config.use_direct_solver
                     && (config.linear_solver_cpu_preconditioner
                         == LinearSolverCpuPreconditionerKind::JacobiSchur
-                    || config.linear_solver_cpu_preconditioner
-                        == LinearSolverCpuPreconditionerKind::IlutSchur
-                    || config.linear_solver_cpu_preconditioner
-                        == LinearSolverCpuPreconditionerKind::IluSchur
-                    || config.linear_solver_backend_preconditioner
-                        == BackendPreconditionerKind::JacobiSchur))
+                        || config.linear_solver_cpu_preconditioner
+                            == LinearSolverCpuPreconditionerKind::IlutSchur
+                        || config.linear_solver_cpu_preconditioner
+                            == LinearSolverCpuPreconditionerKind::IluSchur
+                        || config.linear_solver_backend_preconditioner
+                            == BackendPreconditionerKind::JacobiSchur))
                     .then(|| {
                         pressure_mass_schur_csr(
                             p_space,
@@ -3038,16 +3035,13 @@ where
                             // the Picard budget: a stalled attempt falls
                             // back to a direct tangent factorization.
                             let solve_config = sonium_solvers::GmresConfig {
-                                max_iterations: config
-                                    .linear_solver_max_iterations
-                                    .clamp(1, 50),
+                                max_iterations: config.linear_solver_max_iterations.clamp(1, 50),
                                 tolerance: config.linear_solver_tolerance,
                                 min_restart: Some(30),
                                 max_restart: Some(240),
                                 ..Default::default()
                             };
-                            let preconditioner =
-                                sonium_solvers::IluPreconditioner::from_csr(&csr);
+                            let preconditioner = sonium_solvers::IluPreconditioner::from_csr(&csr);
                             let result = sonium_solvers::gmres_preconditioned_with_guess(
                                 &newton_operator,
                                 &preconditioner,
@@ -3154,8 +3148,7 @@ where
                         None => None,
                     }
                 };
-                let krylov_step =
-                    solved.filter(|step| step.iter().all(|value| value.is_finite()));
+                let krylov_step = solved.filter(|step| step.iter().all(|value| value.is_finite()));
                 // Newton corrections are few (bounded by
                 // `max_newton_iterations`), and the Krylov solvers stall on
                 // the exact tangent for stiff immersed-boundary systems. On
@@ -3319,9 +3312,7 @@ where
                         .zip(step.iter().skip(n_v))
                         .map(|(base, delta)| base + trial_damping * delta)
                         .collect();
-                    if evaluate_trial(&trial_velocity, &trial_pressure)
-                        < base_residual
-                    {
+                    if evaluate_trial(&trial_velocity, &trial_pressure) < base_residual {
                         accepted_state = Some((trial_velocity, trial_pressure));
                     }
                     trial_damping *= 0.5;
@@ -3347,8 +3338,7 @@ where
                     }
                     if let (Some(mass), Some(positions)) = (&ptc_mass, &ptc_positions) {
                         if ptc_beta_unit <= 0.0 {
-                            let tangent_scale =
-                                csr_median_diagonal(&base_jacobian).unwrap_or(1.0);
+                            let tangent_scale = csr_median_diagonal(&base_jacobian).unwrap_or(1.0);
                             let mass_scale = csr_median_diagonal(mass).unwrap_or(1.0);
                             if mass_scale > 0.0 {
                                 ptc_beta_unit = tangent_scale / mass_scale;
@@ -3468,9 +3458,7 @@ where
                                 .collect();
                             // Same any-decrease bar as the
                             // mass-shifted search above.
-                            if evaluate_trial(&trial_velocity, &trial_pressure)
-                                < base_residual
-                            {
+                            if evaluate_trial(&trial_velocity, &trial_pressure) < base_residual {
                                 // Recorded only for the iteration's
                                 // profile print; the shift itself does
                                 // not carry into the next visit.
@@ -3539,8 +3527,8 @@ where
                 .map(|value| value * value)
                 .sum::<f64>()
                 .sqrt();
-            let scale = *newton_residual_scale
-                .get_or_insert_with(|| residual_norm.max(f64::MIN_POSITIVE));
+            let scale =
+                *newton_residual_scale.get_or_insert_with(|| residual_norm.max(f64::MIN_POSITIVE));
             let relative_residual = residual_norm / scale;
             final_residual = relative_residual;
             let newton_target = if config.newton_tolerance > 0.0 {
@@ -3556,8 +3544,7 @@ where
             let stagnated = newton_relative_history.len() > 10
                 && relative_residual
                     >= 0.8 * newton_relative_history[newton_relative_history.len() - 11]
-                && relative_residual
-                    < newton_relative_history[newton_relative_history.len() - 11];
+                && relative_residual < newton_relative_history[newton_relative_history.len() - 11];
             let window_stalled = newton_relative_history.len() > 10
                 && relative_residual
                     >= 0.9 * newton_relative_history[newton_relative_history.len() - 11];
@@ -4032,264 +4019,312 @@ where
             mesh.num_elements(),
             crate::parallelism::ELEMENTS_PER_THREAD,
             |element_index| {
-        let element = &mesh.elements[element_index];
-        let element_viscous_mu = viscous_mu_per_element
-            .map(|viscosities| viscosities[element_index])
-            .unwrap_or(viscous_mu);
-        let element_nu = element_viscous_mu / rho.max(f64::EPSILON);
-        let velocity_dofs = v_space.local_to_global(mesh, element_index);
-        let pressure_dofs = p_space.local_to_global(mesh, element_index);
-        let n_local_v = velocity_dofs.len();
-        let n_local = n_local_v + pressure_dofs.len();
-        let mut residual_local = vec![0.0; n_local];
-        let mut tangent_local = if want_tangent {
-            vec![0.0; n_local * n_local]
-        } else {
-            Vec::new()
-        };
-        let local_velocity: Vec<_> = velocity_dofs.iter().map(|&dof| velocity[dof]).collect();
-        let local_pressure: Vec<_> = pressure_dofs.iter().map(|&dof| pressure[dof]).collect();
-        let quadrature = QuadratureRule::new(element.element_type, quad_order);
+                let element = &mesh.elements[element_index];
+                let element_viscous_mu = viscous_mu_per_element
+                    .map(|viscosities| viscosities[element_index])
+                    .unwrap_or(viscous_mu);
+                let element_nu = element_viscous_mu / rho.max(f64::EPSILON);
+                let velocity_dofs = v_space.local_to_global(mesh, element_index);
+                let pressure_dofs = p_space.local_to_global(mesh, element_index);
+                let n_local_v = velocity_dofs.len();
+                let n_local = n_local_v + pressure_dofs.len();
+                let mut residual_local = vec![0.0; n_local];
+                let mut tangent_local = if want_tangent {
+                    vec![0.0; n_local * n_local]
+                } else {
+                    Vec::new()
+                };
+                let local_velocity: Vec<_> =
+                    velocity_dofs.iter().map(|&dof| velocity[dof]).collect();
+                let local_pressure: Vec<_> =
+                    pressure_dofs.iter().map(|&dof| pressure[dof]).collect();
+                let quadrature = QuadratureRule::new(element.element_type, quad_order);
 
-        for point in quadrature.iter() {
-            let v_test =
-                v_space.tabulate(mesh, element_index, point.xi(), point.eta(), point.zeta());
-            let p_test =
-                p_space.tabulate(mesh, element_index, point.xi(), point.eta(), point.zeta());
-            let weight = point.weight * v_test.det_j;
-            let u = velocity_at(&v_test, &local_velocity, dim);
-            let grad_u = velocity_gradient_at(&v_test, &local_velocity, dim);
-            let pressure_gradient = (0..dim)
-                .map(|direction| {
-                    local_pressure
-                        .iter()
-                        .enumerate()
-                        .map(|(j, value)| p_test.grad(j, direction) * value)
-                        .sum::<f64>()
-                })
-                .collect::<Vec<_>>();
-            let pressure_value = local_pressure
-                .iter()
-                .enumerate()
-                .map(|(j, value)| p_test.value(j) * value)
-                .sum::<f64>();
-            let velocity_magnitude = u.iter().map(|value| value * value).sum::<f64>().sqrt();
-            let h = if dim == 2 {
-                (2.0 * v_test.det_j).sqrt()
-            } else {
-                (6.0 * v_test.det_j).cbrt()
-            };
-            let tau =
-                super::stabilisation::stabilisation_tau(velocity_magnitude, h, element_nu, None);
-            let tau_lsic = tau * velocity_magnitude * h * 0.5;
-            let force = body_force_fn(v_test.physical_coords, point_velocity(&u, dim));
-            let force_jacobian = if want_tangent {
-                body_force_jacobian_fn(v_test.physical_coords, point_velocity(&u, dim))
-            } else {
-                [[0.0; 3]; 3]
-            };
-
-            let div_u = (0..dim)
-                .map(|component| grad_u[component][component])
-                .sum::<f64>();
-            for (local_row, &_global_row) in velocity_dofs.iter().enumerate() {
-                let component = local_row % dim;
-                let test_value = v_test.vector_value(local_row, component);
-                let test_gradient = (0..dim)
-                    .map(|direction| v_test.grad(local_row, direction))
-                    .collect::<Vec<_>>();
-                let streamline_test = dot(&u, &test_gradient);
-                let advected_component = dot(&u, &grad_u[component]);
-                let divergence_test = test_gradient[component];
-                let viscous_residual = grad_u[component]
-                    .iter()
-                    .zip(&test_gradient)
-                    .map(|(a, b)| a * b)
-                    .sum::<f64>();
-                let mut row_residual = element_viscous_mu * viscous_residual
-                    + rho * advected_component * test_value
-                    - test_value * force.get(component).copied().unwrap_or(0.0)
-                    - pressure_value * divergence_test;
-
-                if config.use_residual_stabilisation {
-                    row_residual += rho * tau_lsic * divergence_test * div_u;
-                    row_residual += rho * tau * streamline_test * advected_component;
-                    row_residual += tau * streamline_test * pressure_gradient[component];
-                    row_residual -=
-                        tau * streamline_test * force.get(component).copied().unwrap_or(0.0);
-                }
-                residual_local[local_row] += row_residual * weight;
-
-                if want_tangent {
-                for (local_column, &global_column) in velocity_dofs.iter().enumerate() {
-                    let column_component = local_column % dim;
-                    let delta_u = (0..dim)
-                        .map(|direction| v_test.vector_value(local_column, direction))
-                        .collect::<Vec<_>>();
-                    let mut delta_grad = vec![vec![0.0; dim]; dim];
-                    for (direction, slot) in delta_grad[column_component].iter_mut().enumerate() {
-                        *slot = v_test.grad(local_column, direction);
-                    }
-                    let delta_advected =
-                        dot(&delta_u, &grad_u[component]) + dot(&u, &delta_grad[component]);
-                    let delta_streamline_test = dot(&delta_u, &test_gradient);
-                    let delta_velocity_magnitude = if velocity_magnitude > f64::EPSILON {
-                        dot(&u, &delta_u) / velocity_magnitude
-                    } else {
-                        0.0
-                    };
-                    let delta_mu = if viscous_mu_per_element.is_some() {
-                        0.0
-                    } else {
-                        viscous_mu_gradient
-                            .and_then(|gradient| gradient.get(global_column).copied())
-                            .unwrap_or(0.0)
-                    };
-                    let delta_nu = delta_mu / rho.max(f64::EPSILON);
-                    let delta_tau = tau_directional_derivative(tau, h, &u, &delta_u)
-                        + tau_viscosity_directional_derivative(tau, h, element_nu, delta_nu);
-                    let delta_tau_lsic =
-                        h * 0.5 * (delta_tau * velocity_magnitude + tau * delta_velocity_magnitude);
-                    let delta_divergence = delta_grad
-                        .iter()
-                        .enumerate()
-                        .map(|(c, row)| row[c])
-                        .sum::<f64>();
-                    let delta_force = (0..dim)
-                        .map(|output| {
-                            (0..dim)
-                                .map(|input| force_jacobian[output][input] * delta_u[input])
+                for point in quadrature.iter() {
+                    let v_test = v_space.tabulate(
+                        mesh,
+                        element_index,
+                        point.xi(),
+                        point.eta(),
+                        point.zeta(),
+                    );
+                    let p_test = p_space.tabulate(
+                        mesh,
+                        element_index,
+                        point.xi(),
+                        point.eta(),
+                        point.zeta(),
+                    );
+                    let weight = point.weight * v_test.det_j;
+                    let u = velocity_at(&v_test, &local_velocity, dim);
+                    let grad_u = velocity_gradient_at(&v_test, &local_velocity, dim);
+                    let pressure_gradient = (0..dim)
+                        .map(|direction| {
+                            local_pressure
+                                .iter()
+                                .enumerate()
+                                .map(|(j, value)| p_test.grad(j, direction) * value)
                                 .sum::<f64>()
                         })
                         .collect::<Vec<_>>();
-                    let force_component = force.get(component).copied().unwrap_or(0.0);
-                    let delta_force_component = delta_force.get(component).copied().unwrap_or(0.0);
-                    let mut value = element_viscous_mu
-                        * dot(&delta_grad[component], &test_gradient)
-                        + delta_mu * viscous_residual
-                        + rho * delta_advected * test_value
-                        - test_value * delta_force_component;
-
-                    if config.use_residual_stabilisation {
-                        value += rho
-                            * (delta_tau_lsic * divergence_test * div_u
-                                + tau_lsic * divergence_test * delta_divergence);
-                        value += rho
-                            * (delta_tau * streamline_test * advected_component
-                                + tau * delta_streamline_test * advected_component
-                                + tau * streamline_test * delta_advected);
-                        value += delta_tau * streamline_test * pressure_gradient[component]
-                            + tau * delta_streamline_test * pressure_gradient[component];
-                        value -= delta_tau * streamline_test * force_component
-                            + tau * delta_streamline_test * force_component
-                            + tau * streamline_test * delta_force_component;
-                    }
-                    tangent_local[local_row * n_local + local_column] += value * weight;
-                }
-
-                for (local_column, &_global_column) in pressure_dofs.iter().enumerate() {
-                    let pressure_basis = p_test.value(local_column);
-                    let pressure_gradient_basis = (0..dim)
-                        .map(|direction| p_test.grad(local_column, direction))
-                        .collect::<Vec<_>>();
-                    let mut value = -pressure_basis * divergence_test;
-                    if config.use_residual_stabilisation {
-                        value += tau * streamline_test * pressure_gradient_basis[component];
-                    }
-                    tangent_local[local_row * n_local + n_local_v + local_column] += value * weight;
-                }
-                }
-            }
-
-            for (local_row, &_global_row) in pressure_dofs.iter().enumerate() {
-                let test_value = p_test.value(local_row);
-                let test_gradient = (0..dim)
-                    .map(|direction| p_test.grad(local_row, direction))
-                    .collect::<Vec<_>>();
-                let grad_dot_advected = (0..dim)
-                    .map(|component| test_gradient[component] * dot(&u, &grad_u[component]))
-                    .sum::<f64>();
-                let grad_dot_force = test_gradient
-                    .iter()
-                    .enumerate()
-                    .map(|(component, value)| value * force.get(component).copied().unwrap_or(0.0))
-                    .sum::<f64>();
-                let mut row_residual = -test_value * div_u;
-                if config.use_residual_stabilisation {
-                    row_residual += -tau * grad_dot_advected
-                        - tau / rho.max(f64::EPSILON)
-                            * grad_dot_pressure(&test_gradient, &pressure_gradient)
-                        + tau / rho.max(f64::EPSILON) * grad_dot_force;
-                }
-                residual_local[n_local_v + local_row] += row_residual * weight;
-
-                if want_tangent {
-                for (local_column, &_global_column) in velocity_dofs.iter().enumerate() {
-                    let column_component = local_column % dim;
-                    let delta_u = (0..dim)
-                        .map(|direction| v_test.vector_value(local_column, direction))
-                        .collect::<Vec<_>>();
-                    let mut delta_grad = vec![vec![0.0; dim]; dim];
-                    for (direction, slot) in delta_grad[column_component].iter_mut().enumerate() {
-                        *slot = v_test.grad(local_column, direction);
-                    }
-                    let delta_velocity_magnitude = if velocity_magnitude > f64::EPSILON {
-                        dot(&u, &delta_u) / velocity_magnitude
-                    } else {
-                        0.0
-                    };
-                    let delta_tau = tau_directional_derivative(tau, h, &u, &delta_u);
-                    let delta_divergence = delta_grad
+                    let pressure_value = local_pressure
                         .iter()
                         .enumerate()
-                        .map(|(c, row)| row[c])
+                        .map(|(j, value)| p_test.value(j) * value)
                         .sum::<f64>();
-                    let delta_advected = (0..dim)
-                        .map(|component| {
-                            test_gradient[component]
-                                * (dot(&delta_u, &grad_u[component])
-                                    + dot(&u, &delta_grad[component]))
-                        })
-                        .sum::<f64>();
-                    let delta_force_dot = (0..dim)
-                        .map(|output| {
-                            test_gradient[output]
-                                * (0..dim)
-                                    .map(|input| force_jacobian[output][input] * delta_u[input])
-                                    .sum::<f64>()
-                        })
-                        .sum::<f64>();
-                    let mut value = -test_value * delta_divergence;
-                    if config.use_residual_stabilisation {
-                        value += -delta_tau * grad_dot_advected - tau * delta_advected;
-                        value += -delta_tau / rho.max(f64::EPSILON)
-                            * grad_dot_pressure(&test_gradient, &pressure_gradient);
-                        value += (delta_tau * grad_dot_force + tau * delta_force_dot)
-                            / rho.max(f64::EPSILON);
-                        // Keep the local magnitude derivative explicit in the
-                        // expression above; this variable documents that the
-                        // state dependence is intentionally velocity-only.
-                        let _ = delta_velocity_magnitude;
-                    }
-                    tangent_local[(n_local_v + local_row) * n_local + local_column] += value * weight;
-                }
-
-                for (local_column, &_global_column) in pressure_dofs.iter().enumerate() {
-                    let pressure_gradient_basis = (0..dim)
-                        .map(|direction| p_test.grad(local_column, direction))
-                        .collect::<Vec<_>>();
-                    let value = if config.use_residual_stabilisation {
-                        -tau / rho.max(f64::EPSILON)
-                            * grad_dot_pressure(&test_gradient, &pressure_gradient_basis)
+                    let velocity_magnitude =
+                        u.iter().map(|value| value * value).sum::<f64>().sqrt();
+                    let h = if dim == 2 {
+                        (2.0 * v_test.det_j).sqrt()
                     } else {
-                        0.0
+                        (6.0 * v_test.det_j).cbrt()
                     };
-                    tangent_local[(n_local_v + local_row) * n_local + n_local_v + local_column] +=
-                        value * weight;
+                    let tau = super::stabilisation::stabilisation_tau(
+                        velocity_magnitude,
+                        h,
+                        element_nu,
+                        None,
+                    );
+                    let tau_lsic = tau * velocity_magnitude * h * 0.5;
+                    let force = body_force_fn(v_test.physical_coords, point_velocity(&u, dim));
+                    let force_jacobian = if want_tangent {
+                        body_force_jacobian_fn(v_test.physical_coords, point_velocity(&u, dim))
+                    } else {
+                        [[0.0; 3]; 3]
+                    };
+
+                    let div_u = (0..dim)
+                        .map(|component| grad_u[component][component])
+                        .sum::<f64>();
+                    for (local_row, &_global_row) in velocity_dofs.iter().enumerate() {
+                        let component = local_row % dim;
+                        let test_value = v_test.vector_value(local_row, component);
+                        let test_gradient = (0..dim)
+                            .map(|direction| v_test.grad(local_row, direction))
+                            .collect::<Vec<_>>();
+                        let streamline_test = dot(&u, &test_gradient);
+                        let advected_component = dot(&u, &grad_u[component]);
+                        let divergence_test = test_gradient[component];
+                        let viscous_residual = grad_u[component]
+                            .iter()
+                            .zip(&test_gradient)
+                            .map(|(a, b)| a * b)
+                            .sum::<f64>();
+                        let mut row_residual = element_viscous_mu * viscous_residual
+                            + rho * advected_component * test_value
+                            - test_value * force.get(component).copied().unwrap_or(0.0)
+                            - pressure_value * divergence_test;
+
+                        if config.use_residual_stabilisation {
+                            row_residual += rho * tau_lsic * divergence_test * div_u;
+                            row_residual += rho * tau * streamline_test * advected_component;
+                            row_residual += tau * streamline_test * pressure_gradient[component];
+                            row_residual -= tau
+                                * streamline_test
+                                * force.get(component).copied().unwrap_or(0.0);
+                        }
+                        residual_local[local_row] += row_residual * weight;
+
+                        if want_tangent {
+                            for (local_column, &global_column) in velocity_dofs.iter().enumerate() {
+                                let column_component = local_column % dim;
+                                let delta_u = (0..dim)
+                                    .map(|direction| v_test.vector_value(local_column, direction))
+                                    .collect::<Vec<_>>();
+                                let mut delta_grad = vec![vec![0.0; dim]; dim];
+                                for (direction, slot) in
+                                    delta_grad[column_component].iter_mut().enumerate()
+                                {
+                                    *slot = v_test.grad(local_column, direction);
+                                }
+                                let delta_advected = dot(&delta_u, &grad_u[component])
+                                    + dot(&u, &delta_grad[component]);
+                                let delta_streamline_test = dot(&delta_u, &test_gradient);
+                                let delta_velocity_magnitude = if velocity_magnitude > f64::EPSILON
+                                {
+                                    dot(&u, &delta_u) / velocity_magnitude
+                                } else {
+                                    0.0
+                                };
+                                let delta_mu = if viscous_mu_per_element.is_some() {
+                                    0.0
+                                } else {
+                                    viscous_mu_gradient
+                                        .and_then(|gradient| gradient.get(global_column).copied())
+                                        .unwrap_or(0.0)
+                                };
+                                let delta_nu = delta_mu / rho.max(f64::EPSILON);
+                                let delta_tau = tau_directional_derivative(tau, h, &u, &delta_u)
+                                    + tau_viscosity_directional_derivative(
+                                        tau, h, element_nu, delta_nu,
+                                    );
+                                let delta_tau_lsic = h
+                                    * 0.5
+                                    * (delta_tau * velocity_magnitude
+                                        + tau * delta_velocity_magnitude);
+                                let delta_divergence = delta_grad
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(c, row)| row[c])
+                                    .sum::<f64>();
+                                let delta_force = (0..dim)
+                                    .map(|output| {
+                                        (0..dim)
+                                            .map(|input| {
+                                                force_jacobian[output][input] * delta_u[input]
+                                            })
+                                            .sum::<f64>()
+                                    })
+                                    .collect::<Vec<_>>();
+                                let force_component = force.get(component).copied().unwrap_or(0.0);
+                                let delta_force_component =
+                                    delta_force.get(component).copied().unwrap_or(0.0);
+                                let mut value = element_viscous_mu
+                                    * dot(&delta_grad[component], &test_gradient)
+                                    + delta_mu * viscous_residual
+                                    + rho * delta_advected * test_value
+                                    - test_value * delta_force_component;
+
+                                if config.use_residual_stabilisation {
+                                    value += rho
+                                        * (delta_tau_lsic * divergence_test * div_u
+                                            + tau_lsic * divergence_test * delta_divergence);
+                                    value += rho
+                                        * (delta_tau * streamline_test * advected_component
+                                            + tau * delta_streamline_test * advected_component
+                                            + tau * streamline_test * delta_advected);
+                                    value +=
+                                        delta_tau * streamline_test * pressure_gradient[component]
+                                            + tau
+                                                * delta_streamline_test
+                                                * pressure_gradient[component];
+                                    value -= delta_tau * streamline_test * force_component
+                                        + tau * delta_streamline_test * force_component
+                                        + tau * streamline_test * delta_force_component;
+                                }
+                                tangent_local[local_row * n_local + local_column] += value * weight;
+                            }
+
+                            for (local_column, &_global_column) in pressure_dofs.iter().enumerate()
+                            {
+                                let pressure_basis = p_test.value(local_column);
+                                let pressure_gradient_basis = (0..dim)
+                                    .map(|direction| p_test.grad(local_column, direction))
+                                    .collect::<Vec<_>>();
+                                let mut value = -pressure_basis * divergence_test;
+                                if config.use_residual_stabilisation {
+                                    value +=
+                                        tau * streamline_test * pressure_gradient_basis[component];
+                                }
+                                tangent_local[local_row * n_local + n_local_v + local_column] +=
+                                    value * weight;
+                            }
+                        }
+                    }
+
+                    for (local_row, &_global_row) in pressure_dofs.iter().enumerate() {
+                        let test_value = p_test.value(local_row);
+                        let test_gradient = (0..dim)
+                            .map(|direction| p_test.grad(local_row, direction))
+                            .collect::<Vec<_>>();
+                        let grad_dot_advected = (0..dim)
+                            .map(|component| test_gradient[component] * dot(&u, &grad_u[component]))
+                            .sum::<f64>();
+                        let grad_dot_force = test_gradient
+                            .iter()
+                            .enumerate()
+                            .map(|(component, value)| {
+                                value * force.get(component).copied().unwrap_or(0.0)
+                            })
+                            .sum::<f64>();
+                        let mut row_residual = -test_value * div_u;
+                        if config.use_residual_stabilisation {
+                            row_residual += -tau * grad_dot_advected
+                                - tau / rho.max(f64::EPSILON)
+                                    * grad_dot_pressure(&test_gradient, &pressure_gradient)
+                                + tau / rho.max(f64::EPSILON) * grad_dot_force;
+                        }
+                        residual_local[n_local_v + local_row] += row_residual * weight;
+
+                        if want_tangent {
+                            for (local_column, &_global_column) in velocity_dofs.iter().enumerate()
+                            {
+                                let column_component = local_column % dim;
+                                let delta_u = (0..dim)
+                                    .map(|direction| v_test.vector_value(local_column, direction))
+                                    .collect::<Vec<_>>();
+                                let mut delta_grad = vec![vec![0.0; dim]; dim];
+                                for (direction, slot) in
+                                    delta_grad[column_component].iter_mut().enumerate()
+                                {
+                                    *slot = v_test.grad(local_column, direction);
+                                }
+                                let delta_velocity_magnitude = if velocity_magnitude > f64::EPSILON
+                                {
+                                    dot(&u, &delta_u) / velocity_magnitude
+                                } else {
+                                    0.0
+                                };
+                                let delta_tau = tau_directional_derivative(tau, h, &u, &delta_u);
+                                let delta_divergence = delta_grad
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(c, row)| row[c])
+                                    .sum::<f64>();
+                                let delta_advected = (0..dim)
+                                    .map(|component| {
+                                        test_gradient[component]
+                                            * (dot(&delta_u, &grad_u[component])
+                                                + dot(&u, &delta_grad[component]))
+                                    })
+                                    .sum::<f64>();
+                                let delta_force_dot = (0..dim)
+                                    .map(|output| {
+                                        test_gradient[output]
+                                            * (0..dim)
+                                                .map(|input| {
+                                                    force_jacobian[output][input] * delta_u[input]
+                                                })
+                                                .sum::<f64>()
+                                    })
+                                    .sum::<f64>();
+                                let mut value = -test_value * delta_divergence;
+                                if config.use_residual_stabilisation {
+                                    value += -delta_tau * grad_dot_advected - tau * delta_advected;
+                                    value += -delta_tau / rho.max(f64::EPSILON)
+                                        * grad_dot_pressure(&test_gradient, &pressure_gradient);
+                                    value += (delta_tau * grad_dot_force + tau * delta_force_dot)
+                                        / rho.max(f64::EPSILON);
+                                    // Keep the local magnitude derivative explicit in the
+                                    // expression above; this variable documents that the
+                                    // state dependence is intentionally velocity-only.
+                                    let _ = delta_velocity_magnitude;
+                                }
+                                tangent_local[(n_local_v + local_row) * n_local + local_column] +=
+                                    value * weight;
+                            }
+
+                            for (local_column, &_global_column) in pressure_dofs.iter().enumerate()
+                            {
+                                let pressure_gradient_basis = (0..dim)
+                                    .map(|direction| p_test.grad(local_column, direction))
+                                    .collect::<Vec<_>>();
+                                let value = if config.use_residual_stabilisation {
+                                    -tau / rho.max(f64::EPSILON)
+                                        * grad_dot_pressure(
+                                            &test_gradient,
+                                            &pressure_gradient_basis,
+                                        )
+                                } else {
+                                    0.0
+                                };
+                                tangent_local[(n_local_v + local_row) * n_local
+                                    + n_local_v
+                                    + local_column] += value * weight;
+                            }
+                        }
+                    }
                 }
-                }
-            }
-        }
                 (residual_local, tangent_local, velocity_dofs, pressure_dofs)
             },
         );
@@ -6999,19 +7034,59 @@ fn solve_cached_bdf_linear_system(
             let pressure_schur = backend_schur;
             if progress {
                 eprintln!(
-                    "BDF_LINEAR_SETUP solver=backend-gmres rows={} nnz={} reused=false",
+                    "BDF_LINEAR_BEGIN solver=backend-gmres rows={} nnz={}",
                     csr.num_rows,
                     csr.values.len()
                 );
             }
-            let (solution, actual_backend, iterations) = solve_iterative_linear_system(
-                config,
-                csr,
-                b,
-                Some(x0),
-                velocity_block_size,
-                pressure_schur.as_ref(),
-            )?;
+            #[cfg(feature = "cuda")]
+            let retained = if resolved_backend == LinearSolverBackend::Cuda
+                && config.linear_solver_kind == LinearSolverKind::F64
+            {
+                Some(super::bdf_cuda::solve_cached(
+                    workspace,
+                    config,
+                    csr,
+                    b,
+                    x0,
+                    velocity_block_size,
+                    pressure_schur.as_ref(),
+                ))
+            } else {
+                None
+            };
+            #[cfg(not(feature = "cuda"))]
+            let retained: Option<Result<(Vec<f64>, usize, bool), String>> = None;
+            let (solution, actual_backend, iterations, setup_reused) = match retained {
+                Some(Ok((solution, iterations, reused))) => {
+                    (solution, LinearSolverBackend::Cuda, iterations, reused)
+                }
+                Some(Err(error)) => {
+                    eprintln!(
+                        "WARNING: retained CUDA BDF solve failed ({error}); falling back to CPU"
+                    );
+                    let (solution, _, iterations) = solve_iterative_cpu(
+                        config,
+                        csr,
+                        b,
+                        Some(x0),
+                        velocity_block_size,
+                        pressure_schur.as_ref(),
+                    )?;
+                    (solution, LinearSolverBackend::Cpu, iterations, false)
+                }
+                None => {
+                    let (solution, actual_backend, iterations) = solve_iterative_linear_system(
+                        config,
+                        csr,
+                        b,
+                        Some(x0),
+                        velocity_block_size,
+                        pressure_schur.as_ref(),
+                    )?;
+                    (solution, actual_backend, iterations, false)
+                }
+            };
             let solver = if matches!(actual_backend, LinearSolverBackend::Cpu) {
                 match config.linear_solver_cpu_preconditioner {
                     LinearSolverCpuPreconditionerKind::Ilu => BdfLinearSolverKind::GmresIlu,
@@ -7042,7 +7117,7 @@ fn solve_cached_bdf_linear_system(
                     BdfLinearSolverKind::Direct => "direct",
                 };
                 eprintln!(
-                    "BDF_LINEAR_SOLVE_DONE solver={solver_name} iterations={iterations} residual={true_relative_residual:.12e} converged={converged} reused=false"
+                    "BDF_LINEAR_SOLVE_DONE solver={solver_name} iterations={iterations} residual={true_relative_residual:.12e} converged={converged} reused={setup_reused}"
                 );
             }
             return converged.then_some((
@@ -7052,7 +7127,7 @@ fn solve_cached_bdf_linear_system(
                     resolved_linear_solver_backend: actual_backend,
                     iterations,
                     true_relative_residual,
-                    setup_reused: false,
+                    setup_reused,
                     converged,
                 },
             ));
@@ -8079,24 +8154,20 @@ mod tests {
         let mut small_symbolic = SteadyDirectSymbolics::default();
         let small = factorize_steady_direct(&diagonal(8), &mut small_symbolic, 0.1)
             .expect("small diagonal system must factorize");
-        assert!(matches!(
-            small,
-            SteadyDirectFactorization::Supernodal(_)
-        ));
+        assert!(matches!(small, SteadyDirectFactorization::Supernodal(_)));
         let small_solution = small.solve(&rhs).expect("small diagonal solve");
         for (actual, expected) in small_solution.iter().zip(&rhs) {
             assert!((actual - expected / 2.0).abs() <= 1.0e-12);
         }
 
         let large_n = EXACT_MULTIFRONTAL_MIN_ROWS + 4;
-        let large_rhs: Vec<f64> = (0..large_n).map(|index| (index % 17) as f64 - 8.0).collect();
+        let large_rhs: Vec<f64> = (0..large_n)
+            .map(|index| (index % 17) as f64 - 8.0)
+            .collect();
         let mut large_symbolic = SteadyDirectSymbolics::default();
         let large = factorize_steady_direct(&diagonal(large_n), &mut large_symbolic, 0.1)
             .expect("large diagonal system must factorize");
-        assert!(matches!(
-            large,
-            SteadyDirectFactorization::Multifrontal(_)
-        ));
+        assert!(matches!(large, SteadyDirectFactorization::Multifrontal(_)));
         assert!(
             large_symbolic.lu.is_none() && large_symbolic.multifrontal.is_some(),
             "the multifrontal path must cache its tree, not the supernodal analysis"

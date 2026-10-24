@@ -13,6 +13,8 @@
 //! - **GMRES+Deflated+ShiftedLaplacian**: Deflated GMRES with shifted-Laplacian (best for clustered eigenvalues)
 
 mod deflation;
+#[cfg(feature = "cuda")]
+pub mod device;
 pub mod explicit_dynamics;
 pub mod implicit_dynamics;
 pub mod matrix_free;
@@ -1066,7 +1068,11 @@ pub fn solve_deflated_with_subspace(
 
 /// Solve a Helmholtz problem directly from CSR matrix and RHS
 ///
-/// This is useful when you have pre-assembled sparse matrices.
+/// This CPU convenience function accepts preassembled sparse matrices.
+/// For retained CUDA execution, enable `cuda` and prepare
+/// `device::CudaConfiguredFemSolveSession::try_from_csr` with an explicit
+/// workload and memory pool. That session retains operator/preconditioner/Krylov
+/// state and exposes device RHS and numeric updates between solves.
 pub fn solve_csr(
     csr: &CsrMatrix<Complex64>,
     rhs: &[Complex64],

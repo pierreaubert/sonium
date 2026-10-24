@@ -38,3 +38,9 @@ mod nonlinear;
 pub use forms::*;
 pub use materials::*;
 pub use nonlinear::*;
+
+#[cfg(feature = "cuda")]
+mod device_field;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use device_field::CudaMagneticCentroidField;
