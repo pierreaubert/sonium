@@ -27,6 +27,13 @@ use sonium_compute::{CudaBackend, CudaBemFieldOperatorC64, MemoryPool};
 
 use crate::core::parallel::{BEM_QUADRATURE_PAIRS_PER_THREAD, gated_map, gated_map_indexed};
 
+#[cfg(feature = "cuda")]
+#[path = "pressure_cuda_device.rs"]
+mod cuda_device;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use cuda_device::CudaBemFieldWorkspace;
+
 /// Field evaluation result at a single point
 #[derive(Debug, Clone)]
 pub struct FieldPoint {
@@ -387,7 +394,7 @@ pub fn compute_scattered_field_cuda_checked(
 }
 
 #[cfg(feature = "cuda")]
-fn point_on_flat_triangle(point: [f64; 3], vertices: [[f64; 3]; 3]) -> bool {
+pub(crate) fn point_on_flat_triangle(point: [f64; 3], vertices: [[f64; 3]; 3]) -> bool {
     let edge0 = [
         vertices[1][0] - vertices[0][0],
         vertices[1][1] - vertices[0][1],

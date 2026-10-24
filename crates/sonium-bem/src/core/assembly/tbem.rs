@@ -3688,6 +3688,11 @@ mod cuda_path {
         BemRegularPairOutF64, BemRegularPairOutRealF64, CudaBackend, CudaBuffer, DeviceBufferLike,
     };
 
+    mod device {
+        include!("tbem_device.rs");
+    }
+    pub use device::{CudaTbemGmresSession, CudaTbemDeviceSystem, CudaTbemSolveError, CudaTbemSolveReport, CudaTbemSolveSession};
+
     /// Typed failures from the CUDA constant-panel assembly seam.
     #[derive(Debug, thiserror::Error)]
     pub enum CudaTbemAssemblyError {
@@ -3754,6 +3759,8 @@ mod cuda_path {
     /// production `for_ka` policy at construction. Callers must rebuild the
     /// workspace when a frequency step changes that quadrature schedule.
     pub struct CudaTbemAssemblyWorkspace {
+        device_system: Option<CudaTbemDeviceSystem>,
+        quadrature_schedule: Vec<[usize; 4]>,
         geometry_key: u64,
         all_coords: Vec<DenseMatrix<f64>>,
         routes: Vec<Vec<PairRoute>>,
@@ -4000,6 +4007,8 @@ mod cuda_path {
                 .map_err(CudaTbemAssemblyError::Backend)?;
 
             Ok(Self {
+                device_system: None,
+                quadrature_schedule: device::quadrature_schedule(elements, physics),
                 geometry_key: cuda_tbem_geometry_key(elements, nodes),
                 all_coords,
                 routes,
@@ -5421,7 +5430,7 @@ mod cuda_path {
 
 #[cfg(feature = "cuda")]
 pub use cuda_path::{
-    CudaTbemAssemblyError, CudaTbemAssemblyWorkspace, build_quad4_cuda_regular_quadrature,
+    CudaTbemGmresSession, CudaTbemAssemblyError, CudaTbemAssemblyWorkspace, CudaTbemDeviceSystem, CudaTbemSolveError, CudaTbemSolveReport, CudaTbemSolveSession, build_quad4_cuda_regular_quadrature,
     build_tbem_system_with_beta_cuda, build_tbem_system_with_beta_cuda_checked,
     build_tri3_cuda_singular_quadrature,
 };

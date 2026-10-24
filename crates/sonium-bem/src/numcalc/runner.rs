@@ -1,6 +1,7 @@
 //! Run a Mesh2HRTF project across all frequencies and capture the surface
 //! pressure plus optional evaluation-grid pressure for each one.
 
+// Rust guideline compliant 2026-02-21
 use std::fs;
 use std::path::Path;
 
@@ -15,9 +16,29 @@ use crate::core::types::{BasisOrder, ElementProperty};
 
 use super::project::NumCalcProject;
 
+/// Explicit execution route used by the NumCalc producer.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SweepExecution {
+    /// CPU assembly and GMRES with CPU field evaluation.
+    Cpu,
+    /// CUDA TBEM, GMRES and Jacobi; exported solutions feed CPU field evaluation.
+    CudaJacobiWithCpuFields,
+    /// CUDA TBEM, GMRES, Jacobi and off-surface fields; host JSON export only.
+    CudaJacobi,
+}
+
+struct SolvedSweep {
+    solutions: Vec<Vec<Complex64>>,
+    fields: Option<Vec<[f64; 2]>>,
+}
+
 /// One row per frequency × eval-point complex pressure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SweepOutput {
+    /// Execution provenance; absent when reading older output files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<SweepExecution>,
     /// Solve frequencies (Hz).
     pub frequencies: Vec<f64>,
     /// Speed of sound (m/s) used for the sweep.
@@ -55,6 +76,151 @@ pub fn run_project(
     max_iterations: usize,
     tolerance: f64,
 ) -> Result<SweepOutput, BemError> {
+    run_project_using(
+        project,
+        freq_start_idx,
+        freq_end_idx,
+        max_iterations,
+        tolerance,
+        SweepExecution::Cpu,
+        |elements, incident, config| {
+            frequency_sweep(
+                elements,
+                &project.nodes,
+                incident,
+                config,
+                AssemblyMethod::Tbem,
+                project.speed_of_sound,
+                project.density,
+            )
+            .map(|sweep| SolvedSweep {
+                solutions: sweep.solutions,
+                fields: None,
+            })
+        },
+    )
+}
+
+/// Run a NumCalc project using retained native CUDA TBEM and point Jacobi.
+///
+/// The caller supplies a pool reused throughout the sweep. Prepared boundary
+/// data and the CPU producer's frequency/configuration conventions are preserved.
+/// Field evaluation consumes device solutions before explicit JSON export.
+/// Evaluation grids require off-surface points and velocity/impedance traces.
+///
+/// # Errors
+/// Rejects unsupported geometry, dense systems with 1000 or more DOFs, invalid
+/// controls and nonconvergence. Propagates CUDA failures without CPU fallback.
+#[cfg(feature = "cuda")]
+pub fn run_project_cuda_jacobi(
+    project: &NumCalcProject,
+    freq_start_idx: Option<usize>,
+    freq_end_idx: Option<usize>,
+    max_iterations: usize,
+    tolerance: f64,
+    pool: &sonium_compute::MemoryPool<sonium_compute::CudaBackend>,
+) -> Result<SweepOutput, BemError> {
+    run_project_using(
+        project,
+        freq_start_idx,
+        freq_end_idx,
+        max_iterations,
+        tolerance,
+        SweepExecution::CudaJacobi,
+        |elements, incident, config| {
+            use crate::core::bem_solver::pack_incident_sources;
+            use crate::core::postprocess::pressure::CudaBemFieldWorkspace;
+            use sonium_compute::Backend;
+            config.validate()?;
+            let physics = project
+                .try_physics_at(config.frequencies.first().copied().unwrap_or(1.0))
+                .map_err(|e| BemError::InvalidParameters(e.to_string()))?;
+            if config.frequencies.is_empty() {
+                return Ok(SolvedSweep {
+                    solutions: Vec::new(),
+                    fields: Some(Vec::new()),
+                });
+            }
+            if elements.len() >= 1000 {
+                return Err(BemError::InvalidParameters(
+                    "dense CUDA NumCalc requires fewer than 1000 surface DOFs".into(),
+                ));
+            }
+            let points = project.evaluation_centers();
+            let failed = |e: String| BemError::SolverFailed(e);
+            let mut field = if points.is_empty() {
+                None
+            } else {
+                Some(CudaBemFieldWorkspace::try_new(
+                    pool,
+                    elements,
+                    &project.nodes,
+                    &points,
+                )?)
+            };
+            let mut packed = pack_incident_sources(incident);
+            let source_count = packed.len() / 6;
+            packed.resize(packed.len().max(6), 0.0);
+            let mut sources = pool
+                .try_alloc::<f64>(packed.len())
+                .map_err(|e| failed(e.to_string()))?;
+            pool.backend()
+                .try_copy_h2d(&packed, sources.raw_mut())
+                .map_err(|e| failed(e.to_string()))?;
+            let mut solutions = Vec::with_capacity(config.frequencies.len());
+            let mut fields = Vec::with_capacity(points.len() * config.frequencies.len());
+            crate::core::solver::frequency_sweep::frequency_sweep_cuda_tbem_jacobi_device(
+                elements,
+                &project.nodes,
+                incident,
+                config,
+                &physics,
+                None,
+                pool,
+                |physics, _, pressure| {
+                    if let Some(field) = field.as_mut() {
+                        let output = field.try_evaluate(
+                            pool.backend(),
+                            pressure,
+                            physics,
+                            sources.raw(),
+                            source_count,
+                        )?;
+                        let mut values = vec![Complex64::default(); points.len()];
+                        pool.backend()
+                            .try_copy_d2h(output, &mut values)
+                            .map_err(|e| failed(e.to_string()))?;
+                        fields.extend(values.into_iter().map(|z| [z.re, z.im]));
+                    }
+                    let mut surface = vec![Complex64::default(); elements.len()];
+                    pool.backend()
+                        .try_copy_d2h(pressure, &mut surface)
+                        .map_err(|e| failed(e.to_string()))?;
+                    solutions.push(surface);
+                    Ok(())
+                },
+            )?;
+            Ok(SolvedSweep {
+                solutions,
+                fields: Some(fields),
+            })
+        },
+    )
+}
+
+fn run_project_using(
+    project: &NumCalcProject,
+    freq_start_idx: Option<usize>,
+    freq_end_idx: Option<usize>,
+    max_iterations: usize,
+    tolerance: f64,
+    execution: SweepExecution,
+    solve: impl FnOnce(
+        &[crate::core::types::Element],
+        &IncidentField,
+        &FrequencySweepConfig,
+    ) -> Result<SolvedSweep, BemError>,
+) -> Result<SweepOutput, BemError> {
     let total = project.frequencies.len();
     let start = freq_start_idx.unwrap_or(0).min(total);
     let end = freq_end_idx.unwrap_or(total).min(total).max(start);
@@ -80,19 +246,11 @@ pub fn run_project(
         max_recycle_relative_frequency_delta: 0.1,
     };
 
-    let sweep = frequency_sweep(
-        &surface_elements,
-        &project.nodes,
-        &incident,
-        &config,
-        AssemblyMethod::Tbem,
-        project.speed_of_sound,
-        project.density,
-    )?;
+    let SolvedSweep { solutions, fields } = solve(&surface_elements, &incident, &config)?;
 
-    let n_dof = sweep.solutions.first().map(|s| s.len()).unwrap_or(0);
-    let mut surface_flat: Vec<[f64; 2]> = Vec::with_capacity(sweep.solutions.len() * n_dof.max(1));
-    for sol in &sweep.solutions {
+    let n_dof = solutions.first().map(|s| s.len()).unwrap_or(0);
+    let mut surface_flat: Vec<[f64; 2]> = Vec::with_capacity(solutions.len() * n_dof.max(1));
+    for sol in &solutions {
         for &c in sol {
             surface_flat.push([c.re, c.im]);
         }
@@ -100,7 +258,9 @@ pub fn run_project(
 
     let eval_points = project.evaluation_centers();
     let eval_flat = flatten_eval_points(&eval_points);
-    let eval_pressure = if project.evaluation_indices.is_empty() {
+    let eval_pressure = if let Some(fields) = fields {
+        fields
+    } else if project.evaluation_indices.is_empty() {
         Vec::new()
     } else {
         eval_pressure_per_frequency(
@@ -108,12 +268,13 @@ pub fn run_project(
             &frequencies,
             &incident,
             &surface_elements,
-            &sweep.solutions,
+            &solutions,
             &eval_points,
         )
     };
 
     Ok(SweepOutput {
+        execution: Some(execution),
         frequencies,
         speed_of_sound: project.speed_of_sound,
         density: project.density,
@@ -192,6 +353,86 @@ mod tests {
 
     fn sample_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/sample_project/NC.inp")
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn native_numcalc_cuda_project_and_fields() {
+        use sonium_compute::{CudaBackend, MemoryPool, MemoryPoolConfig};
+        let backend = match CudaBackend::new_default() {
+            Ok(backend) => backend,
+            Err(error) => {
+                assert!(
+                    std::env::var("SONIUM_REQUIRE_CUDA").as_deref() != Ok("1"),
+                    "{error}"
+                );
+                return;
+            }
+        };
+        let pool = MemoryPool::new(backend, MemoryPoolConfig::default()).unwrap();
+        let mut project = load_project(sample_path()).unwrap();
+        for center in [[2.0, 0.5, 0.3], [-2.0, 0.3, 0.4]] {
+            let mut evaluation = project.elements[0].clone();
+            evaluation.property = ElementProperty::Evaluation;
+            evaluation.center = center;
+            evaluation.dof_addresses.clear();
+            project.evaluation_indices.push(project.elements.len());
+            project.elements.push(evaluation);
+        }
+        for (start, end) in [
+            (None, None),
+            (Some(1), Some(3)),
+            (Some(99), Some(200)),
+            (Some(2), Some(0)),
+        ] {
+            let cpu = run_project(&project, start, end, 250, 1e-10).unwrap();
+            let gpu = run_project_cuda_jacobi(&project, start, end, 250, 1e-10, &pool).unwrap();
+            assert_eq!(gpu.execution, Some(SweepExecution::CudaJacobi));
+            assert_eq!(cpu.execution, Some(SweepExecution::Cpu));
+            assert_eq!(cpu.frequencies, gpu.frequencies);
+            assert_eq!(cpu.eval_points, gpu.eval_points);
+            assert_eq!(cpu.num_surface_dofs, gpu.num_surface_dofs);
+            for (actual, expected) in [
+                (&gpu.surface_pressure, &cpu.surface_pressure),
+                (&gpu.eval_pressure, &cpu.eval_pressure),
+            ] {
+                assert_eq!(actual.len(), expected.len());
+                let error = actual
+                    .iter()
+                    .flatten()
+                    .zip(expected.iter().flatten())
+                    .map(|(a, b)| (a - b).powi(2))
+                    .sum::<f64>();
+                let norm = expected.iter().flatten().map(|x| x * x).sum::<f64>();
+                assert!(error.sqrt() <= 1e-7 * norm.sqrt().max(1e-12));
+            }
+            let mut json = serde_json::to_value(&gpu).unwrap();
+            assert_eq!(json["execution"], "cuda_jacobi");
+            json["execution"] = serde_json::Value::String("cuda_jacobi_with_cpu_fields".into());
+            assert_eq!(
+                serde_json::from_value::<SweepOutput>(json.clone())
+                    .unwrap()
+                    .execution,
+                Some(SweepExecution::CudaJacobiWithCpuFields)
+            );
+            json.as_object_mut().unwrap().remove("execution");
+            assert!(
+                serde_json::from_value::<SweepOutput>(json)
+                    .unwrap()
+                    .execution
+                    .is_none()
+            );
+        }
+        project.elements[0].boundary_condition =
+            crate::core::types::BoundaryCondition::Pressure(vec![Complex64::new(1.0, 0.0)]);
+        let before = pool.backend().begin_runtime_stats();
+        assert!(run_project_cuda_jacobi(&project, None, None, 250, 1e-10, &pool).is_err());
+        assert_eq!(
+            pool.backend()
+                .runtime_stats_since(before)
+                .allocation_operations,
+            0
+        );
     }
 
     #[test]

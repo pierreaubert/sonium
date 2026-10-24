@@ -32,6 +32,25 @@
 //! let pressure = solution.evaluate_pressure(&[0.0, 0.0, 0.2]);
 //! ```
 
+#[cfg(feature = "cuda")]
+#[path = "bem_solver_cuda.rs"]
+mod cuda;
+#[cfg(feature = "cuda")]
+pub(crate) use cuda::pack_incident_sources;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use cuda::{
+    CudaScatteringOptions, CudaScatteringPreconditioner, CudaScatteringReport, CudaScatteringSession,
+    CudaMlfmmBemSession, CudaMlfmmBemSolveReport, CudaMlfmmPreconditioner,
+    CudaHMatrixBlockSolveReport,
+    CudaBemSession, CudaBemGmresSession,
+    CudaHMatrixAction,
+    CudaHMatrixBemSession,
+    CudaHMatrixLinearSession,
+    CudaHMatrixPreconditioner,
+    CudaHMatrixSolveReport,
+};
+
 use num_complex::Complex64;
 use sonium_solvers::dense::DenseMatrix;
 use std::f64::consts::PI;

@@ -12,4 +12,7 @@ pub mod project;
 pub mod runner;
 
 pub use project::{NumCalcProject, ProjectError, load_project};
-pub use runner::{SweepOutput, run_project};
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use runner::run_project_cuda_jacobi;
+pub use runner::{SweepExecution, SweepOutput, run_project};

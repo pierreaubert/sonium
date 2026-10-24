@@ -34,6 +34,13 @@ use sonium_wave::special::{legendre_polynomials, spherical_hankel_first_kind};
 use std::fmt;
 use std::sync::Mutex;
 
+#[cfg(feature = "cuda")]
+#[path = "mlfmm_cuda.rs"]
+mod cuda;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use cuda::{CudaMlfmmPreconditioner, CudaMlfmmSolveSession};
+
 /// Validation failure while admitting a mesh to the constant-panel MLFMM
 /// kernels.
 ///

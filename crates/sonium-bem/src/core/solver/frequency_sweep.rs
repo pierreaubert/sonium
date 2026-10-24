@@ -35,6 +35,13 @@ use sonium_solvers::iterative::{
 };
 use sonium_solvers::traits::LinearOperator;
 
+#[cfg(feature = "cuda")]
+#[path = "frequency_sweep_cuda.rs"]
+mod cuda;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use cuda::{CudaFrequencySweepPoint, CudaFrequencySweepResult, frequency_sweep_cuda_tbem_jacobi, frequency_sweep_cuda_tbem_jacobi_device};
+
 // ============================================================================
 // Configuration
 // ============================================================================

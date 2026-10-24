@@ -29,7 +29,7 @@ cli = ["dep:clap"]
 sofa = ["dep:hdf5", "sonium-xem/io-sofa"]
 meshlang = ["sonium-mesher/meshlang"]
 metal = ["sonium-compute/metal"]
-cuda = ["sonium-compute/cuda"]
+cuda = ["sonium-compute/cuda", "sonium-solvers/cuda"]
 
 [dependencies]
 # Common types shared with FEM
