@@ -1094,3 +1094,94 @@ extern "C" __global__ void sonium_bem_quadrature_pair_c64_derivative(
     out[out_offset + gid * out_stride] =
         SoniumBemRegularPairOutF64{acc_g, acc_h, acc_ht, acc_e};
 }
+
+// One row per thread gives a deterministic RHS accumulation. Matrix entries
+// are column-major, so adjacent row threads write adjacent locations.
+extern "C" __global__ void sonium_bem_dense_system_c64(
+    const SoniumBemRegularPairOutF64* regular,
+    const SoniumBemRegularPairOutF64* quadrature,
+    const int* routes, const Complex64* coefficients,
+    Complex64* matrix, Complex64* rhs,
+    unsigned long long n, unsigned long long nr, unsigned long long nq
+) {
+    const unsigned long long row = (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= n) return;
+    const double invalid = __longlong_as_double(0x7ff8000000000000ULL);
+    Complex64 sum = coefficients[row * 10 + 9];
+    for (unsigned long long col = 0; col < n; ++col) {
+        const int route = routes[row + col * n];
+        if (route == (-2147483647 - 1)) {
+            matrix[row + col * n] = Complex64{0.0, 0.0};
+            continue;
+        }
+        const bool is_regular = route < 0;
+        const unsigned long long index = is_regular ? (unsigned long long)(-(long long)route - 1) : (unsigned long long)route;
+        if (index >= (is_regular ? nr : nq)) {
+            matrix[row + col * n] = Complex64{invalid, invalid};
+            sum = Complex64{invalid, invalid};
+            continue;
+        }
+        const SoniumBemRegularPairOutF64 p = is_regular ? regular[index] : quadrature[index];
+        const Complex64 channels[4] = {p.g, p.h, p.ht, p.e};
+        Complex64 a = {0.0, 0.0};
+        for (int k = 0; k < 4; ++k) {
+            const Complex64 w = coefficients[col * 10 + k];
+            const Complex64 v = coefficients[col * 10 + 4 + k];
+            const Complex64 x = channels[k];
+            a.re += x.re * w.re - x.im * w.im;
+            a.im += x.re * w.im + x.im * w.re;
+            sum.re += x.re * v.re - x.im * v.im;
+            sum.im += x.re * v.im + x.im * v.re;
+        }
+        if (row == col) {
+            a.re += coefficients[col * 10 + 8].re;
+            a.im += coefficients[col * 10 + 8].im;
+        }
+        matrix[row + col * n] = a;
+    }
+    rhs[row] = sum;
+}
+
+// Six doubles per point (position, normal) and source (coordinates, complex
+// amplitude, kind). One thread per collocation row keeps source order stable.
+extern "C" __global__ void sonium_bem_incident_rhs_c64(
+    const double* points, const double* sources, Complex64* rhs,
+    unsigned long long n, unsigned long long source_count,
+    double k, double harmonic, double gamma, double beta_re, double beta_im
+) {
+    const unsigned long long row = (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (row >= n) return;
+    const double* x = points + row * 6;
+    Complex64 p = {0.0, 0.0}, dp = {0.0, 0.0};
+    for (unsigned long long j = 0; j < source_count; ++j) {
+        const double* s = sources + j * 6;
+        double phase, scale = 1.0, dr = 0.0, di;
+        if (s[5] == 0.0) {
+            phase = harmonic * k * (s[0]*x[0] + s[1]*x[1] + s[2]*x[2]);
+            di = harmonic * k * (s[0]*x[3] + s[1]*x[4] + s[2]*x[5]);
+        } else if (s[5] == 1.0) {
+            const double dx = x[0]-s[0], dy = x[1]-s[1], dz = x[2]-s[2];
+            const double r = sqrt(dx*dx + dy*dy + dz*dz);
+            // Match IncidentField's existing near-source convention.
+            if (r <= 1.0e-10) continue;
+            phase = harmonic * k * r;
+            scale = 1.0 / (12.56637061435917295385 * r);
+            const double drdn = (dx*x[3] + dy*x[4] + dz*x[5]) / r;
+            dr = -drdn / r;
+            di = harmonic * k * drdn;
+        } else {
+            const double invalid = __longlong_as_double(0x7ff8000000000000ULL);
+            rhs[row] = Complex64{invalid, invalid};
+            return;
+        }
+        double sn, cs;
+        sincos(phase, &sn, &cs);
+        const Complex64 value = {(s[3]*cs - s[4]*sn)*scale, (s[3]*sn + s[4]*cs)*scale};
+        p.re += value.re;
+        p.im += value.im;
+        dp.re += dr*value.re - di*value.im;
+        dp.im += dr*value.im + di*value.re;
+    }
+    rhs[row] = Complex64{-(gamma*p.re + beta_re*dp.re - beta_im*dp.im),
+                         -(gamma*p.im + beta_re*dp.im + beta_im*dp.re)};
+}

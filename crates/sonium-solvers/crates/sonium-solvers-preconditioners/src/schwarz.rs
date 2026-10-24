@@ -304,6 +304,12 @@ pub struct AdditiveSchwarzPreconditioner<T: ComplexField> {
     runtime: Arc<SchwarzRuntimeState>,
 }
 
+#[cfg(feature = "cuda")]
+#[path = "cuda_schwarz.rs"]
+mod cuda;
+#[cfg(feature = "cuda")]
+pub use cuda::CudaSchwarzPreconditioner;
+
 /// Coarse space for the two-level additive Schwarz variant: an `n × nc`
 /// coarse basis `Z` together with the sparse LU factorization of the
 /// Galerkin coarse operator `E = ZᵀAZ`.

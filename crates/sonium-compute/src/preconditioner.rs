@@ -6,7 +6,7 @@
 
 use crate::gmres::{BackendCsr, BackendPreconditioner};
 use crate::operator::{
-    DeviceAdjointCapability, DeviceOperator, PersistentDeviceCsr, PrebakedSpmv, validate_csr_inputs,
+    DeviceAdjointCapability, PersistentDeviceCsr, validate_csr_inputs,
 };
 use crate::{
     Backend, DeviceBufferLike, DevicePreconditioner, DeviceScalar,
@@ -17,6 +17,8 @@ use std::sync::Mutex;
 
 mod block_jacobi;
 mod chebyshev;
+mod matrix;
+use matrix::PreconditionerMatrix;
 pub mod saddle_point;
 
 pub use block_jacobi::{BlockJacobiBackend, DEFAULT_BLOCK_SIZE};
@@ -34,6 +36,8 @@ pub struct PointJacobiBackend<B: Backend, T: DeviceScalar = f64> {
     diag_inv: PersistentDeviceCsr<B, T>,
     n: usize,
     workspace: Mutex<Option<B::Buffer<T>>>,
+    // Block applications must not evict the scalar scratch used by recovery.
+    block_workspace: Mutex<Option<B::Buffer<T>>>,
     runtime_diagnostics: crate::DevicePreconditionerDiagnostics,
 }
 
@@ -85,6 +89,7 @@ impl<B: Backend, T: DeviceScalar> PointJacobiBackend<B, T> {
             diag_inv,
             n,
             workspace: Mutex::new(Some(workspace)),
+            block_workspace: Mutex::new(None),
             runtime_diagnostics,
         })
     }
@@ -288,8 +293,13 @@ impl<B: Backend, T: DeviceScalar> DevicePreconditioner<B, T> for PointJacobiBack
                 ),
             });
         }
+        let storage = if rhs == 1 {
+            &self.workspace
+        } else {
+            &self.block_workspace
+        };
         let mut workspace =
-            self.workspace
+            storage
                 .lock()
                 .map_err(|_| crate::BackendError::OperationFailed {
                     operation: "point_jacobi_apply_colmajor",
@@ -386,16 +396,17 @@ impl<B: Backend, T: DeviceScalar> DevicePreconditioner<B, T> for PointJacobiBack
 
 /// Polynomial Jacobi preconditioner of degree `K >= 1`.
 ///
-/// Holds a borrowed reference to the system matrix `A` plus an on-device
+/// Holds a borrowed or owned resident system matrix `A` plus an on-device
 /// diagonal CSR storing `1/A_ii`. `apply` runs `K` damped
 /// Jacobi-Richardson steps.
 pub struct PolynomialJacobiBackend<'a, B: Backend, T: DeviceScalar = f64> {
-    a: &'a BackendCsr<B, T>,
-    a_prebaked: PrebakedSpmv<'a, B, T>,
+    a: PreconditionerMatrix<'a, B, T>,
     diag_inv: PersistentDeviceCsr<B, T>,
     degree: usize,
     damping: T,
     workspace: Mutex<PolynomialWorkspace<B, T>>,
+    // Scalar recovery must not evict the latest block application scratch.
+    block_workspace: Mutex<PolynomialWorkspace<B, T>>,
     runtime_diagnostics: crate::DevicePreconditionerDiagnostics,
 }
 
@@ -444,16 +455,71 @@ impl<'a, B: Backend, T: DeviceScalar> PolynomialJacobiBackend<'a, B, T> {
         degree: usize,
         damping: T,
     ) -> crate::BackendResult<Self> {
+        Self::try_from_matrix(backend, a.m, diag_host, degree, damping, || {
+            PreconditionerMatrix::borrowed(backend, a)
+        })
+    }
+
+    /// Build from an owned resident matrix, retaining descriptors across numeric updates.
+    ///
+    /// # Errors
+    /// Rejects invalid degree, damping or diagonal and propagates backend failures.
+    pub fn try_from_owned_csr(
+        backend: &B,
+        a: PersistentDeviceCsr<B, T>,
+        diag_host: &[T],
+        degree: usize,
+        damping: T,
+    ) -> crate::BackendResult<Self> {
+        let n = a.m();
+        Self::try_from_matrix(backend, n, diag_host, degree, damping, || {
+            Ok(PreconditionerMatrix::Owned {
+                matrix: a,
+                valid: true,
+            })
+        })
+    }
+
+    /// Refresh owned matrix values and inverse diagonal without replacing device storage.
+    ///
+    /// Device values must be finite and match the retained sparsity pattern.
+    /// Scalar and block scratch remain cached. Validation errors preserve the old
+    /// state; a backend failure requires successful refresh before further applies.
+    ///
+    /// # Errors
+    /// Rejects borrowed matrices, invalid shapes/diagonals and backend failures.
+    pub fn try_update_numeric(
+        &mut self,
+        backend: &B,
+        values: &B::Buffer<T>,
+        diagonal: &[T],
+    ) -> crate::BackendResult<()> {
+        self.a
+            .try_refresh(backend, values, diagonal, &mut self.diag_inv)
+    }
+
+    fn try_from_matrix(
+        backend: &B,
+        rows: usize,
+        diag_host: &[T],
+        degree: usize,
+        damping: T,
+        make_matrix: impl FnOnce() -> crate::BackendResult<PreconditionerMatrix<'a, B, T>>,
+    ) -> crate::BackendResult<Self> {
         if degree == 0 {
             return Err(crate::BackendError::InvalidArgument {
                 operation: "polynomial_jacobi_constructor",
                 reason: "polynomial degree must be >= 1".into(),
             });
         }
-        if diag_host.len() != a.m {
+        if diag_host.len() != rows {
             return Err(crate::BackendError::InvalidArgument {
                 operation: "polynomial_jacobi_constructor",
-                reason: format!("diagonal length {} != A row count {}", diag_host.len(), a.m),
+                reason: format!(
+                    "diagonal length {} != A row count {}",
+                    diag_host.len(),
+                    rows
+                ),
             });
         }
         if !damping.is_finite() || diag_host.iter().any(|value| !value.is_finite()) {
@@ -480,7 +546,7 @@ impl<'a, B: Backend, T: DeviceScalar> PolynomialJacobiBackend<'a, B, T> {
         backend.try_inject_preconditioner_failure(
             PreconditionerFailureInjectionPoint::HierarchyUpload,
         )?;
-        let a_prebaked = PrebakedSpmv::try_from_csr(backend, a)?;
+        let a = make_matrix()?;
         backend.try_inject_preconditioner_failure(
             PreconditionerFailureInjectionPoint::DiagonalUpload,
         )?;
@@ -499,16 +565,27 @@ impl<'a, B: Backend, T: DeviceScalar> PolynomialJacobiBackend<'a, B, T> {
                 .raw_alloc::<T>(n)
                 .map_err(crate::BackendError::from)?,
         };
+        let block_workspace = PolynomialWorkspace {
+            result: backend
+                .raw_alloc::<T>(0)
+                .map_err(crate::BackendError::from)?,
+            rk: backend
+                .raw_alloc::<T>(0)
+                .map_err(crate::BackendError::from)?,
+            dk: backend
+                .raw_alloc::<T>(0)
+                .map_err(crate::BackendError::from)?,
+        };
         let runtime_diagnostics = crate::DevicePreconditionerDiagnostics::default();
         runtime_diagnostics.record_setup();
 
         Ok(Self {
             a,
-            a_prebaked,
             diag_inv,
             degree,
             damping,
             workspace: Mutex::new(workspace),
+            block_workspace: Mutex::new(block_workspace),
             runtime_diagnostics,
         })
     }
@@ -628,7 +705,8 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T>
         z: &mut B::Buffer<T>,
     ) -> crate::BackendResult<()> {
         backend.try_inject_preconditioner_failure(PreconditionerFailureInjectionPoint::Launch)?;
-        let n = self.a.m;
+        self.a.ensure_valid()?;
+        let n = self.a.matrix().m;
         if r.len() != n || z.len() != n {
             return Err(crate::BackendError::InvalidArgument {
                 operation: "polynomial_jacobi_apply",
@@ -659,7 +737,7 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T>
         }
         for _ in 1..self.degree {
             let PolynomialWorkspace { result, rk, dk } = &mut *workspace;
-            self.a_prebaked.try_apply(backend, result, rk)?;
+            self.a.try_apply(backend, result, rk)?;
             backend.try_scale::<T>(-T::one(), rk)?;
             backend.try_axpy::<T>(T::one(), r, rk)?;
             self.diag_inv.try_apply(backend, rk, dk)?;
@@ -700,7 +778,8 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T>
         z: &mut B::Buffer<T>,
     ) -> crate::BackendResult<()> {
         backend.try_inject_preconditioner_failure(PreconditionerFailureInjectionPoint::Launch)?;
-        let n = self.a.m;
+        self.a.ensure_valid()?;
+        let n = self.a.matrix().m;
         let len = n
             .checked_mul(rhs)
             .ok_or(crate::BackendError::InvalidArgument {
@@ -717,8 +796,11 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T>
                 ),
             });
         }
+        if rhs == 1 {
+            return self.try_apply_untracked(backend, r, z);
+        }
         let mut workspace =
-            self.workspace
+            self.block_workspace
                 .lock()
                 .map_err(|_| crate::BackendError::OperationFailed {
                     operation: "polynomial_jacobi_apply_colmajor",
@@ -738,7 +820,7 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T>
         }
         for _ in 1..self.degree {
             let PolynomialWorkspace { result, rk, dk } = &mut *workspace;
-            self.a_prebaked
+            self.a
                 .try_apply_colmajor(backend, rhs, result, rk)?;
             backend.try_scale::<T>(-T::one(), rk)?;
             backend.try_axpy::<T>(T::one(), r, rk)?;

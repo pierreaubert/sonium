@@ -38,21 +38,33 @@
 mod amg;
 mod block_jacobi;
 mod chebyshev;
+#[cfg(feature = "cuda")]
+mod cuda_ilu;
 mod diagonal;
 mod hybrid_ilu;
 mod ilu;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use cuda_ilu::CudaIluPreconditioner;
 mod ilu_hierarchical;
 mod ilu_parallel;
 pub(crate) mod ilut;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use ilut::CudaIlutPreconditioner;
 mod saddle_point;
 mod schwarz;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use schwarz::CudaSchwarzPreconditioner;
 
 #[cfg(feature = "experimental-gnn")]
 pub use amg::GnnCoarseningWeights;
 pub use amg::{
     AMG_CHECKPOINT_FORMAT_VERSION, AmgCoarsening, AmgConfig, AmgCycle, AmgDiagnostics,
     AmgInterpolation, AmgPhysicsProfile, AmgPreconditioner, AmgRestriction, AmgSmoother,
-    BackendAmgDiagnostics, BackendAmgPreconditioner, MaterialSocConfig,
+    BackendAmgDiagnostics, BackendAmgPhase, BackendAmgPhaseProfile, BackendAmgPreconditioner,
+    MaterialSocConfig,
 };
 pub use block_jacobi::{
     BLOCK_JACOBI_CHECKPOINT_FORMAT_VERSION, BlockJacobiDiagnostics, BlockJacobiPreconditioner,

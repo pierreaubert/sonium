@@ -81,6 +81,10 @@ use crate::gmres::{
     BackendCsr, BackendOperator, BackendPreconditioner, IdentityBackendPreconditioner,
 };
 use crate::{Backend, DeviceBufferLike, DeviceScalar, ReductionMode};
+mod workspace;
+#[doc(inline)]
+pub use workspace::GmresIrWorkspace;
+use workspace::{Allocator, Scratch};
 
 // ---------------------------------------------------------------------------
 // F32 mirror types — kept as type aliases for backward compatibility.
@@ -215,6 +219,7 @@ pub type GmresInnerF32Error = GmresInnerError;
 
 /// Inner GMRES generic over `T: DeviceScalar`. CGS2 + multi_dot.
 /// Exposed crate-internally for use by `gmres_ir_backend_preconditioned`.
+#[cfg(test)]
 fn gmres_inner<B, A, P, T>(
     backend: &B,
     a: &A,
@@ -223,6 +228,34 @@ fn gmres_inner<B, A, P, T>(
     x0: Option<&B::Buffer<T>>,
     out: &mut B::Buffer<T>,
     config: &GmresInnerConfig<T>,
+) -> Result<GmresInnerStatus<T>, GmresInnerError>
+where
+    B: Backend,
+    T: DeviceScalar,
+    A: BackendOperator<B, T> + ?Sized,
+    P: BackendPreconditioner<B, T> + ?Sized,
+{
+    gmres_inner_with_alloc(
+        backend,
+        a,
+        precond,
+        b,
+        x0,
+        out,
+        config,
+        &Allocator::raw(backend),
+    )
+}
+
+fn gmres_inner_with_alloc<B, A, P, T>(
+    backend: &B,
+    a: &A,
+    precond: &P,
+    b: &B::Buffer<T>,
+    x0: Option<&B::Buffer<T>>,
+    out: &mut B::Buffer<T>,
+    config: &GmresInnerConfig<T>,
+    alloc: &Allocator<'_, B, T>,
 ) -> Result<GmresInnerStatus<T>, GmresInnerError>
 where
     B: Backend,
@@ -267,8 +300,8 @@ where
         config.tolerance
     };
 
-    let mut r0 = backend
-        .raw_alloc::<T>(n)
+    let mut r0 = alloc
+        .alloc(n)
         .map_err(|error| GmresInnerError::Allocation {
             label: "r0",
             reason: error.to_string(),
@@ -312,10 +345,10 @@ where
         });
     }
 
-    let mut v: Vec<B::Buffer<T>> = Vec::new();
+    let mut v: Vec<Scratch<'_, B, T>> = Vec::new();
     reserve_inner(&mut v, inner_capacity_add(max_iter, 1, "V")?, "V")?;
-    let mut v0 = backend
-        .raw_alloc::<T>(n)
+    let mut v0 = alloc
+        .alloc(n)
         .map_err(|error| GmresInnerError::Allocation {
             label: "V[0]",
             reason: error.to_string(),
@@ -337,14 +370,14 @@ where
     let mut iterations_done = 0_usize;
     let mut final_resid_rel = initial_resid_rel;
 
-    let mut w = backend
-        .raw_alloc::<T>(n)
+    let mut w = alloc
+        .alloc(n)
         .map_err(|error| GmresInnerError::Allocation {
             label: "w",
             reason: error.to_string(),
         })?;
-    let mut z = backend
-        .raw_alloc::<T>(n)
+    let mut z = alloc
+        .alloc(n)
         .map_err(|error| GmresInnerError::Allocation {
             label: "z",
             reason: error.to_string(),
@@ -369,7 +402,7 @@ where
             inner_capacity_add(j, 1, "basis references")?,
             "basis references",
         )?;
-        basis_refs.extend(v.iter().take(j + 1));
+        basis_refs.extend(v.iter().take(j + 1).map(|buffer| &**buffer));
 
         let dots1 = backend.try_multi_dot_with_mode::<T>(ReductionMode::Fast, &basis_refs, &w)?;
         let mut neg_dots1 =
@@ -398,19 +431,12 @@ where
         let invariant_subspace = h_jp1 == zero_real;
 
         if !invariant_subspace {
-            // Uninitialized: fully overwritten by the copy+scale below
-            // before any read (same values as the zeroed alloc; saves a
-            // device-side memset per step).
-            // SAFETY: `try_copy_d2d` writes all `n` elements, then
-            // `try_scale` rewrites all `n` elements before `v_next` is read.
-            let mut v_next = unsafe {
-                backend.raw_alloc_uninitialized::<T>(n).map_err(|error| {
-                    GmresInnerError::Allocation {
-                        label: "V[j+1]",
-                        reason: error.to_string(),
-                    }
-                })?
-            };
+            let mut v_next = alloc
+                .alloc(n)
+                .map_err(|error| GmresInnerError::Allocation {
+                    label: "V[j+1]",
+                    reason: error.to_string(),
+                })?;
             backend.try_copy_d2d(&w, &mut v_next)?;
             backend.try_scale::<T>(T::from_real(T::Real::one() / h_jp1), &mut v_next)?;
             v.push(v_next);
@@ -499,8 +525,8 @@ where
         y[i] = sum / h[i][i];
     }
 
-    let mut dx_unprec = backend
-        .raw_alloc::<T>(n)
+    let mut dx_unprec = alloc
+        .alloc(n)
         .map_err(|error| GmresInnerError::Allocation {
             label: "dx_unprec",
             reason: error.to_string(),
@@ -508,11 +534,11 @@ where
     backend.try_scale::<T>(T::zero(), &mut dx_unprec)?;
     let mut v_refs: Vec<&B::Buffer<T>> = Vec::new();
     reserve_inner(&mut v_refs, k, "solution basis references")?;
-    v_refs.extend(v.iter().take(k));
+    v_refs.extend(v.iter().take(k).map(|buffer| &**buffer));
     backend.try_axpy_many::<T>(&y, &v_refs, &mut dx_unprec)?;
 
-    let mut dx = backend
-        .raw_alloc::<T>(n)
+    let mut dx = alloc
+        .alloc(n)
         .map_err(|error| GmresInnerError::Allocation {
             label: "dx",
             reason: error.to_string(),
@@ -633,6 +659,61 @@ impl From<crate::BackendError> for GmresIrError {
     }
 }
 
+/// Solve using retained, quota-accounted mixed-precision device scratch.
+///
+/// Operators, RHS and output must belong to the workspace pool's backend.
+/// Scratch is reused across inner solves, restarts and calls; later calls with
+/// larger iteration demand can grow it. Algorithm and certification match
+/// the non-workspace entrypoint. Execution/allocation errors discard cached
+/// scratch before retry; input validation failures preserve it.
+///
+/// # Errors
+/// Returns input, quota, backend or numerical failures as in
+/// [gmres_ir_backend_preconditioned].
+#[allow(clippy::too_many_arguments)]
+pub fn gmres_ir_backend_preconditioned_with_workspace<B, AOuter, AInner, P, Outer>(
+    workspace: &mut GmresIrWorkspace<B, Outer>,
+    a_outer: &AOuter,
+    a_inner: &AInner,
+    inner_precond: &P,
+    b_outer: &B::Buffer<Outer>,
+    x0_outer: Option<&B::Buffer<Outer>>,
+    out_outer: &mut B::Buffer<Outer>,
+    config: &GmresIrConfig<Outer>,
+) -> Result<GmresIrStatus<Outer>, GmresIrError>
+where
+    B: Backend,
+    Outer: crate::LowerPrecision,
+    AOuter: BackendOperator<B, Outer> + ?Sized,
+    AInner: BackendOperator<B, Outer::Lower> + ?Sized,
+    P: BackendPreconditioner<B, Outer::Lower> + ?Sized,
+{
+    workspace.prepare(a_outer.n());
+    let result = gmres_ir_backend_preconditioned_with_alloc(
+        workspace.pool.backend(),
+        a_outer,
+        a_inner,
+        inner_precond,
+        b_outer,
+        x0_outer,
+        out_outer,
+        config,
+        &Allocator::pooled(&workspace.pool, &workspace.outer),
+        &Allocator::pooled(&workspace.pool, &workspace.inner),
+    );
+    if matches!(
+        &result,
+        Err(GmresIrError::Backend { .. }
+            | GmresIrError::InnerSolverFailed { .. }
+            | GmresIrError::Allocation { .. })
+    ) {
+        // A failing operator may have partially written or poisoned scratch.
+        // Discard it before retry rather than relying on zero times NaN.
+        workspace.clear();
+    }
+    result
+}
+
 /// Mixed-precision FGMRES-IR (Carson-Higham 2018 Alg 5.3).
 ///
 /// Outer FGMRES Arnoldi cycles in `f64` with the variable f32 inner
@@ -671,6 +752,40 @@ pub fn gmres_ir_backend_preconditioned<B, AOuter, AInner, P, Outer>(
     x0_outer: Option<&B::Buffer<Outer>>,
     out_outer: &mut B::Buffer<Outer>,
     config: &GmresIrConfig<Outer>,
+) -> Result<GmresIrStatus<Outer>, GmresIrError>
+where
+    B: Backend,
+    Outer: crate::LowerPrecision,
+    AOuter: BackendOperator<B, Outer> + ?Sized,
+    AInner: BackendOperator<B, Outer::Lower> + ?Sized,
+    P: BackendPreconditioner<B, Outer::Lower> + ?Sized,
+{
+    gmres_ir_backend_preconditioned_with_alloc(
+        backend,
+        a_outer,
+        a_inner,
+        inner_precond,
+        b_outer,
+        x0_outer,
+        out_outer,
+        config,
+        &Allocator::raw(backend),
+        &Allocator::raw(backend),
+    )
+}
+
+#[expect(clippy::too_many_arguments, reason = "shared solver core adds two precision-specific scratch allocators")]
+fn gmres_ir_backend_preconditioned_with_alloc<B, AOuter, AInner, P, Outer>(
+    backend: &B,
+    a_outer: &AOuter,
+    a_inner: &AInner,
+    inner_precond: &P,
+    b_outer: &B::Buffer<Outer>,
+    x0_outer: Option<&B::Buffer<Outer>>,
+    out_outer: &mut B::Buffer<Outer>,
+    config: &GmresIrConfig<Outer>,
+    alloc: &Allocator<'_, B, Outer>,
+    inner_alloc: &Allocator<'_, B, Outer::Lower>,
 ) -> Result<GmresIrStatus<Outer>, GmresIrError>
 where
     B: Backend,
@@ -749,12 +864,10 @@ where
         Some(x_init) => backend.try_copy_d2d(x_init, out_outer)?,
     }
 
-    let mut r_outer = backend
-        .raw_alloc::<Outer>(n)
-        .map_err(|error| GmresIrError::Allocation {
-            label: "r",
-            reason: error.to_string(),
-        })?;
+    let mut r_outer = alloc.alloc(n).map_err(|error| GmresIrError::Allocation {
+        label: "r",
+        reason: error.to_string(),
+    })?;
     recompute_true_residual::<B, AOuter, Outer>(
         backend,
         a_outer,
@@ -777,13 +890,10 @@ where
     )?;
 
     if current_resid <= config.outer_tolerance {
-        let mut ax_outer =
-            backend
-                .raw_alloc::<Outer>(n)
-                .map_err(|error| GmresIrError::Allocation {
-                    label: "Ax finalization",
-                    reason: error.to_string(),
-                })?;
+        let mut ax_outer = alloc.alloc(n).map_err(|error| GmresIrError::Allocation {
+            label: "Ax finalization",
+            reason: error.to_string(),
+        })?;
         a_outer.try_apply(backend, out_outer, &mut ax_outer)?;
         let ax_norm = backend.try_nrm2_with_mode::<Outer>(ReductionMode::Fast, &ax_outer)?;
         let residual_norm = backend.try_nrm2_with_mode::<Outer>(ReductionMode::Fast, &r_outer)?;
@@ -813,7 +923,7 @@ where
         let this_cycle = cycle_size.min(remaining);
         cycles += 1;
 
-        let cycle = fgmres_ir_one_cycle::<B, AOuter, AInner, P, Outer>(
+        let cycle = fgmres_ir_one_cycle_with_alloc::<B, AOuter, AInner, P, Outer>(
             backend,
             a_outer,
             a_inner,
@@ -828,6 +938,8 @@ where
             iters_done,
             &mut history,
             &mut true_residual_checks,
+            alloc,
+            inner_alloc,
         )?;
 
         iters_done += cycle.iters_done;
@@ -854,12 +966,10 @@ where
         }
     }
 
-    let mut ax_outer = backend
-        .raw_alloc::<Outer>(n)
-        .map_err(|error| GmresIrError::Allocation {
-            label: "Ax finalization",
-            reason: error.to_string(),
-        })?;
+    let mut ax_outer = alloc.alloc(n).map_err(|error| GmresIrError::Allocation {
+        label: "Ax finalization",
+        reason: error.to_string(),
+    })?;
     a_outer.try_apply(backend, out_outer, &mut ax_outer)?;
     let ax_norm = backend.try_nrm2_with_mode::<Outer>(ReductionMode::Fast, &ax_outer)?;
     let residual_norm = backend.try_nrm2_with_mode::<Outer>(ReductionMode::Fast, &r_outer)?;
@@ -919,7 +1029,7 @@ fn ir_capacity_add(
 
 /// One Arnoldi cycle of size `cycle_max` for FGMRES-IR.
 #[allow(clippy::too_many_arguments)]
-fn fgmres_ir_one_cycle<B, AOuter, AInner, P, Outer>(
+fn fgmres_ir_one_cycle_with_alloc<B, AOuter, AInner, P, Outer>(
     backend: &B,
     a_outer: &AOuter,
     a_inner: &AInner,
@@ -934,6 +1044,8 @@ fn fgmres_ir_one_cycle<B, AOuter, AInner, P, Outer>(
     iter_offset: usize,
     history: &mut Vec<Outer::Real>,
     true_residual_checks: &mut Vec<(usize, Outer::Real, Outer::Real)>,
+    alloc: &Allocator<'_, B, Outer>,
+    inner_alloc: &Allocator<'_, B, Outer::Lower>,
 ) -> Result<OneCycleResult<Outer::Real>, GmresIrError>
 where
     B: Backend,
@@ -956,17 +1068,15 @@ where
         });
     }
 
-    let mut v_basis: Vec<B::Buffer<Outer>> = Vec::new();
+    let mut v_basis: Vec<Scratch<'_, B, Outer>> = Vec::new();
     reserve_ir(&mut v_basis, ir_capacity_add(cycle_max, 1, "V")?, "V")?;
-    let mut z_basis: Vec<B::Buffer<Outer>> = Vec::new();
+    let mut z_basis: Vec<Scratch<'_, B, Outer>> = Vec::new();
     reserve_ir(&mut z_basis, cycle_max, "Z")?;
 
-    let mut v0 = backend
-        .raw_alloc::<Outer>(n)
-        .map_err(|error| GmresIrError::Allocation {
-            label: "V[0]",
-            reason: error.to_string(),
-        })?;
+    let mut v0 = alloc.alloc(n).map_err(|error| GmresIrError::Allocation {
+        label: "V[0]",
+        reason: error.to_string(),
+    })?;
     backend.try_copy_d2d(r_init, &mut v0)?;
     backend.try_scale::<Outer>(Outer::from_real(Outer::Real::one() / beta), &mut v0)?;
     v_basis.push(v0);
@@ -981,26 +1091,22 @@ where
     reserve_ir(&mut g, ir_capacity_add(cycle_max, 1, "rhs")?, "rhs")?;
     g.push(Outer::from_real(beta));
 
-    let mut v_j_inner =
-        backend
-            .raw_alloc::<Outer::Lower>(n)
-            .map_err(|error| GmresIrError::Allocation {
-                label: "v_j_inner",
-                reason: error.to_string(),
-            })?;
-    let mut z_j_inner =
-        backend
-            .raw_alloc::<Outer::Lower>(n)
-            .map_err(|error| GmresIrError::Allocation {
-                label: "z_j_inner",
-                reason: error.to_string(),
-            })?;
-    let mut w_outer = backend
-        .raw_alloc::<Outer>(n)
+    let mut v_j_inner = inner_alloc
+        .alloc(n)
         .map_err(|error| GmresIrError::Allocation {
-            label: "w_outer",
+            label: "v_j_inner",
             reason: error.to_string(),
         })?;
+    let mut z_j_inner = inner_alloc
+        .alloc(n)
+        .map_err(|error| GmresIrError::Allocation {
+            label: "z_j_inner",
+            reason: error.to_string(),
+        })?;
+    let mut w_outer = alloc.alloc(n).map_err(|error| GmresIrError::Allocation {
+        label: "w_outer",
+        reason: error.to_string(),
+    })?;
 
     let mut iters_done = 0_usize;
     let mut inner_iters = 0_usize;
@@ -1032,7 +1138,7 @@ where
         backend.try_cast_to_lower::<Outer>(&v_basis[j], &mut v_j_inner)?;
 
         backend.try_scale::<Outer::Lower>(Outer::Lower::zero(), &mut z_j_inner)?;
-        let inner_status = gmres_inner::<B, AInner, P, Outer::Lower>(
+        let inner_status = gmres_inner_with_alloc::<B, AInner, P, Outer::Lower>(
             backend,
             a_inner,
             inner_precond,
@@ -1043,6 +1149,7 @@ where
                 max_iterations: config.max_inner_iterations,
                 tolerance: inner_tol,
             },
+            inner_alloc,
         )
         .map_err(|e| GmresIrError::InnerSolverFailed {
             outer: iter_offset + j,
@@ -1050,18 +1157,12 @@ where
         })?;
         inner_iters += inner_status.iterations;
 
-        // Cast z_j: Lower → Outer; store in Z basis. Uninitialized: the
-        // cast writes every element before any read (saves a memset).
-        // SAFETY: `try_cast_from_lower` writes all `n` elements of
-        // `z_j_outer` before it is read by `try_apply` below.
-        let mut z_j_outer = unsafe {
-            backend
-                .raw_alloc_uninitialized::<Outer>(n)
-                .map_err(|error| GmresIrError::Allocation {
-                    label: "z_j_outer",
-                    reason: error.to_string(),
-                })?
-        };
+        // Cast z_j: Lower → Outer; store in the retained Z basis.
+
+        let mut z_j_outer = alloc.alloc(n).map_err(|error| GmresIrError::Allocation {
+            label: "z_j_outer",
+            reason: error.to_string(),
+        })?;
         backend.try_cast_from_lower::<Outer>(&z_j_inner, &mut z_j_outer)?;
 
         // w = A · z_j (Outer)
@@ -1080,7 +1181,7 @@ where
             ir_capacity_add(j, 1, "basis references")?,
             "basis references",
         )?;
-        basis_refs.extend(v_basis.iter().take(j + 1));
+        basis_refs.extend(v_basis.iter().take(j + 1).map(|buffer| &**buffer));
 
         let dots1 =
             backend.try_multi_dot_with_mode::<Outer>(ReductionMode::Fast, &basis_refs, &w_outer)?;
@@ -1110,18 +1211,10 @@ where
         let invariant_subspace = h_jp1 == zero_real;
 
         if !invariant_subspace {
-            // Uninitialized: fully overwritten by the copy+scale below
-            // before any read (saves a device-side memset per step).
-            // SAFETY: `try_copy_d2d` writes all `n` elements, then
-            // `try_scale` rewrites all `n` elements before `v_next` is read.
-            let mut v_next = unsafe {
-                backend
-                    .raw_alloc_uninitialized::<Outer>(n)
-                    .map_err(|error| GmresIrError::Allocation {
-                        label: "V[j+1]",
-                        reason: error.to_string(),
-                    })?
-            };
+            let mut v_next = alloc.alloc(n).map_err(|error| GmresIrError::Allocation {
+                label: "V[j+1]",
+                reason: error.to_string(),
+            })?;
             backend.try_copy_d2d(&w_outer, &mut v_next)?;
             backend
                 .try_scale::<Outer>(Outer::from_real(Outer::Real::one() / h_jp1), &mut v_next)?;
@@ -1193,8 +1286,8 @@ where
             && period > 0
             && iters_done.is_multiple_of(period)
         {
-            let true_rel = compute_true_residual_with_y::<B, AOuter, Outer>(
-                backend, a_outer, b_outer, out_outer, &z_basis, &h, &g, iters_done,
+            let true_rel = compute_true_residual_with_y_with_alloc::<B, AOuter, Outer>(
+                backend, a_outer, b_outer, out_outer, &z_basis, &h, &g, iters_done, alloc,
             )? / b_norm;
             true_residual_checks.push((iter_offset + iters_done, fgmres_estimate, true_rel));
         }
@@ -1218,7 +1311,7 @@ where
         }
         let mut z_refs: Vec<&B::Buffer<Outer>> = Vec::new();
         reserve_ir(&mut z_refs, k, "residual basis references")?;
-        z_refs.extend(z_basis.iter().take(k));
+        z_refs.extend(z_basis.iter().take(k).map(|buffer| &**buffer));
         backend.try_axpy_many::<Outer>(&y, &z_refs, out_outer)?;
     }
 
@@ -1251,15 +1344,16 @@ where
 /// Z·y`, computes `‖b − A x_tentative‖`, then discards. Used for
 /// telemetry only.
 #[allow(clippy::too_many_arguments)]
-fn compute_true_residual_with_y<B, AOuter, Outer>(
+fn compute_true_residual_with_y_with_alloc<B, AOuter, Outer>(
     backend: &B,
     a_outer: &AOuter,
     b_outer: &B::Buffer<Outer>,
     x_outer: &B::Buffer<Outer>,
-    z_basis: &[B::Buffer<Outer>],
+    z_basis: &[Scratch<'_, B, Outer>],
     h: &[Vec<Outer>],
     g: &[Outer],
     k: usize,
+    alloc: &Allocator<'_, B, Outer>,
 ) -> Result<Outer::Real, GmresIrError>
 where
     B: Backend,
@@ -1276,24 +1370,19 @@ where
         }
         y[i] = sum / h[i][i];
     }
-    let mut x_tentative =
-        backend
-            .raw_alloc::<Outer>(n)
-            .map_err(|error| GmresIrError::Allocation {
-                label: "x_tentative",
-                reason: error.to_string(),
-            })?;
+    let mut x_tentative = alloc.alloc(n).map_err(|error| GmresIrError::Allocation {
+        label: "x_tentative",
+        reason: error.to_string(),
+    })?;
     backend.try_copy_d2d(x_outer, &mut x_tentative)?;
     let mut z_refs: Vec<&B::Buffer<Outer>> = Vec::new();
     reserve_ir(&mut z_refs, k, "solution basis references")?;
-    z_refs.extend(z_basis.iter().take(k));
+    z_refs.extend(z_basis.iter().take(k).map(|buffer| &**buffer));
     backend.try_axpy_many::<Outer>(&y, &z_refs, &mut x_tentative)?;
-    let mut r = backend
-        .raw_alloc::<Outer>(n)
-        .map_err(|error| GmresIrError::Allocation {
-            label: "r telemetry",
-            reason: error.to_string(),
-        })?;
+    let mut r = alloc.alloc(n).map_err(|error| GmresIrError::Allocation {
+        label: "r telemetry",
+        reason: error.to_string(),
+    })?;
     a_outer.try_residual(backend, &x_tentative, b_outer, &mut r)?;
     Ok(backend.try_nrm2_with_mode::<Outer>(ReductionMode::Fast, &r)?)
 }
@@ -1353,7 +1442,7 @@ mod tests {
     fn gmres_ir_inner_uses_fused_basis_updates() {
         let source = include_str!("gmres_ir.rs");
         let inner_body = source
-            .split("fn gmres_inner")
+            .split("fn gmres_inner_with_alloc")
             .nth(1)
             .expect("inner GMRES function should exist")
             .split("// ---------------------------------------------------------------------------")

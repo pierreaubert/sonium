@@ -30,12 +30,16 @@ pub mod explicit_hourglass;
 pub mod explicit_restart;
 pub mod explicit_scatter;
 pub mod explicit_state;
+pub mod fem_tet;
+pub mod fem_hex;
+pub mod quadrature_assembly;
 pub mod fmm_cpu;
 pub mod gmres;
 pub mod gmres_ir;
 pub mod host_array;
 pub mod host_csr;
 pub mod operator;
+pub mod operator_sum;
 pub mod operator_tape;
 pub mod pcg;
 pub mod perf;
@@ -93,7 +97,8 @@ pub use error::{
 pub use gmres::{
     BackendCsr, BackendOperator, BackendPreconditioner, GmresBackendConfig, GmresBackendError,
     GmresBackendStatus, GmresWorkspace, IdentityBackendPreconditioner,
-    gmres_backend_preconditioned, gmres_backend_preconditioned_pooled,
+    fgmres_backend_preconditioned_pooled_with_workspace, gmres_backend_preconditioned,
+    gmres_backend_preconditioned_pooled,
     gmres_backend_preconditioned_pooled_with_workspace,
 };
 pub use gmres_ir::{
@@ -140,7 +145,7 @@ pub use transpose::{TransposeError, transpose_2d};
 
 #[cfg(feature = "cuda")]
 pub use cuda::{
-    CudaAllocationLedger, CudaBackend, CudaBuffer, CudaMlfmmC64, CudaMlfmmLevelC64Input,
+    CudaAllocationLedger, CudaBackend, CudaDenseJacobi, CudaBuffer, CudaMlfmmC64, CudaMlfmmLevelC64Input,
     CudaMlfmmNearBlockC64Input, CudaMlfmmPhaseTransferC64Input, CudaMlfmmTransferC64Input,
     CudaMlfmmTranslationC64Input, cuda_device_count, try_cuda_device_count,
 };

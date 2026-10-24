@@ -359,11 +359,13 @@ pub(super) fn build_tentative_prolongation<T: ComplexField>(
 ///     = P_tent - omega * D^{-1} * A * P_tent
 ///
 /// where omega = 4/(3*rho(D^{-1}A)) is chosen to damp high-frequency modes.
+/// Truncation respects `max_entries` and retains a nonzero own-aggregate entry.
 pub(super) fn smooth_prolongation<T: ComplexField>(
     matrix: &CsrMatrix<T>,
     diag_inv: &[T],
     p_tent: &CsrMatrix<T>,
     omega: T::Real,
+    max_entries: usize,
 ) -> CsrMatrix<T> {
     // Step 1: Compute A * P_tent using Gustavson's SpMM (with the AMG
     // drop tolerance, preserving the established SA numerics)
@@ -415,14 +417,24 @@ pub(super) fn smooth_prolongation<T: ComplexField>(
             })
             .collect();
 
-        // Keep at most max_interp_elements entries (largest by magnitude)
-        let max_entries = 4;
+        // Retain the row's own aggregate when truncating. Pure magnitude
+        // truncation can delete every entry of a small aggregate's column,
+        // producing unsupported coarse DOFs and a singular Galerkin matrix.
+        // Current callers supply one-hot tentative prolongation.
+        let owner = p_tent.row_entries(i).next().map(|(column, _)| column);
         if row_entries.len() > max_entries {
             row_entries.sort_by(|a, b| {
                 b.1.norm()
                     .partial_cmp(&a.1.norm())
                     .unwrap_or(std::cmp::Ordering::Equal)
             });
+            if let Some(position) = row_entries
+                .iter()
+                .position(|&(column, _)| Some(column) == owner)
+                && position >= max_entries
+            {
+                row_entries.swap(max_entries - 1, position);
+            }
             row_entries.truncate(max_entries);
             row_entries.sort_by_key(|&(j, _)| j); // restore column order
         }
@@ -864,3 +876,7 @@ pub(super) fn energy_minimizing_prolongation<T: ComplexField>(
     }
     builder.finish()
 }
+
+#[cfg(test)]
+#[path = "interpolation_aggregation_tests.rs"]
+mod aggregation_tests;

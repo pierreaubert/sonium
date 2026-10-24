@@ -35,10 +35,18 @@ pub struct SaddlePointJacobiSchurBackend<'a, B: Backend, T: DeviceScalar = f64> 
     velocity_block: PersistentDeviceCsr<B, T>,
     pressure_schur: PersistentDeviceCsr<B, T>,
     pressure_preconditioner: Option<&'a dyn BackendPreconditioner<B, T>>,
+    owned_pressure_preconditioner: Option<Box<dyn BackendPreconditioner<B, T>>>,
     pressure_mask: PersistentDeviceCsr<B, T>,
     velocity_diag_inv: PersistentDeviceCsr<B, T>,
     pressure_diag_inv: PersistentDeviceCsr<B, T>,
     n: usize,
+    velocity_size: usize,
+    host_rows: Vec<usize>,
+    host_columns: Vec<usize>,
+    schur_rows: Vec<usize>,
+    schur_columns: Vec<usize>,
+    schur_values: Vec<T>,
+    numeric_valid: bool,
     velocity_degree: usize,
     velocity_damping: T,
     pressure_degree: usize,
@@ -152,6 +160,12 @@ fn schur_lambda_max_f64(
         operation: "saddle_preconditioner_constructor",
         reason: error.to_string(),
     })?;
+    if velocity_block_size > n {
+        return Err(crate::BackendError::InvalidArgument {
+            operation: "saddle_preconditioner_constructor",
+            reason: "velocity block must fit inside matrix".into(),
+        });
+    }
     let pressure_size = n - velocity_block_size;
     if schur.num_rows != pressure_size || schur.num_cols != pressure_size {
         return Err(crate::BackendError::InvalidArgument {
@@ -184,6 +198,222 @@ fn schur_lambda_max_f64(
 }
 
 impl<'a, B: Backend> SaddlePointJacobiSchurBackend<'a, B, f64> {
+    /// Refresh fixed-pattern numeric data while retaining all device storage.
+    ///
+    /// Validation failures preserve the previous action. A failed upload invalidates
+    /// scalar and block applications until a complete refresh succeeds. Diagonal
+    /// extraction and pressure spectral estimation remain host operations. An external
+    /// pressure action is retained only when the supplied pressure matrix is unchanged.
+    ///
+    /// # Errors
+    /// Rejects changed shapes/patterns, non-finite values, changed external pressure
+    /// matrices and backend transfer failures. Changed external pressure setup must rebuild.
+    pub fn try_update_numeric_host(
+        &mut self,
+        backend: &B,
+        matrix: HostCsrRef<'_, f64>,
+        schur: HostCsrRef<'_, f64>,
+    ) -> crate::BackendResult<()> {
+        self.update_numeric_host(backend, matrix, schur, false)
+    }
+
+    /// Refresh numeric blocks and attach a prepared replacement pressure action.
+    ///
+    /// The caller supplies a full-system pressure action matching the new Schur
+    /// approximation. The replacement is published only after every block upload
+    /// succeeds. Shared mutable pressure actions require exclusive producer access
+    /// across preparation and this call; discard the session if either step fails.
+    ///
+    /// # Errors
+    /// Rejects changed patterns or invalid data and propagates backend failures.
+    /// Interrupted uploads invalidate application until a successful full refresh.
+    pub fn try_update_numeric_host_with_pressure(
+        &mut self,
+        backend: &B,
+        matrix: HostCsrRef<'_, f64>,
+        schur: HostCsrRef<'_, f64>,
+        pressure: Box<dyn BackendPreconditioner<B, f64>>,
+    ) -> crate::BackendResult<()> {
+        self.update_numeric_host(backend, matrix, schur, true)?;
+        self.pressure_preconditioner = None;
+        self.owned_pressure_preconditioner = Some(pressure);
+        self.pressure_kind = PressureSchurBackendKind::External;
+        Ok(())
+    }
+
+    fn update_numeric_host(
+        &mut self,
+        backend: &B,
+        matrix: HostCsrRef<'_, f64>,
+        schur: HostCsrRef<'_, f64>,
+        replace_pressure: bool,
+    ) -> crate::BackendResult<()> {
+        let invalid = |reason: &str| crate::BackendError::InvalidArgument {
+            operation: "saddle_preconditioner_update",
+            reason: reason.into(),
+        };
+        if !replace_pressure
+            && self.pressure_kind == PressureSchurBackendKind::External
+            && schur.values != self.schur_values
+        {
+            return Err(invalid(
+                "changed external pressure matrix requires rebuilding",
+            ));
+        }
+        if matrix.num_rows != self.n
+            || matrix.num_cols != self.n
+            || matrix.row_ptrs != self.host_rows
+            || matrix.col_indices != self.host_columns
+            || matrix.values.len() != self.host_columns.len()
+            || schur.num_rows != self.n - self.velocity_size
+            || schur.num_cols != self.n - self.velocity_size
+            || schur.row_ptrs != self.schur_rows
+            || schur.col_indices != self.schur_columns
+            || schur.values.len() != self.schur_columns.len()
+        {
+            return Err(invalid(
+                "numeric refresh requires the retained full and pressure CSR patterns",
+            ));
+        }
+        if matrix
+            .values
+            .iter()
+            .chain(schur.values)
+            .any(|v| !v.is_finite())
+        {
+            return Err(invalid("matrix values must be finite"));
+        }
+        // Recovery must restore every block: a failed prior refresh may have
+        // uploaded pressure values without publishing the new host snapshot.
+        let refresh_pressure = !self.numeric_valid || schur.values != self.schur_values;
+        let bound = if refresh_pressure {
+            schur_lambda_max_f64(self.n, self.velocity_size, schur)?
+        } else {
+            self.pressure_lambda_max
+        };
+        if !bound.is_finite() || bound <= 0.0 {
+            return Err(invalid(
+                "pressure spectral bound must be finite and positive",
+            ));
+        }
+        let mut velocity_values = Vec::new();
+        let mut velocity_inverse = vec![0.0; self.n];
+        let mut pressure_inverse = if refresh_pressure {
+            vec![0.0; self.n]
+        } else {
+            Vec::new()
+        };
+        // Match constructor semantics: first diagonal entry, zero for missing or tiny diagonals.
+        let inverse = |v: f64| if v.abs() > f64::EPSILON { 1.0 / v } else { 0.0 };
+        for (row, diagonal) in velocity_inverse
+            .iter_mut()
+            .enumerate()
+            .take(self.velocity_size)
+        {
+            let range = matrix.row_ptrs[row]..matrix.row_ptrs[row + 1];
+            if let Some(j) = range.clone().find(|&j| matrix.col_indices[j] == row) {
+                *diagonal = inverse(matrix.values[j]);
+            }
+            velocity_values.extend(
+                range
+                    .filter(|&j| matrix.col_indices[j] < self.velocity_size)
+                    .map(|j| matrix.values[j]),
+            );
+        }
+        if refresh_pressure {
+            for row in 0..schur.num_rows {
+                if let Some(j) = (schur.row_ptrs[row]..schur.row_ptrs[row + 1])
+                    .find(|&j| schur.col_indices[j] == row)
+                {
+                    pressure_inverse[self.velocity_size + row] = inverse(schur.values[j]);
+                }
+            }
+        }
+        self.numeric_valid = false;
+        self.a.try_copy_values_from_host(backend, matrix.values)?;
+        self.velocity_block
+            .try_copy_values_from_host(backend, &velocity_values)?;
+        if refresh_pressure {
+            self.pressure_schur
+                .try_copy_values_from_host(backend, schur.values)?;
+        }
+        backend.try_inject_preconditioner_failure(
+            PreconditionerFailureInjectionPoint::DiagonalUpload,
+        )?;
+        self.velocity_diag_inv
+            .try_copy_values_from_host(backend, &velocity_inverse)?;
+        if refresh_pressure {
+            self.pressure_diag_inv
+                .try_copy_values_from_host(backend, &pressure_inverse)?;
+        }
+        self.pressure_lambda_max = bound;
+        self.schur_values.copy_from_slice(schur.values);
+        self.numeric_valid = true;
+        Ok(())
+    }
+
+    /// Build an owned Jacobi/Schur action directly from host CSR matrices.
+    ///
+    /// The full matrix and all block operators upload once and remain owned by
+    /// the preconditioner. No borrowed device matrix or intermediate upload is
+    /// required. Setup and spectral estimation are host work. Polynomial and
+    /// Chebyshev pressure solves are supported. External pressure solvers can
+    /// be attached with [`Self::with_owned_pressure_preconditioner`] or use the
+    /// separate borrowed-preconditioner constructor.
+    ///
+    /// # Errors
+    /// Rejects malformed or non-finite CSR, incompatible block dimensions,
+    /// non-finite relaxation controls, unsupported external pressure solvers,
+    /// index overflow and native setup/allocation failures.
+    pub fn try_from_host_csr(
+        backend: &B,
+        matrix: HostCsrRef<'_, f64>,
+        pressure_schur: HostCsrRef<'_, f64>,
+        config: SaddlePointJacobiSchurBackendConfig,
+    ) -> crate::BackendResult<Self> {
+        let invalid = |reason: String| crate::BackendError::InvalidArgument {
+            operation: "saddle_preconditioner_constructor",
+            reason,
+        };
+        HostCsrRef::try_new(
+            matrix.num_rows,
+            matrix.num_cols,
+            matrix.row_ptrs,
+            matrix.col_indices,
+            matrix.values,
+        )
+        .map_err(|error| invalid(error.to_string()))?;
+        if config.pressure_kind == PressureSchurBackendKind::External {
+            return Err(invalid(
+                "external pressure solver requires the borrowed-preconditioner constructor".into(),
+            ));
+        }
+        let convert = |indices: &[usize]| -> crate::BackendResult<Vec<i32>> {
+            indices
+                .iter()
+                .map(|&index| {
+                    i32::try_from(index).map_err(|_| invalid("CSR index exceeds i32 range".into()))
+                })
+                .collect()
+        };
+        let rows = convert(matrix.row_ptrs)?;
+        let columns = convert(matrix.col_indices)?;
+        let lambda =
+            schur_lambda_max_f64(matrix.num_rows, config.velocity_block_size, pressure_schur)?;
+        Self::try_build(
+            backend,
+            (matrix.num_rows, matrix.num_cols),
+            || PersistentDeviceCsr::try_from_host_csr_ref(backend, matrix),
+            &rows,
+            &columns,
+            matrix.values,
+            pressure_schur,
+            config,
+            None,
+            lambda,
+        )
+    }
+
     /// Build from raw host CSR parts.
     ///
     /// Panics on construction failure; production paths must use
@@ -191,7 +421,7 @@ impl<'a, B: Backend> SaddlePointJacobiSchurBackend<'a, B, f64> {
     #[deprecated(note = "panics on construction failure; use try_from_csr_host_parts")]
     pub fn from_csr_host_parts(
         backend: &B,
-        a: &'a BackendCsr<B, f64>,
+        a: &BackendCsr<B, f64>,
         row_ptr_host: &[i32],
         col_idx_host: &[i32],
         values_host: &[f64],
@@ -214,7 +444,7 @@ impl<'a, B: Backend> SaddlePointJacobiSchurBackend<'a, B, f64> {
     /// Checked variant of [`Self::from_csr_host_parts`].
     pub fn try_from_csr_host_parts(
         backend: &B,
-        a: &'a BackendCsr<B, f64>,
+        a: &BackendCsr<B, f64>,
         row_ptr_host: &[i32],
         col_idx_host: &[i32],
         values_host: &[f64],
@@ -247,7 +477,7 @@ impl<'a, B: Backend> SaddlePointJacobiSchurBackend<'a, B, f64> {
     )]
     pub fn from_csr_host_parts_with_pressure_preconditioner(
         backend: &B,
-        a: &'a BackendCsr<B, f64>,
+        a: &BackendCsr<B, f64>,
         row_ptr_host: &[i32],
         col_idx_host: &[i32],
         values_host: &[f64],
@@ -273,7 +503,7 @@ impl<'a, B: Backend> SaddlePointJacobiSchurBackend<'a, B, f64> {
     #[allow(clippy::too_many_arguments)]
     pub fn try_from_csr_host_parts_with_pressure_preconditioner(
         backend: &B,
-        a: &'a BackendCsr<B, f64>,
+        a: &BackendCsr<B, f64>,
         row_ptr_host: &[i32],
         col_idx_host: &[i32],
         values_host: &[f64],
@@ -285,7 +515,8 @@ impl<'a, B: Backend> SaddlePointJacobiSchurBackend<'a, B, f64> {
             schur_lambda_max_f64(a.m, config.velocity_block_size, pressure_schur)?;
         Self::try_build(
             backend,
-            a,
+            (a.m, a.n),
+            || PersistentDeviceCsr::try_clone_from_device_csr(backend, a),
             row_ptr_host,
             col_idx_host,
             values_host,
@@ -304,7 +535,7 @@ impl<'a, B: Backend> SaddlePointJacobiSchurBackend<'a, B, f32> {
     #[allow(clippy::too_many_arguments)]
     pub fn try_from_csr_host_parts_f32(
         backend: &B,
-        a: &'a BackendCsr<B, f32>,
+        a: &BackendCsr<B, f32>,
         row_ptr_host: &[i32],
         col_idx_host: &[i32],
         values_host: &[f32],
@@ -326,7 +557,8 @@ impl<'a, B: Backend> SaddlePointJacobiSchurBackend<'a, B, f32> {
         let pressure_lambda_max = schur_lambda_max_f64(a.m, config.velocity_block_size, schur_f64)?;
         Self::try_build(
             backend,
-            a,
+            (a.m, a.n),
+            || PersistentDeviceCsr::try_clone_from_device_csr(backend, a),
             row_ptr_host,
             col_idx_host,
             values_host,
@@ -339,11 +571,28 @@ impl<'a, B: Backend> SaddlePointJacobiSchurBackend<'a, B, f32> {
 }
 
 impl<'a, B: Backend, T: DeviceScalar> SaddlePointJacobiSchurBackend<'a, B, T> {
+    /// Replace the pressure solve with an owned full-system device action.
+    ///
+    /// The action must use the same backend/stream and full-system vector layout,
+    /// with pressure unknowns after the velocity block. Its output is masked to
+    /// the pressure block. Ownership allows an auxiliary AMG hierarchy to survive
+    /// repeated solves without borrowing a temporary setup object.
+    pub fn with_owned_pressure_preconditioner(
+        mut self,
+        preconditioner: Box<dyn BackendPreconditioner<B, T>>,
+    ) -> Self {
+        self.pressure_preconditioner = None;
+        self.owned_pressure_preconditioner = Some(preconditioner);
+        self.pressure_kind = PressureSchurBackendKind::External;
+        self
+    }
+
     /// Shared checked construction for every working precision.
     #[allow(clippy::too_many_arguments)]
     fn try_build(
         backend: &B,
-        a: &'a BackendCsr<B, T>,
+        shape: (usize, usize),
+        make_matrix: impl FnOnce() -> crate::BackendResult<PersistentDeviceCsr<B, T>>,
         row_ptr_host: &[i32],
         col_idx_host: &[i32],
         values_host: &[T],
@@ -352,20 +601,32 @@ impl<'a, B: Backend, T: DeviceScalar> SaddlePointJacobiSchurBackend<'a, B, T> {
         pressure_preconditioner: Option<&'a dyn BackendPreconditioner<B, T>>,
         pressure_lambda_max: f64,
     ) -> crate::BackendResult<Self> {
+        let (matrix_m, matrix_n) = shape;
         let velocity_block_size = config.velocity_block_size;
-        if a.m != a.n {
+        if !config.velocity_damping.is_finite()
+            || !config.pressure_damping.is_finite()
+            || !config.pressure_chebyshev_eigenvalue_ratio.is_finite()
+            || values_host.iter().any(|value| !value.is_finite())
+            || pressure_schur.values.iter().any(|value| !value.is_finite())
+        {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "saddle_preconditioner_constructor",
+                reason: "matrix values and relaxation controls must be finite".into(),
+            });
+        }
+        if matrix_m != matrix_n {
             return Err(crate::BackendError::InvalidArgument {
                 operation: "saddle_preconditioner_constructor",
                 reason: "saddle-point backend preconditioner needs square A".into(),
             });
         }
-        if a.m > i32::MAX as usize {
+        if matrix_m > i32::MAX as usize {
             return Err(crate::BackendError::InvalidArgument {
                 operation: "saddle_preconditioner_constructor",
-                reason: format!("matrix dimension {} exceeds i32 CSR index range", a.m),
+                reason: format!("matrix dimension {} exceeds i32 CSR index range", matrix_m),
             });
         }
-        validate_csr_inputs(a.m, a.n, row_ptr_host, col_idx_host, values_host)?;
+        validate_csr_inputs(matrix_m, matrix_n, row_ptr_host, col_idx_host, values_host)?;
         HostCsrRef::try_new(
             pressure_schur.num_rows,
             pressure_schur.num_cols,
@@ -377,13 +638,13 @@ impl<'a, B: Backend, T: DeviceScalar> SaddlePointJacobiSchurBackend<'a, B, T> {
             operation: "saddle_preconditioner_constructor",
             reason: error.to_string(),
         })?;
-        if velocity_block_size > a.m {
+        if velocity_block_size > matrix_m {
             return Err(crate::BackendError::InvalidArgument {
                 operation: "saddle_preconditioner_constructor",
                 reason: "velocity block must fit inside matrix".into(),
             });
         }
-        let pressure_size = a.m - velocity_block_size;
+        let pressure_size = matrix_m - velocity_block_size;
         if pressure_schur.num_rows != pressure_size || pressure_schur.num_cols != pressure_size {
             return Err(crate::BackendError::InvalidArgument {
                 operation: "saddle_preconditioner_constructor",
@@ -394,17 +655,17 @@ impl<'a, B: Backend, T: DeviceScalar> SaddlePointJacobiSchurBackend<'a, B, T> {
             });
         }
 
-        let mut velocity_diag = vec![T::zero(); a.m];
+        let mut velocity_diag = vec![T::zero(); matrix_m];
         let (velocity_block_row_ptr, velocity_block_col_idx, velocity_block_values) =
             extract_embedded_velocity_block(
-                a.m,
+                matrix_m,
                 row_ptr_host,
                 col_idx_host,
                 values_host,
                 velocity_block_size,
             );
         let (pressure_schur_row_ptr, pressure_schur_col_idx, pressure_schur_values) =
-            embed_pressure_schur(a.m, velocity_block_size, pressure_schur);
+            embed_pressure_schur(matrix_m, velocity_block_size, pressure_schur);
         for row in 0..velocity_block_size {
             let lo = row_ptr_host[row] as usize;
             let hi = row_ptr_host[row + 1] as usize;
@@ -416,7 +677,7 @@ impl<'a, B: Backend, T: DeviceScalar> SaddlePointJacobiSchurBackend<'a, B, T> {
             }
         }
 
-        let mut pressure_diag = vec![T::zero(); a.m];
+        let mut pressure_diag = vec![T::zero(); matrix_m];
         for row in 0..pressure_schur.num_rows {
             let lo = pressure_schur.row_ptrs[row];
             let hi = pressure_schur.row_ptrs[row + 1];
@@ -428,12 +689,10 @@ impl<'a, B: Backend, T: DeviceScalar> SaddlePointJacobiSchurBackend<'a, B, T> {
             }
         }
 
-        let matrix_m = a.m;
-        let matrix_n = a.n;
         backend.try_inject_preconditioner_failure(
             PreconditionerFailureInjectionPoint::HierarchyUpload,
         )?;
-        let a = PersistentDeviceCsr::try_clone_from_device_csr(backend, a)?;
+        let a = make_matrix()?;
         backend.try_inject_preconditioner_failure(
             PreconditionerFailureInjectionPoint::DiagonalUpload,
         )?;
@@ -457,6 +716,9 @@ impl<'a, B: Backend, T: DeviceScalar> SaddlePointJacobiSchurBackend<'a, B, T> {
                 &velocity_block_values,
             )?,
         )?;
+        let schur_rows = pressure_schur.row_ptrs.to_vec();
+        let schur_columns = pressure_schur.col_indices.to_vec();
+        let schur_values = pressure_schur.values.to_vec();
         let pressure_schur = PersistentDeviceCsr::try_from_device_csr(
             backend,
             BackendCsr::try_from_host(
@@ -480,10 +742,18 @@ impl<'a, B: Backend, T: DeviceScalar> SaddlePointJacobiSchurBackend<'a, B, T> {
             velocity_block,
             pressure_schur,
             pressure_preconditioner,
+            owned_pressure_preconditioner: None,
             pressure_mask,
             velocity_diag_inv,
             pressure_diag_inv,
             n: matrix_m,
+            velocity_size: velocity_block_size,
+            host_rows: row_ptr_host.iter().map(|&i| i as usize).collect(),
+            host_columns: col_idx_host.iter().map(|&i| i as usize).collect(),
+            schur_rows,
+            schur_columns,
+            schur_values,
+            numeric_valid: true,
             velocity_degree: config.velocity_degree.max(1),
             velocity_damping: T::from_real(real_from_f64::<T>(config.velocity_damping)),
             pressure_degree: config.pressure_degree.max(1),
@@ -518,7 +788,11 @@ impl<'a, B: Backend, T: DeviceScalar> SaddlePointJacobiSchurBackend<'a, B, T> {
                 )?;
             }
             PressureSchurBackendKind::External => {
-                if let Some(preconditioner) = self.pressure_preconditioner {
+                if let Some(preconditioner) = self
+                    .owned_pressure_preconditioner
+                    .as_deref()
+                    .or(self.pressure_preconditioner)
+                {
                     preconditioner.try_apply(backend, r, y_pressure)?;
                     self.pressure_mask
                         .try_apply(backend, y_pressure, correction)?;
@@ -632,7 +906,11 @@ impl<'a, B: Backend, T: DeviceScalar> SaddlePointJacobiSchurBackend<'a, B, T> {
                 )?;
             }
             PressureSchurBackendKind::External => {
-                if let Some(preconditioner) = self.pressure_preconditioner {
+                if let Some(preconditioner) = self
+                    .owned_pressure_preconditioner
+                    .as_deref()
+                    .or(self.pressure_preconditioner)
+                {
                     // The default col-major adapter is allowed to stage through the host.
                     // Apply one column at a time through persistent device buffers so a
                     // composed pressure preconditioner remains device-resident as well.
@@ -781,6 +1059,13 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T>
         r: &B::Buffer<T>,
         z: &mut B::Buffer<T>,
     ) -> crate::BackendResult<()> {
+        if !self.numeric_valid {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "saddle_preconditioner_apply",
+                reason: "numeric refresh failed; complete a successful refresh before applying"
+                    .into(),
+            });
+        }
         backend.try_inject_preconditioner_failure(PreconditionerFailureInjectionPoint::Launch)?;
         if r.len() != self.n || z.len() != self.n {
             return Err(crate::BackendError::InvalidArgument {
@@ -870,6 +1155,13 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T>
         r: &B::Buffer<T>,
         z: &mut B::Buffer<T>,
     ) -> crate::BackendResult<()> {
+        if !self.numeric_valid {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "saddle_preconditioner_apply",
+                reason: "numeric refresh failed; complete a successful refresh before applying"
+                    .into(),
+            });
+        }
         backend.try_inject_preconditioner_failure(PreconditionerFailureInjectionPoint::Launch)?;
         let len = self
             .n

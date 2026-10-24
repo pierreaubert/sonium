@@ -85,13 +85,14 @@ cli = [
     "anyhow",
 ]
 
-# GPU backends — forwarded to sonium-compute. Activates the
-# CUDA / Metal arms inside `backend_gmres_bench` and any future
-# GPU-aware bench/test in this crate.
+# CUDA enables the backends exposed by the compatibility facade, including
+# direct and eigen APIs; consumers need not enable split-crate features separately.
 cuda = [
     "sonium-compute/cuda",
     "sonium-solvers-iterative/cuda",
     "sonium-solvers-preconditioners/cuda",
+    "sonium-solvers-direct/cuda",
+    "sonium-solvers-eigen/cuda",
 ]
 metal = ["sonium-compute/metal", "sonium-solvers-iterative/metal"]
 native-direct-perf = []

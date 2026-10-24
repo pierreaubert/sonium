@@ -3,17 +3,22 @@
 //! The operator and preconditioner see a contiguous column-major multi-vector
 //! and may use a native SpMM implementation.  The large block Arnoldi basis,
 //! orthogonalisation vectors, and least-squares candidate updates remain on
-//! the backend; only small coefficient blocks and final convergence records
-//! cross to the host.  This gives room FEM and repeated-load BEM callers a
-//! backend-resident block path without requiring every backend to expose a
-//! host-visible matrix view.
+//! the backend, including the initial residual and QR. Native validation and
+//! zeroing hooks avoid full-vector initialization transfers when available;
+//! other backends use checked host staging. Small QR/Krylov coefficients still
+//! cross to the host. Scalar recovery and final solution assembly use device
+//! copies, with retained scratch for repeated room FEM and BEM loads.
 //!
 //! The returned convergence values are always recomputed from `b - A*x` after
 //! each block step.  They are therefore true residuals, not only projected
 //! block-GMRES estimates.
 
+mod shapes;
+use shapes::BlockShape;
+
 use crate::gmres::{
-    GmresBackendConfig, GmresBackendError, GmresBackendStatus, gmres_backend_preconditioned,
+    GmresBackendConfig, GmresBackendError, GmresBackendStatus, GmresWorkspace,
+    gmres_backend_preconditioned, gmres_backend_preconditioned_pooled_with_workspace,
 };
 use crate::operator::{DeviceOperator, DevicePreconditioner};
 use crate::{Backend, BufferView, DeviceBufferLike, DeviceScalar, ReductionMode};
@@ -50,7 +55,10 @@ where
 /// Caller-owned scratch for repeated block-GMRES solves with the same backend
 /// and scalar family. Device buffers are retained at the exact full-RHS and
 /// active-block shapes used by the most recent solve; changing either shape
-/// replaces that class of buffers on the next call.
+/// replaces that class of buffers on the next call. Scalar fallback column
+/// buffers are retained independently. Use `with_fallback_pool` to retain
+/// scalar Krylov scratch as well, or `with_retained_shapes` to also cache
+/// previously visited active-block widths until `clear`.
 pub struct BlockGmresWorkspace<B: Backend, T: DeviceScalar> {
     n: usize,
     full_len: usize,
@@ -83,6 +91,15 @@ pub struct BlockGmresWorkspace<B: Backend, T: DeviceScalar> {
     resident_projection: Option<B::Buffer<T>>,
     resident_coefficients: Option<B::Buffer<T>>,
     host: BlockGmresHostWorkspace<T>,
+    fallback: BlockFallback<B, T>,
+    retain_active_shapes: bool,
+    cached_shapes: Vec<BlockShape<B, T>>,
+}
+
+struct BlockFallback<B: Backend, T: DeviceScalar> {
+    columns: Option<[B::Buffer<T>; 3]>,
+    pool: Option<crate::MemoryPool<B>>,
+    krylov: GmresWorkspace<B, T>,
 }
 
 /// Reusable host-side vectors for the unavoidable staging and residual work
@@ -96,15 +113,9 @@ struct BlockGmresHostWorkspace<T: DeviceScalar> {
     block_len: usize,
     b_full: Vec<T>,
     x_full: Vec<T>,
-    ax_full: Vec<T>,
-    residual_full: Vec<T>,
     b_norms: Vec<T::Real>,
     residual_norms: Vec<T::Real>,
     active: Vec<usize>,
-    b_active: Vec<T>,
-    x_active: Vec<T>,
-    r_active: Vec<T>,
-    best_x: Vec<T>,
     best_residuals: Vec<T::Real>,
     /// Krylov basis and Hessenberg storage retained across repeated solves.
     v_blocks: Vec<Vec<T>>,
@@ -118,16 +129,12 @@ struct BlockGmresHostWorkspace<T: DeviceScalar> {
     ax_scratch: Vec<T>,
     residual_scratch: Vec<T>,
     /// QR and dense small-system scratch retained across Arnoldi steps.
-    qr_q: Vec<T>,
     qr_r: Vec<T>,
-    qr_work: Vec<T>,
     initial_r: Vec<T>,
     block_inner: Vec<T>,
     least_squares_normal: Vec<T>,
     least_squares_rhs: Vec<T>,
     least_squares_solution: Vec<T>,
-    resident_projection: Vec<T>,
-    resident_coefficients: Vec<T>,
 }
 
 impl<T: DeviceScalar> BlockGmresHostWorkspace<T> {
@@ -137,15 +144,9 @@ impl<T: DeviceScalar> BlockGmresHostWorkspace<T> {
             block_len: 0,
             b_full: Vec::new(),
             x_full: Vec::new(),
-            ax_full: Vec::new(),
-            residual_full: Vec::new(),
             b_norms: Vec::new(),
             residual_norms: Vec::new(),
             active: Vec::new(),
-            b_active: Vec::new(),
-            x_active: Vec::new(),
-            r_active: Vec::new(),
-            best_x: Vec::new(),
             best_residuals: Vec::new(),
             v_blocks: Vec::new(),
             z_blocks: Vec::new(),
@@ -156,61 +157,29 @@ impl<T: DeviceScalar> BlockGmresHostWorkspace<T> {
             w_scratch: Vec::new(),
             ax_scratch: Vec::new(),
             residual_scratch: Vec::new(),
-            qr_q: Vec::new(),
             qr_r: Vec::new(),
-            qr_work: Vec::new(),
             initial_r: Vec::new(),
             block_inner: Vec::new(),
             least_squares_normal: Vec::new(),
             least_squares_rhs: Vec::new(),
             least_squares_solution: Vec::new(),
-            resident_projection: Vec::new(),
-            resident_coefficients: Vec::new(),
         }
     }
 
     fn ensure_full(&mut self, total: usize, rhs: usize) -> Result<(), BlockGmresError> {
-        reserve_block_host(&mut self.b_full, total, "block RHS")?;
-        reserve_block_host(&mut self.x_full, total, "block solution")?;
-        reserve_block_host(&mut self.ax_full, total, "block matvec")?;
-        reserve_block_host(&mut self.residual_full, total, "block residual")?;
         reserve_block_host(&mut self.b_norms, rhs, "block RHS norms")?;
         reserve_block_host(&mut self.residual_norms, rhs, "block residual norms")?;
         reserve_block_host(&mut self.active, rhs, "active RHS indices")?;
         self.full_len = total;
-        self.b_full.resize(total, T::zero());
-        self.x_full.resize(total, T::zero());
-        self.ax_full.resize(total, T::zero());
-        self.residual_full.resize(total, T::zero());
         self.b_norms.resize(rhs, T::Real::zero());
         self.residual_norms.resize(rhs, T::Real::zero());
         self.active.clear();
         Ok(())
     }
 
-    fn ensure_resident_reductions(&mut self, count: usize) -> Result<(), BlockGmresError> {
-        reserve_block_host(&mut self.resident_projection, count, "resident projection")?;
-        reserve_block_host(
-            &mut self.resident_coefficients,
-            count,
-            "resident coefficients",
-        )?;
-        self.resident_projection.resize(count, T::zero());
-        self.resident_coefficients.resize(count, T::zero());
-        Ok(())
-    }
-
     fn ensure_block(&mut self, block_len: usize, block_size: usize) -> Result<(), BlockGmresError> {
-        reserve_block_host(&mut self.b_active, block_len, "active block RHS")?;
-        reserve_block_host(&mut self.x_active, block_len, "active block solution")?;
-        reserve_block_host(&mut self.r_active, block_len, "active block residual")?;
-        reserve_block_host(&mut self.best_x, block_len, "best block solution")?;
         reserve_block_host(&mut self.best_residuals, block_size, "best block residuals")?;
         self.block_len = block_len;
-        self.b_active.resize(block_len, T::zero());
-        self.x_active.resize(block_len, T::zero());
-        self.r_active.resize(block_len, T::zero());
-        self.best_x.resize(block_len, T::zero());
         self.best_residuals.resize(block_size, T::Real::zero());
         Ok(())
     }
@@ -222,15 +191,9 @@ impl<T: DeviceScalar> BlockGmresHostWorkspace<T> {
     fn capacity(&self) -> usize {
         self.b_full.capacity()
             + self.x_full.capacity()
-            + self.ax_full.capacity()
-            + self.residual_full.capacity()
             + self.b_norms.capacity()
             + self.residual_norms.capacity()
             + self.active.capacity()
-            + self.b_active.capacity()
-            + self.x_active.capacity()
-            + self.r_active.capacity()
-            + self.best_x.capacity()
             + self.best_residuals.capacity()
             + self.v_blocks.iter().map(Vec::capacity).sum::<usize>()
             + self.z_blocks.iter().map(Vec::capacity).sum::<usize>()
@@ -246,9 +209,7 @@ impl<T: DeviceScalar> BlockGmresHostWorkspace<T> {
             + self.w_scratch.capacity()
             + self.ax_scratch.capacity()
             + self.residual_scratch.capacity()
-            + self.qr_q.capacity()
             + self.qr_r.capacity()
-            + self.qr_work.capacity()
             + self.initial_r.capacity()
             + self.block_inner.capacity()
             + self.least_squares_normal.capacity()
@@ -352,7 +313,48 @@ impl<B: Backend, T: DeviceScalar> BlockGmresWorkspace<B, T> {
             resident_projection: None,
             resident_coefficients: None,
             host: BlockGmresHostWorkspace::new(),
+            retain_active_shapes: false,
+            cached_shapes: Vec::new(),
+            fallback: BlockFallback {
+                columns: None,
+                pool: None,
+                krylov: GmresWorkspace::new(n),
+            },
         }
+    }
+
+    /// Retain scalar fallback Krylov storage through the supplied pool.
+    ///
+    /// Pass `pool.backend()` to solves using this workspace. The pool covers
+    /// scalar fallback Krylov buffers; block buffers and the three retained
+    /// fallback columns continue to use the backend allocator directly.
+    pub fn with_fallback_pool(n: usize, pool: &crate::MemoryPool<B>) -> Self {
+        let mut workspace = Self::new(n);
+        workspace.fallback.pool = Some(pool.clone());
+        workspace
+    }
+
+    /// Retain active-width buffers as well as pooled scalar-fallback scratch.
+    ///
+    /// Deflation can visit several active RHS widths. This opt-in constructor
+    /// retains each visited width instead of replacing its buffers, trading
+    /// memory for allocation reuse. New widths or larger Krylov limits may grow
+    /// storage; `clear` releases every cached shape. Block basis buffers retain
+    /// their existing backend allocation policy, so pool quota coverage is partial.
+    pub fn with_retained_shapes(n: usize, pool: &crate::MemoryPool<B>) -> Self {
+        let mut workspace = Self::with_fallback_pool(n, pool);
+        workspace.retain_active_shapes = true;
+        workspace
+    }
+
+    /// Bytes cached in the optional scalar fallback Krylov workspace.
+    ///
+    /// These bytes are excluded from `device_capacity` and `device_buffer_count`.
+    ///
+    /// # Errors
+    /// Returns an error if the scalar workspace cache was poisoned.
+    pub fn fallback_cached_bytes(&self) -> Result<usize, GmresBackendError> {
+        self.fallback.krylov.cached_bytes()
     }
 
     /// Operator dimension this workspace accepts.
@@ -360,7 +362,7 @@ impl<B: Backend, T: DeviceScalar> BlockGmresWorkspace<B, T> {
         self.n
     }
 
-    /// Number of retained device buffers.
+    /// Number of directly retained buffers, excluding pooled scalar Krylov storage.
     pub fn device_buffer_count(&self) -> usize {
         [
             self.full_x.is_some(),
@@ -384,11 +386,24 @@ impl<B: Backend, T: DeviceScalar> BlockGmresWorkspace<B, T> {
         .count()
             + self.resident_basis.len()
             + self.resident_z.len()
+            + self.fallback.columns.as_ref().map_or(0, |_| 3)
+            + self
+                .cached_shapes
+                .iter()
+                .map(BlockShape::buffer_count)
+                .sum::<usize>()
     }
 
-    /// Number of retained device scalar slots.
+    /// Directly retained scalar slots, excluding pooled scalar Krylov storage.
     pub fn device_capacity(&self) -> usize {
-        self.full_x.as_ref().map_or(0, |buffer| buffer.len())
+        self.cached_shapes
+            .iter()
+            .map(BlockShape::capacity)
+            .sum::<usize>()
+            + self.fallback.columns.as_ref().map_or(0, |columns| {
+                columns.iter().map(DeviceBufferLike::len).sum::<usize>()
+            })
+            + self.full_x.as_ref().map_or(0, |buffer| buffer.len())
             + self.full_ax.as_ref().map_or(0, |buffer| buffer.len())
             + self.block_x.as_ref().map_or(0, |buffer| buffer.len())
             + self.block_v.as_ref().map_or(0, |buffer| buffer.len())
@@ -438,8 +453,11 @@ impl<B: Backend, T: DeviceScalar> BlockGmresWorkspace<B, T> {
         self.host.capacity()
     }
 
-    /// Drop all retained device and shape state.
+    /// Release workspace buffers and shape state.
+    ///
+    /// The caller's pool may cache released scalar buffers for later reuse.
     pub fn clear(&mut self) {
+        self.cached_shapes.clear();
         self.full_len = 0;
         self.block_len = 0;
         self.full_x = None;
@@ -461,9 +479,19 @@ impl<B: Backend, T: DeviceScalar> BlockGmresWorkspace<B, T> {
         self.resident_projection = None;
         self.resident_coefficients = None;
         self.host.clear();
+        self.fallback.columns = None;
+        self.fallback.krylov = GmresWorkspace::new(self.n);
     }
 
     fn ensure_full(&mut self, backend: &B, len: usize) -> Result<(), BlockGmresError> {
+        if self.block_column.is_none() {
+            self.block_column = Some(backend.raw_alloc::<T>(self.n).map_err(|error| {
+                BlockGmresError::Allocation {
+                    label: "block column scratch",
+                    reason: error.to_string(),
+                }
+            })?);
+        }
         if self.full_len == len && self.full_x.is_some() && self.full_ax.is_some() {
             return Ok(());
         }
@@ -494,6 +522,27 @@ impl<B: Backend, T: DeviceScalar> BlockGmresWorkspace<B, T> {
             && self.block_ax.is_some()
         {
             return Ok(());
+        }
+        if self.retain_active_shapes {
+            self.cached_shapes
+                .try_reserve(1)
+                .map_err(|error| BlockGmresError::Allocation {
+                    label: "retained block shapes",
+                    reason: error.to_string(),
+                })?;
+            if let Some(index) = self
+                .cached_shapes
+                .iter()
+                .position(|shape| shape.block_len == len)
+            {
+                let cached = self.cached_shapes.swap_remove(index);
+                let previous = self.take_block_shape();
+                if previous.block_len != 0 {
+                    self.cached_shapes.push(previous);
+                }
+                self.install_block_shape(cached);
+                return Ok(());
+            }
         }
         let x = backend
             .raw_alloc::<T>(len)
@@ -538,13 +587,6 @@ impl<B: Backend, T: DeviceScalar> BlockGmresWorkspace<B, T> {
                     label: "block initial solution",
                     reason: error.to_string(),
                 })?;
-        let column =
-            backend
-                .raw_alloc::<T>(self.n)
-                .map_err(|error| BlockGmresError::Allocation {
-                    label: "block column scratch",
-                    reason: error.to_string(),
-                })?;
         let residual =
             backend
                 .raw_alloc::<T>(len)
@@ -552,6 +594,10 @@ impl<B: Backend, T: DeviceScalar> BlockGmresWorkspace<B, T> {
                     label: "block residual",
                     reason: error.to_string(),
                 })?;
+        if self.retain_active_shapes && self.block_len != 0 {
+            let previous = self.take_block_shape();
+            self.cached_shapes.push(previous);
+        }
         self.block_len = len;
         self.block_x = Some(x);
         self.block_v = Some(v);
@@ -560,7 +606,6 @@ impl<B: Backend, T: DeviceScalar> BlockGmresWorkspace<B, T> {
         self.block_ax = Some(ax);
         self.block_b = Some(b);
         self.block_x_initial = Some(x_initial);
-        self.block_column = Some(column);
         self.block_residual = Some(residual);
         Ok(())
     }
@@ -733,6 +778,33 @@ where
         .map_err(|error| BlockGmresError::Backend(error.to_string()))
 }
 
+fn validate_block_input<B: Backend, T: DeviceScalar>(
+    backend: &B,
+    input: &B::Buffer<T>,
+    staging: &mut Vec<T>,
+    label: &str,
+) -> Result<(), BlockGmresError> {
+    let finite = match backend
+        .try_all_finite_native(input)
+        .map_err(|error| BlockGmresError::Backend(error.to_string()))?
+    {
+        Some(finite) => finite,
+        None => {
+            reserve_block_host(staging, input.len(), "input validation")?;
+            staging.resize(input.len(), T::zero());
+            copy_d2h_checked(backend, input, staging)?;
+            staging.iter().all(DeviceScalar::is_finite)
+        }
+    };
+    if finite {
+        Ok(())
+    } else {
+        Err(BlockGmresError::InvalidArgument(format!(
+            "block-GMRES {label} contains non-finite values"
+        )))
+    }
+}
+
 fn missing_workspace_buffer(label: &'static str) -> BlockGmresError {
     BlockGmresError::Backend(format!(
         "block-GMRES workspace buffer {label} is not initialized"
@@ -817,6 +889,13 @@ where
     P: DevicePreconditioner<B, T> + ?Sized,
     T: DeviceScalar + std::ops::AddAssign,
 {
+    if let Some(pool) = &workspace.fallback.pool
+        && !std::ptr::eq(backend, pool.backend())
+    {
+        return Err(BlockGmresError::InvalidArgument(
+            "block workspace requires its fallback pool's backend instance".into(),
+        ));
+    }
     if !config.tolerance.is_finite() || config.tolerance < T::Real::zero() {
         return Err(BlockGmresError::InvalidArgument(
             "block-GMRES tolerance must be finite and non-negative".into(),
@@ -864,48 +943,34 @@ where
         )));
     }
 
-    // Allocate both device and host staging buffers once per shape.  The
-    // caller-owned workspace keeps these large vectors across repeated solves.
+    // Retain device storage and compact host control state. Full input staging
+    // is allocated lazily only if a backend lacks native initialization hooks.
     workspace.ensure_full(backend, total)?;
     workspace.host.ensure_full(total, rhs)?;
-    copy_d2h_checked(backend, b, &mut workspace.host.b_full)?;
+    validate_block_input(backend, b, &mut workspace.host.b_full, "RHS")?;
     if let Some(x0) = x0 {
-        copy_d2h_checked(backend, x0, &mut workspace.host.x_full)?;
-    } else {
-        workspace.host.x_full.fill(T::zero());
-    }
-    // Keep local mutable copies for the rank-deficient fallback; the
-    // workspace-owned staging vectors are reused for the common path below.
-    let b_full = std::mem::take(&mut workspace.host.b_full);
-    let mut x_full = std::mem::take(&mut workspace.host.x_full);
-    // Reject non-finite caller data before any device operation. Otherwise a
-    // NaN norm can silently remove a RHS from the active set and publish a
-    // non-converged status with a non-finite iterate.
-    if b_full.iter().any(|value| !value.is_finite()) {
-        workspace.host.b_full = b_full;
-        workspace.host.x_full = x_full;
-        return Err(BlockGmresError::InvalidArgument(
-            "block-GMRES RHS contains non-finite values".into(),
-        ));
-    }
-    if x_full.iter().any(|value| !value.is_finite()) {
-        workspace.host.b_full = b_full;
-        workspace.host.x_full = x_full;
-        return Err(BlockGmresError::InvalidArgument(
-            "block-GMRES initial guess contains non-finite values".into(),
-        ));
+        validate_block_input(backend, x0, &mut workspace.host.x_full, "initial guess")?;
     }
 
     // Compute one initial residual for the full set.  This also lets us
     // deflate zero RHS columns without forcing a rank-deficient QR block.
-    copy_h2d_checked(
-        backend,
-        &x_full,
-        workspace
-            .full_x
-            .as_mut()
-            .ok_or_else(|| missing_workspace_buffer("full solution"))?,
-    )?;
+    let full_x = workspace
+        .full_x
+        .as_mut()
+        .ok_or_else(|| missing_workspace_buffer("full solution"))?;
+    if let Some(x0) = x0 {
+        backend
+            .try_copy_d2d(x0, full_x)
+            .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
+    } else if !backend
+        .try_zero_native(full_x)
+        .map_err(|error| BlockGmresError::Backend(error.to_string()))?
+    {
+        reserve_block_host(&mut workspace.host.x_full, total, "zero initial guess")?;
+        workspace.host.x_full.resize(total, T::zero());
+        workspace.host.x_full.fill(T::zero());
+        copy_h2d_checked(backend, &workspace.host.x_full, full_x)?;
+    }
     a.try_apply_colmajor(
         backend,
         rhs,
@@ -919,28 +984,30 @@ where
             .ok_or_else(|| missing_workspace_buffer("full operator result"))?,
     )
     .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
-    copy_d2h_checked(
-        backend,
-        workspace
-            .full_ax
-            .as_ref()
-            .ok_or_else(|| missing_workspace_buffer("full operator result"))?,
-        &mut workspace.host.ax_full,
-    )?;
-    let ax_full = &workspace.host.ax_full;
-    for (residual, (&bi, &axi)) in workspace
-        .host
-        .residual_full
-        .iter_mut()
-        .zip(b_full.iter().zip(ax_full))
-    {
-        *residual = bi - axi;
-    }
-
+    let residual = workspace
+        .full_ax
+        .as_mut()
+        .ok_or_else(|| missing_workspace_buffer("full residual"))?;
+    backend
+        .try_scale(T::zero() - T::one(), residual)
+        .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
+    backend
+        .try_axpy(T::one(), b, residual)
+        .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
     let tolerance = config.tolerance.max(T::Real::zero());
     for col in 0..rhs {
-        workspace.host.b_norms[col] = norm_column(&b_full, n, col);
-        workspace.host.residual_norms[col] = norm_column(&workspace.host.residual_full, n, col);
+        let column = workspace
+            .block_column
+            .as_mut()
+            .ok_or_else(|| missing_workspace_buffer("column scratch"))?;
+        copy_device_region(backend, b, col * n, column, 0, n)?;
+        workspace.host.b_norms[col] = backend
+            .try_nrm2_with_mode(ReductionMode::Fast, column)
+            .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
+        copy_device_region(backend, residual, col * n, column, 0, n)?;
+        workspace.host.residual_norms[col] = backend
+            .try_nrm2_with_mode(ReductionMode::Fast, column)
+            .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
     }
     workspace.host.active.extend((0..rhs).filter(|&col| {
         let b_norm = workspace.host.b_norms[col];
@@ -956,12 +1023,18 @@ where
     let residual_norms = std::mem::take(&mut workspace.host.residual_norms);
     if active.is_empty() {
         let status = make_status(0, &b_norms, &residual_norms, tolerance, rhs)?;
-        workspace.host.b_full = b_full;
-        workspace.host.x_full = x_full;
         workspace.host.active = active;
         workspace.host.b_norms = b_norms;
         workspace.host.residual_norms = residual_norms;
-        copy_h2d_checked(backend, &workspace.host.x_full, out)?;
+        backend
+            .try_copy_d2d(
+                workspace
+                    .full_x
+                    .as_ref()
+                    .ok_or_else(|| missing_workspace_buffer("full solution"))?,
+                out,
+            )
+            .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
         return Ok(status);
     }
 
@@ -974,44 +1047,89 @@ where
     workspace.ensure_block(backend, block_storage)?;
     workspace.host.ensure_block(block_storage, block_size)?;
     for (active_col, &full_col) in active.iter().enumerate() {
-        let src = full_col * n..(full_col + 1) * n;
-        let dst = active_col * n..(active_col + 1) * n;
-        workspace.host.b_active[dst.clone()].copy_from_slice(&b_full[src.clone()]);
-        workspace.host.x_active[dst.clone()].copy_from_slice(&x_full[src]);
-        workspace.host.r_active[dst]
-            .copy_from_slice(&workspace.host.residual_full[full_col * n..(full_col + 1) * n]);
+        copy_device_region(
+            backend,
+            b,
+            full_col * n,
+            workspace
+                .block_b
+                .as_mut()
+                .ok_or_else(|| missing_workspace_buffer("RHS"))?,
+            active_col * n,
+            n,
+        )?;
+        copy_device_region(
+            backend,
+            workspace
+                .full_x
+                .as_ref()
+                .ok_or_else(|| missing_workspace_buffer("full solution"))?,
+            full_col * n,
+            workspace
+                .block_x_initial
+                .as_mut()
+                .ok_or_else(|| missing_workspace_buffer("initial solution"))?,
+            active_col * n,
+            n,
+        )?;
+        copy_device_region(
+            backend,
+            workspace
+                .full_ax
+                .as_ref()
+                .ok_or_else(|| missing_workspace_buffer("full residual"))?,
+            full_col * n,
+            workspace
+                .block_w
+                .as_mut()
+                .ok_or_else(|| missing_workspace_buffer("active residual"))?,
+            active_col * n,
+            n,
+        )?;
     }
-
     let qr_tolerance = T::Real::epsilon().sqrt();
-    let rank = qr_block_into(
-        &workspace.host.r_active,
+    let rank = qr_device_block_into(
+        backend,
+        workspace
+            .block_w
+            .as_ref()
+            .ok_or_else(|| missing_workspace_buffer("active residual"))?,
+        workspace
+            .block_v
+            .as_mut()
+            .ok_or_else(|| missing_workspace_buffer("initial basis"))?,
+        workspace
+            .block_column
+            .as_mut()
+            .ok_or_else(|| missing_workspace_buffer("column scratch"))?,
         n,
         block_size,
         qr_tolerance,
-        &mut workspace.host.qr_q,
         &mut workspace.host.qr_r,
-        &mut workspace.host.qr_work,
+        &mut workspace.host.block_inner,
     )?;
     if rank < block_size {
         // A dependent initial residual block contains fewer independent
         // directions than requested RHS columns.  Deflate that block to the
         // scalar path instead of rejecting a perfectly solvable batch.  This
-        // is a cold-path fallback; full-rank batches retain the SpMM/block
-        // Krylov path below.
+        // fallback can also occur in small residual-correction systems;
+        // full-rank batches retain the SpMM/block Krylov path below.
         let result = solve_rank_deficient_columns(
+            &mut workspace.fallback,
             backend,
             a,
             precond,
-            &b_full,
-            &mut x_full,
+            b,
+            workspace
+                .full_x
+                .as_mut()
+                .ok_or_else(|| missing_workspace_buffer("full solution"))?,
             &active,
             n,
             config,
             tolerance,
             out,
         );
-        workspace.host.b_full = b_full;
-        workspace.host.x_full = x_full;
         workspace.host.active = active;
         workspace.host.b_norms = b_norms;
         workspace.host.residual_norms = residual_norms;
@@ -1032,45 +1150,27 @@ where
     // Block-Hessenberg storage: rows of block matrices, each row indexed by
     // Arnoldi block and each column by the current block step.
     workspace.host.best_residuals.clear();
-    let initial_residuals =
-        residual_norms_for_active(&workspace.host.residual_full, n, &active, &b_norms)?;
     reserve_block_host(
         &mut workspace.host.best_residuals,
-        initial_residuals.len(),
+        active.len(),
         "best block residuals",
     )?;
     workspace
         .host
         .best_residuals
-        .extend_from_slice(&initial_residuals);
+        .extend(active.iter().map(|&col| {
+            if b_norms[col] > T::Real::zero() {
+                residual_norms[col] / b_norms[col]
+            } else {
+                residual_norms[col]
+            }
+        }));
     workspace.host.h_scalar.clear();
     workspace.host.rhs_scalar.clear();
     let resident_blocks = max_iterations.checked_add(1).ok_or_else(|| {
         BlockGmresError::InvalidArgument("resident block basis count overflow".into())
     })?;
     workspace.ensure_resident_krylov(backend, block_storage, block_size, resident_blocks)?;
-    let max_projection_count = block_size.checked_mul(resident_blocks).ok_or_else(|| {
-        BlockGmresError::InvalidArgument("resident projection size overflow".into())
-    })?;
-    workspace
-        .host
-        .ensure_resident_reductions(max_projection_count)?;
-    copy_h2d_checked(
-        backend,
-        &workspace.host.b_active,
-        workspace
-            .block_b
-            .as_mut()
-            .ok_or_else(|| missing_workspace_buffer("RHS"))?,
-    )?;
-    copy_h2d_checked(
-        backend,
-        &workspace.host.x_active,
-        workspace
-            .block_x_initial
-            .as_mut()
-            .ok_or_else(|| missing_workspace_buffer("initial solution"))?,
-    )?;
     backend
         .try_copy_d2d(
             workspace
@@ -1083,11 +1183,15 @@ where
                 .ok_or_else(|| missing_workspace_buffer("solution"))?,
         )
         .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
-    copy_h2d_checked(
-        backend,
-        &workspace.host.qr_q,
-        &mut workspace.resident_basis[0],
-    )?;
+    backend
+        .try_copy_d2d(
+            workspace
+                .block_v
+                .as_ref()
+                .ok_or_else(|| missing_workspace_buffer("initial basis"))?,
+            &mut workspace.resident_basis[0],
+        )
+        .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
     copy_device_region(
         backend,
         &workspace.resident_basis[0],
@@ -1207,9 +1311,14 @@ where
                         projection,
                     )
                     .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
-                copy_d2h_checked(backend, projection, &mut workspace.host.resident_projection)?;
-                workspace.host.block_inner[..basis_count]
-                    .copy_from_slice(&workspace.host.resident_projection[..basis_count]);
+                backend
+                    .try_copy_view_d2h(
+                        projection,
+                        BufferView::new(projection.len(), 0, basis_count, 1)
+                            .map_err(|error| BlockGmresError::Backend(error.to_string()))?,
+                        &mut workspace.host.block_inner[..basis_count],
+                    )
+                    .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
             } else {
                 backend
                     .try_multi_dot_strided_with_mode_into(
@@ -1316,9 +1425,14 @@ where
                             projection,
                         )
                         .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
-                    copy_d2h_checked(backend, projection, &mut workspace.host.resident_projection)?;
-                    workspace.host.block_inner[..column]
-                        .copy_from_slice(&workspace.host.resident_projection[..column]);
+                    backend
+                        .try_copy_view_d2h(
+                            projection,
+                            BufferView::new(projection.len(), 0, column, 1)
+                                .map_err(|error| BlockGmresError::Backend(error.to_string()))?,
+                            &mut workspace.host.block_inner[..column],
+                        )
+                        .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
                 } else {
                     backend
                         .try_multi_dot_strided_with_mode_into(
@@ -1455,19 +1569,21 @@ where
                 // through the checked scalar path instead of publishing a
                 // panic or an unusable block iterate.
                 let result = solve_rank_deficient_columns(
+                    &mut workspace.fallback,
                     backend,
                     a,
                     precond,
-                    &b_full,
-                    &mut x_full,
+                    b,
+                    workspace
+                        .full_x
+                        .as_mut()
+                        .ok_or_else(|| missing_workspace_buffer("full solution"))?,
                     &active,
                     n,
                     config,
                     tolerance,
                     out,
                 );
-                workspace.host.b_full = b_full;
-                workspace.host.x_full = x_full;
                 workspace.host.active = active;
                 workspace.host.b_norms = b_norms;
                 workspace.host.residual_norms = residual_norms;
@@ -1515,17 +1631,18 @@ where
                 *coefficient =
                     workspace.host.least_squares_solution[basis_index * block_size + rhs_col];
             }
-            workspace.host.resident_coefficients[..z_basis_count]
-                .copy_from_slice(&workspace.host.block_inner[..z_basis_count]);
-            workspace.host.resident_coefficients[z_basis_count..].fill(T::zero());
-            copy_h2d_checked(
-                backend,
-                &workspace.host.resident_coefficients,
-                workspace
-                    .resident_coefficients
-                    .as_mut()
-                    .ok_or_else(|| missing_workspace_buffer("resident coefficients"))?,
-            )?;
+            let coefficients = workspace
+                .resident_coefficients
+                .as_mut()
+                .ok_or_else(|| missing_workspace_buffer("resident coefficients"))?;
+            backend
+                .try_copy_view_h2d(
+                    &workspace.host.block_inner[..z_basis_count],
+                    coefficients,
+                    BufferView::new(coefficients.len(), 0, z_basis_count, 1)
+                        .map_err(|error| BlockGmresError::Backend(error.to_string()))?,
+                )
+                .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
             backend
                 .try_basis_axpy_strided_device(
                     workspace
@@ -1650,19 +1767,21 @@ where
         }
         if breakdown {
             let result = solve_rank_deficient_columns(
+                &mut workspace.fallback,
                 backend,
                 a,
                 precond,
-                &b_full,
-                &mut x_full,
+                b,
+                workspace
+                    .full_x
+                    .as_mut()
+                    .ok_or_else(|| missing_workspace_buffer("full solution"))?,
                 &active,
                 n,
                 config,
                 tolerance,
                 out,
             );
-            workspace.host.b_full = b_full;
-            workspace.host.x_full = x_full;
             workspace.host.active = active;
             workspace.host.b_norms = b_norms;
             workspace.host.residual_norms = residual_norms;
@@ -1670,20 +1789,31 @@ where
         }
     }
 
-    copy_d2h_checked(
-        backend,
-        workspace
-            .block_x
-            .as_ref()
-            .ok_or_else(|| missing_workspace_buffer("solution"))?,
-        &mut workspace.host.x_active,
-    )?;
-
     for (active_col, &full_col) in active.iter().enumerate() {
-        x_full[full_col * n..(full_col + 1) * n]
-            .copy_from_slice(&workspace.host.x_active[active_col * n..(active_col + 1) * n]);
+        copy_device_region(
+            backend,
+            workspace
+                .block_x
+                .as_ref()
+                .ok_or_else(|| missing_workspace_buffer("solution"))?,
+            active_col * n,
+            workspace
+                .full_x
+                .as_mut()
+                .ok_or_else(|| missing_workspace_buffer("full solution"))?,
+            full_col * n,
+            n,
+        )?;
     }
-    copy_h2d_checked(backend, &x_full, out)?;
+    backend
+        .try_copy_d2d(
+            workspace
+                .full_x
+                .as_ref()
+                .ok_or_else(|| missing_workspace_buffer("full solution"))?,
+            out,
+        )
+        .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
 
     reserve_block_host(
         &mut workspace.host.full_residuals,
@@ -1694,8 +1824,6 @@ where
     for (active_col, &full_col) in active.iter().enumerate() {
         workspace.host.full_residuals[full_col] = workspace.host.best_residuals[active_col];
     }
-    workspace.host.b_full = b_full;
-    workspace.host.x_full = x_full;
     workspace.host.active = active;
     workspace.host.b_norms = b_norms;
     workspace.host.residual_norms = residual_norms;
@@ -1709,11 +1837,15 @@ where
         // non-convergence is reported by the true residual gate rather than
         // returning an unusable partial block iterate.
         solve_rank_deficient_columns(
+            &mut workspace.fallback,
             backend,
             a,
             precond,
-            &workspace.host.b_full,
-            &mut workspace.host.x_full,
+            b,
+            workspace
+                .full_x
+                .as_mut()
+                .ok_or_else(|| missing_workspace_buffer("full solution"))?,
             &workspace.host.active,
             n,
             config,
@@ -1725,11 +1857,12 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn solve_rank_deficient_columns<B, A, P, T>(
+    fallback: &mut BlockFallback<B, T>,
     backend: &B,
     a: &A,
     precond: &P,
-    b_full: &[T],
-    x_full: &mut [T],
+    b_full: &B::Buffer<T>,
+    x_full: &mut B::Buffer<T>,
     active: &[usize],
     n: usize,
     config: &BlockGmresConfig<T::Real>,
@@ -1750,57 +1883,54 @@ where
         reserved_block_host::<T::Real>(active.len(), "rank-deficient residuals")?;
     relative_residuals.resize(active.len(), T::Real::zero());
     let mut max_iterations = 0usize;
+    if fallback.columns.is_none() {
+        let allocate = || {
+            backend
+                .raw_alloc::<T>(n)
+                .map_err(|error| BlockGmresError::Allocation {
+                    label: "rank-deficient column",
+                    reason: error.to_string(),
+                })
+        };
+        fallback.columns = Some([allocate()?, allocate()?, allocate()?]);
+    }
+    let [b_column, x_initial, x_column] = fallback
+        .columns
+        .as_mut()
+        .ok_or_else(|| missing_workspace_buffer("scalar fallback columns"))?;
     for (active_position, &full_col) in active.iter().enumerate() {
-        let mut b_column =
-            backend
-                .raw_alloc::<T>(n)
-                .map_err(|error| BlockGmresError::Allocation {
-                    label: "rank-deficient RHS",
-                    reason: error.to_string(),
-                })?;
-        let mut x_initial =
-            backend
-                .raw_alloc::<T>(n)
-                .map_err(|error| BlockGmresError::Allocation {
-                    label: "rank-deficient initial guess",
-                    reason: error.to_string(),
-                })?;
-        let mut x_column =
-            backend
-                .raw_alloc::<T>(n)
-                .map_err(|error| BlockGmresError::Allocation {
-                    label: "rank-deficient solution",
-                    reason: error.to_string(),
-                })?;
-        copy_h2d_checked(
-            backend,
-            &b_full[full_col * n..(full_col + 1) * n],
-            &mut b_column,
-        )?;
-        copy_h2d_checked(
-            backend,
-            &x_full[full_col * n..(full_col + 1) * n],
-            &mut x_initial,
-        )?;
-        let status = gmres_backend_preconditioned(
-            backend,
-            a,
-            precond,
-            &b_column,
-            Some(&x_initial),
-            &mut x_column,
-            &scalar_config,
-        )
+        copy_device_region(backend, b_full, full_col * n, b_column, 0, n)?;
+        copy_device_region(backend, x_full, full_col * n, x_initial, 0, n)?;
+        let status = if let Some(pool) = &fallback.pool {
+            gmres_backend_preconditioned_pooled_with_workspace(
+                pool,
+                &mut fallback.krylov,
+                a,
+                precond,
+                b_column,
+                Some(x_initial),
+                x_column,
+                &scalar_config,
+            )
+        } else {
+            gmres_backend_preconditioned(
+                backend,
+                a,
+                precond,
+                b_column,
+                Some(x_initial),
+                x_column,
+                &scalar_config,
+            )
+        }
         .map_err(map_rank_deficient_fallback_error)?;
         max_iterations = max_iterations.max(status.iterations);
         relative_residuals[active_position] = status.final_residual;
-        copy_d2h_checked(
-            backend,
-            &x_column,
-            &mut x_full[full_col * n..(full_col + 1) * n],
-        )?;
+        copy_device_region(backend, x_column, 0, x_full, full_col * n, n)?;
     }
-    copy_h2d_checked(backend, x_full, out)?;
+    backend
+        .try_copy_d2d(x_full, out)
+        .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
 
     let full_rhs = b_full.len() / n;
     let mut full_residuals =
@@ -1884,34 +2014,73 @@ fn make_status_from_relative<T: DeviceScalar>(
     })
 }
 
-fn norm_column<T: DeviceScalar>(values: &[T], n: usize, col: usize) -> T::Real {
-    values[col * n..(col + 1) * n]
-        .iter()
-        .map(|value| value.norm_sqr())
-        .fold(T::Real::zero(), |sum, value| sum + value)
-        .sqrt()
-}
-
-fn residual_norms_for_active<T: DeviceScalar>(
-    residual_full: &[T],
+// Two-pass block orthogonalization with only the small R factor on the host.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "explicit disjoint device scratch and QR shape"
+)]
+fn qr_device_block_into<B: Backend, T: DeviceScalar>(
+    backend: &B,
+    input: &B::Buffer<T>,
+    q: &mut B::Buffer<T>,
+    column: &mut B::Buffer<T>,
     n: usize,
-    active: &[usize],
-    b_norms: &[T::Real],
-) -> Result<Vec<T::Real>, BlockGmresError> {
-    let mut values = reserved_block_host(active.len(), "active residual norms")?;
-    values.resize(active.len(), T::Real::zero());
-    for (slot, &col) in values.iter_mut().zip(active) {
-        let residual = norm_column(residual_full, n, col);
-        *slot = if b_norms[col] > T::Real::zero() {
-            residual / b_norms[col]
+    block_size: usize,
+    tolerance: T::Real,
+    r: &mut Vec<T>,
+    coefficients: &mut Vec<T>,
+) -> Result<usize, BlockGmresError> {
+    let count = block_size.checked_mul(block_size).ok_or_else(|| {
+        BlockGmresError::InvalidArgument("initial QR coefficient size overflow".into())
+    })?;
+    reserve_block_host(r, count, "initial QR coefficients")?;
+    r.resize(count, T::zero());
+    r.fill(T::zero());
+    reserve_block_host(coefficients, block_size, "initial QR projection")?;
+    let mut rank = 0;
+    for col in 0..block_size {
+        copy_device_region(backend, input, col * n, column, 0, n)?;
+        coefficients.resize(col, T::zero());
+        if col > 0 {
+            for _ in 0..2 {
+                backend
+                    .try_multi_dot_strided_with_mode_into(
+                        ReductionMode::Fast,
+                        q,
+                        n,
+                        col,
+                        column,
+                        coefficients,
+                    )
+                    .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
+                for (prev, &value) in coefficients.iter().enumerate() {
+                    r[prev * block_size + col] = r[prev * block_size + col] + value;
+                }
+                backend
+                    .try_basis_axpy_strided(T::zero() - T::one(), q, n, col, coefficients, column)
+                    .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
+            }
+        }
+        let norm = backend
+            .try_nrm2_with_mode(ReductionMode::Fast, column)
+            .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
+        let scale = if norm > tolerance {
+            rank += 1;
+            r[col * block_size + col] = T::from_real(norm);
+            T::from_real(T::Real::one() / norm)
         } else {
-            residual
+            // A finite rejected column must overwrite any old basis contents.
+            T::zero()
         };
+        backend
+            .try_scale(scale, column)
+            .map_err(|error| BlockGmresError::Backend(error.to_string()))?;
+        copy_device_region(backend, column, 0, q, col * n, n)?;
     }
-    Ok(values)
+    Ok(rank)
 }
 
-/// Modified Gram-Schmidt twice (CGS2-equivalent accuracy) on a block.
+#[cfg(test)]
 fn qr_block_into<T: DeviceScalar>(
     input: &[T],
     n: usize,
@@ -1977,6 +2146,7 @@ fn qr_block<T: DeviceScalar>(
     Ok((q, r, rank))
 }
 
+#[cfg(test)]
 fn column_dot<T: DeviceScalar>(q: &[T], w: &[T], n: usize, _block_size: usize, col: usize) -> T {
     (0..n)
         .map(|row| q[col * n + row].conj_mul(w[row]))
@@ -2843,3 +3013,6 @@ mod tests {
         assert!(result[0].norm() > 0.0);
     }
 }
+
+#[cfg(test)]
+mod initial_qr_tests;

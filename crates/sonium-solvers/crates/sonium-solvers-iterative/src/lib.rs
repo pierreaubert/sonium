@@ -46,12 +46,15 @@ pub mod backend;
 
 pub use checkpoint::{BLOCK_FGMRES_CHECKPOINT_FORMAT_VERSION, BLOCK_FGMRES_CHECKPOINT_MAGIC};
 
+#[doc(inline)]
 pub use backend::{
     BackendKrylovCapability, BackendKrylovConfig, BackendKrylovError,
     BackendKrylovFailureDiagnostic, BackendKrylovMethod, BackendKrylovScalar, BackendKrylovStatus,
-    BackendKrylovWorkspace, BackendStoppingReason, CancellationToken,
+    BackendKrylovWorkspace, BackendStoppingReason, CancellationToken, DeviceGmresSession,
+    DeviceInitialGuess, DevicePcgAssumption, DevicePcgSession, DevicePcgStatus,
     backend_krylov_capability_matrix, try_block_fgmres_backend, try_block_gmres_backend,
-    try_fgmres_backend_preconditioned, try_gmres_backend,
+    try_fgmres_backend_preconditioned, try_gmres_backend, validate_backend_krylov,
+    validate_backend_pcg,
 };
 pub use bicgstab::{
     BiCgstabConfig, BiCgstabSolution, bicgstab, bicgstab_preconditioned,

@@ -1,6 +1,5 @@
-// Device-side validation for native gather admission.  The kernel writes a
-// single status word and never touches the destination, so an invalid input
-// is rejected before the gather kernel can publish partial output.
+// Device-side validation for native compute inputs. Kernels write a single
+// status word and never modify input arrays or operation destinations.
 
 __device__ bool sonium_finite_component(const unsigned char* address,
                                         unsigned long long width) {
@@ -13,6 +12,23 @@ __device__ bool sonium_finite_component(const unsigned char* address,
         return isfinite(value);
     }
     return false;
+}
+
+extern "C" __global__ void sonium_validate_finite(
+    const unsigned char* values,
+    unsigned long long count,
+    unsigned long long value_size,
+    unsigned long long real_size,
+    int* status) {
+    const unsigned long long index =
+        static_cast<unsigned long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (index >= count) return;
+    const unsigned char* value = values + index * value_size;
+    if (!sonium_finite_component(value, real_size)
+        || (value_size != real_size
+            && !sonium_finite_component(value + real_size, real_size))) {
+        atomicExch(status, 1);
+    }
 }
 
 extern "C" __global__ void sonium_validate_gather4(

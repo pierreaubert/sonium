@@ -2,20 +2,23 @@
 //!
 //! The BEM crate owns tree construction and compression policy.  This module
 //! owns the reusable device representation of the resulting dense and
-//! low-rank blocks.  All actions accumulate into persistent device scratch and
-//! publish to the caller-owned output with one device-to-device copy; the only
+//! low-rank blocks. Scalar actions accumulate into persistent device scratch and
+//! publish to the caller-owned output with one device-to-device copy. Block
+//! actions use indexed column views and shared rank scratch without full-vector
+//! copies; discard partially written block output after an error. The only
 //! host-to-device traffic is the one-time upload performed by
 //! [`CudaHMatrixC64::new`].
 
 use std::collections::HashSet;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use num_complex::Complex64;
 
 use crate::backend::{Backend, BufferView};
-use crate::cuda::CudaBackend;
+use crate::cuda::{CudaBackend, CudaBuffer};
 use crate::error::{BackendError, BackendResult};
 use crate::pool::{Buffer, MemoryPool};
+use crate::{DeviceBufferLike, DeviceOperator};
 
 /// Host description of one dense hierarchical block.
 #[derive(Debug, Clone)]
@@ -111,6 +114,72 @@ pub struct CudaHMatrixWavenumberUpdateC64 {
     value_output: Buffer<Complex64, CudaBackend>,
     derivative_output: Buffer<Complex64, CudaBackend>,
     combined_output: Buffer<Complex64, CudaBackend>,
+}
+
+impl DeviceOperator<CudaBackend, Complex64> for CudaHMatrixC64 {
+    fn n(&self) -> usize {
+        self.num_dofs
+    }
+
+    fn apply(
+        &self,
+        backend: &CudaBackend,
+        x: &CudaBuffer<Complex64>,
+        y: &mut CudaBuffer<Complex64>,
+    ) {
+        if let Err(error) = DeviceOperator::try_apply(self, backend, x, y) {
+            log::error!("CUDA H-matrix action failed: {error}");
+        }
+    }
+
+    fn try_apply(
+        &self,
+        backend: &CudaBackend,
+        x: &CudaBuffer<Complex64>,
+        y: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        if !Arc::ptr_eq(backend.stream(), self.pool.backend().stream()) {
+            return Err(BackendError::InvalidArgument {
+                operation: "cuda_hmatrix_operator",
+                reason: "operator and solver must share the CUDA stream".into(),
+            });
+        }
+        self.try_apply_raw_kind(x, y, HMatrixAction::Forward)
+    }
+
+    fn try_apply_colmajor(
+        &self,
+        backend: &CudaBackend,
+        rhs: usize,
+        x: &CudaBuffer<Complex64>,
+        y: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        if !Arc::ptr_eq(backend.stream(), self.pool.backend().stream()) {
+            return Err(BackendError::InvalidArgument {
+                operation: "cuda_hmatrix_block",
+                reason: "operator and solver must share the CUDA stream".into(),
+            });
+        }
+        self.try_apply_colmajor_kind(rhs, x, y, HMatrixAction::Forward)
+    }
+
+    fn try_residual(
+        &self,
+        backend: &CudaBackend,
+        x: &CudaBuffer<Complex64>,
+        b: &CudaBuffer<Complex64>,
+        out: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        if b.len() != self.num_dofs {
+            return Err(BackendError::InvalidArgument {
+                operation: "cuda_hmatrix_residual",
+                reason: "RHS dimension mismatch".into(),
+            });
+        }
+        DeviceOperator::try_apply(self, backend, x, out)?;
+        backend.try_scale(Complex64::new(-1.0, 0.0), out)?;
+        backend.try_axpy(Complex64::new(1.0, 0.0), b, out)
+    }
 }
 
 impl CudaHMatrixWavenumberUpdateC64 {
@@ -436,6 +505,218 @@ impl CudaHMatrixC64 {
         self.try_apply_kind(input, output, HMatrixAction::Hermitian)
     }
 
+    /// Apply algebraic transpose to borrowed solver buffers without host staging.
+    ///
+    /// # Errors
+    /// Rejects mismatched lengths, allocation extents or streams and backend failures.
+    pub fn try_apply_transpose_raw(
+        &self,
+        input: &CudaBuffer<Complex64>,
+        output: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        self.try_apply_raw_kind(input, output, HMatrixAction::Transpose)
+    }
+
+    /// Apply Hermitian transpose to borrowed solver buffers without host staging.
+    ///
+    /// # Errors
+    /// Rejects mismatched lengths, allocation extents or streams and backend failures.
+    pub fn try_apply_hermitian_raw(
+        &self,
+        input: &CudaBuffer<Complex64>,
+        output: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        self.try_apply_raw_kind(input, output, HMatrixAction::Hermitian)
+    }
+
+    /// Apply transpose to resident column-major RHS blocks.
+    ///
+    /// Columns use indexed views and retained rank scratch without vector copies or allocation.
+    /// A backend error can leave completed output columns; discard output on error.
+    ///
+    /// # Errors
+    /// Rejects invalid extents, foreign streams and backend failures.
+    pub fn try_apply_transpose_colmajor_raw(
+        &self,
+        rhs: usize,
+        input: &CudaBuffer<Complex64>,
+        output: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        self.try_apply_colmajor_kind(rhs, input, output, HMatrixAction::Transpose)
+    }
+
+    /// Apply Hermitian transpose to resident column-major RHS blocks.
+    ///
+    /// Columns use indexed views and retained rank scratch without vector copies or allocation.
+    /// A backend error can leave completed output columns; discard output on error.
+    ///
+    /// # Errors
+    /// Rejects invalid extents, foreign streams and backend failures.
+    pub fn try_apply_hermitian_colmajor_raw(
+        &self,
+        rhs: usize,
+        input: &CudaBuffer<Complex64>,
+        output: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        self.try_apply_colmajor_kind(rhs, input, output, HMatrixAction::Hermitian)
+    }
+
+    fn try_apply_colmajor_kind(
+        &self,
+        rhs: usize,
+        input: &CudaBuffer<Complex64>,
+        output: &mut CudaBuffer<Complex64>,
+        action: HMatrixAction,
+    ) -> BackendResult<()> {
+        let operation = "cuda_hmatrix_block";
+        let len = self
+            .num_dofs
+            .checked_mul(rhs)
+            .ok_or_else(|| BackendError::InvalidArgument {
+                operation,
+                reason: "block extent overflow".into(),
+            })?;
+        let backend = self.pool.backend();
+        for buffer in [input, &*output] {
+            if buffer.len() != len
+                || (len > 0
+                    && buffer.raw().is_none_or(|raw| {
+                        !Arc::ptr_eq(raw.stream(), backend.stream())
+                            || len.checked_mul(std::mem::size_of::<Complex64>()) != Some(raw.len())
+                    }))
+            {
+                return Err(BackendError::InvalidArgument {
+                    operation,
+                    reason: "block dimension, allocation or stream mismatch".into(),
+                });
+            }
+        }
+        if len == 0 {
+            return Ok(());
+        }
+        backend.try_fmm_action_preflight()?;
+        let mut workspace = self
+            .workspace
+            .lock()
+            .map_err(|_| BackendError::OperationFailed {
+                operation,
+                reason: "workspace mutex poisoned".into(),
+            })?;
+        // Block output has always been discard-on-error. Accumulate directly
+        // into column views rather than staging full input/result vectors.
+        backend.try_fmm_zero_c64_view(output, BufferView::contiguous(0, len))?;
+        for j in 0..rhs {
+            let column = BufferView::contiguous(j * self.num_dofs, self.num_dofs);
+            for block in &self.dense_blocks {
+                let (matrix, rows, cols, row_indices, col_indices) = match action {
+                    HMatrixAction::Forward => (
+                        block.forward.raw(),
+                        block.rows,
+                        block.cols,
+                        block.row_indices.raw(),
+                        block.col_indices.raw(),
+                    ),
+                    HMatrixAction::Transpose => (
+                        block.transpose.raw(),
+                        block.cols,
+                        block.rows,
+                        block.col_indices.raw(),
+                        block.row_indices.raw(),
+                    ),
+                    HMatrixAction::Hermitian => (
+                        block.hermitian.raw(),
+                        block.cols,
+                        block.rows,
+                        block.col_indices.raw(),
+                        block.row_indices.raw(),
+                    ),
+                };
+                backend.try_fmm_indexed_dense_matvec_accumulate_c64_view(
+                    matrix,
+                    0,
+                    rows,
+                    cols,
+                    cols,
+                    input,
+                    column,
+                    col_indices,
+                    BufferView::contiguous(0, cols),
+                    output,
+                    column,
+                    row_indices,
+                    BufferView::contiguous(0, rows),
+                )?;
+            }
+            for block in &self.low_rank_blocks {
+                if block.rank == 0 {
+                    continue;
+                }
+                let (left, right, rows, cols, row_indices, col_indices) = match action {
+                    HMatrixAction::Forward => (
+                        block.u.raw(),
+                        block.v_transpose.raw(),
+                        block.rows,
+                        block.cols,
+                        block.row_indices.raw(),
+                        block.col_indices.raw(),
+                    ),
+                    HMatrixAction::Transpose => (
+                        block.v.raw(),
+                        block.u_transpose.raw(),
+                        block.cols,
+                        block.rows,
+                        block.col_indices.raw(),
+                        block.row_indices.raw(),
+                    ),
+                    HMatrixAction::Hermitian => (
+                        block.hermitian_v.raw(),
+                        block.hermitian_u_transpose.raw(),
+                        block.cols,
+                        block.rows,
+                        block.col_indices.raw(),
+                        block.row_indices.raw(),
+                    ),
+                };
+                let rank = BufferView::contiguous(0, block.rank);
+                let CudaHMatrixWorkspace {
+                    projection,
+                    rank_indices,
+                    ..
+                } = &mut *workspace;
+                backend.try_fmm_zero_c64_view(projection.raw_mut(), rank)?;
+                backend.try_fmm_indexed_dense_matvec_accumulate_c64_view(
+                    right,
+                    0,
+                    block.rank,
+                    cols,
+                    cols,
+                    input,
+                    column,
+                    col_indices,
+                    BufferView::contiguous(0, cols),
+                    projection.raw_mut(),
+                    rank,
+                    rank_indices.raw(),
+                    rank,
+                )?;
+                backend.try_fmm_dense_matvec_scatter_accumulate_c64_view(
+                    left,
+                    0,
+                    rows,
+                    block.rank,
+                    block.rank,
+                    projection.raw(),
+                    rank,
+                    output,
+                    column,
+                    row_indices,
+                    BufferView::contiguous(0, rows),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// Apply `A*x` where both vectors are checked one-dimensional views into
     /// caller-owned device buffers.  The hierarchy and all action workspaces
     /// remain resident; only the logical RHS is gathered and the result is
@@ -496,6 +777,15 @@ impl CudaHMatrixC64 {
         output: &mut Buffer<Complex64, CudaBackend>,
         action: HMatrixAction,
     ) -> BackendResult<()> {
+        self.try_apply_raw_kind(input.raw(), output.raw_mut(), action)
+    }
+
+    fn try_apply_raw_kind(
+        &self,
+        input: &CudaBuffer<Complex64>,
+        output: &mut CudaBuffer<Complex64>,
+        action: HMatrixAction,
+    ) -> BackendResult<()> {
         let operation = action.operation();
         if input.len() != self.num_dofs || output.len() != self.num_dofs {
             return Err(BackendError::InvalidArgument {
@@ -509,6 +799,20 @@ impl CudaHMatrixC64 {
             });
         }
         let backend = self.pool.backend();
+        if self.num_dofs > 0 {
+            for buffer in [input, &*output] {
+                if buffer.raw().is_none_or(|raw| {
+                    !Arc::ptr_eq(raw.stream(), backend.stream())
+                        || buffer.len().checked_mul(std::mem::size_of::<Complex64>())
+                            != Some(raw.len())
+                }) {
+                    return Err(BackendError::InvalidArgument {
+                        operation,
+                        reason: "buffer allocation and stream must match the H-matrix".into(),
+                    });
+                }
+            }
+        }
         backend.try_fmm_action_preflight()?;
         let mut workspace = self
             .workspace
@@ -519,7 +823,7 @@ impl CudaHMatrixC64 {
             })?;
         self.execute_action(backend, Some(input), action, &mut workspace)?;
         let result = &workspace.result;
-        backend.try_copy_d2d(result.raw(), output.raw_mut())
+        backend.try_copy_d2d(result.raw(), output)
     }
 
     fn try_apply_kind_view(
@@ -581,7 +885,7 @@ impl CudaHMatrixC64 {
     fn execute_action(
         &self,
         backend: &CudaBackend,
-        external_input: Option<&Buffer<Complex64, CudaBackend>>,
+        external_input: Option<&CudaBuffer<Complex64>>,
         action: HMatrixAction,
         workspace: &mut CudaHMatrixWorkspace,
     ) -> BackendResult<()> {
@@ -595,7 +899,7 @@ impl CudaHMatrixC64 {
             result,
             ..
         } = workspace;
-        let input = external_input.map_or(resident_input.raw(), |input| input.raw());
+        let input = external_input.unwrap_or(resident_input.raw());
         backend.try_scale(Complex64::new(0.0, 0.0), result.raw_mut())?;
 
         for block in &self.dense_blocks {

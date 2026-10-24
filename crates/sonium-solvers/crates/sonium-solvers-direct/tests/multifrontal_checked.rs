@@ -6,7 +6,7 @@ use sonium_solvers_direct::multifrontal_blr::front::{FactoredFront, PivotKind};
 use sonium_solvers_direct::multifrontal_blr::panel::Panel;
 use sonium_solvers_direct::{
     BlrConfig, BlrError, LdltBlrConfig, LdltConfig, MultifrontalBlrFactorization,
-    MultifrontalLdltFactorization, PivotStrategy,
+    MultifrontalLdltFactorization, MultifrontalSymbolic, PivotStrategy,
 };
 use sonium_solvers_sparse::CsrMatrix;
 
@@ -25,6 +25,10 @@ fn factorization_rejects_non_finite_matrix_and_configuration() {
     ));
     assert!(matches!(
         MultifrontalLdltFactorization::factorize(&non_finite),
+        Err(BlrError::NonFiniteMatrix { index: 0 })
+    ));
+    assert!(matches!(
+        MultifrontalSymbolic::analyze(&non_finite, &BlrConfig::default()),
         Err(BlrError::NonFiniteMatrix { index: 0 })
     ));
 

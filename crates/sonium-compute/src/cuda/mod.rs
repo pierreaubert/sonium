@@ -14,10 +14,16 @@ pub mod explicit;
 #[cfg(feature = "cuda")]
 mod hmatrix;
 #[cfg(feature = "cuda")]
+pub mod fem_tet;
+#[cfg(feature = "cuda")]
+pub mod fem_hex;
+#[cfg(feature = "cuda")]
+pub mod quadrature_assembly;
+#[cfg(feature = "cuda")]
 mod mlfmm;
 #[cfg(feature = "cuda")]
 pub use cublas::{
-    CudaAllocationLedger, CudaBackend, CudaBemFieldOperatorC64, CudaBemQuadratureOperatorC64,
+    CudaAllocationLedger, CudaBackend, CudaDenseJacobi, CudaBemFieldOperatorC64, CudaBemQuadratureOperatorC64,
     CudaBemRegularPairOperatorC64, CudaBuffer, CudaDenseCholF64, CudaDenseLuC32, CudaDenseLuC64,
     CudaDenseLuF64, CudaDriverResourceStatsSnapshot, CudaGraphReplay, CudaRuntimeStatsSnapshot,
 };

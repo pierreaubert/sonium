@@ -74,9 +74,11 @@ pub struct GmresBackendStatus<T: DeviceScalar = f64> {
     /// Relative residual predicted by the Hessenberg/Givens recurrence.
     /// This is diagnostic only; `final_residual` is always independently
     /// recomputed from the original operator.
+    /// For a zero RHS, residuals are absolute rather than relative.
     pub projected_residual: T::Real,
     /// Relative residual recomputed with the original operator after the
     /// final candidate is formed (not the projected Hessenberg estimate).
+    /// For a zero RHS, this is the absolute residual norm.
     pub final_residual: T::Real,
     /// Normwise backward error of the returned candidate.
     pub backward_error: T::Real,
@@ -224,6 +226,7 @@ pub struct GmresWorkspace<B: Backend, T: DeviceScalar> {
     device_projection: Option<crate::pool::Buffer<T, B>>,
     device_coefficients: Option<crate::pool::Buffer<T, B>>,
     basis_storage: Vec<RecycledGmresBuffer<B, T>>,
+    preconditioned_storage: Vec<RecycledGmresBuffer<B, T>>,
     // Backing storage for the references passed to fused reductions. The
     // workspace entry point clears these references before basis buffers are
     // released, retaining only the allocation capacity between solves.
@@ -248,8 +251,6 @@ struct GmresHostScratch<T: DeviceScalar> {
     neg_dots1: Vec<T>,
     neg_dots2: Vec<T>,
     y: Vec<T>,
-    device_projection_host: Vec<T>,
-    device_coefficients_host: Vec<T>,
 }
 
 impl<T: DeviceScalar> GmresHostScratch<T> {
@@ -289,8 +290,6 @@ impl<T: DeviceScalar> GmresHostScratch<T> {
             &mut self.neg_dots1,
             &mut self.neg_dots2,
             &mut self.y,
-            &mut self.device_projection_host,
-            &mut self.device_coefficients_host,
         ] {
             vector.clear();
             vector
@@ -315,8 +314,6 @@ impl<T: DeviceScalar> GmresHostScratch<T> {
             + self.neg_dots1.capacity()
             + self.neg_dots2.capacity()
             + self.y.capacity()
-            + self.device_projection_host.capacity()
-            + self.device_coefficients_host.capacity()
     }
 }
 
@@ -329,12 +326,69 @@ impl<B: Backend, T: DeviceScalar> GmresWorkspace<B, T> {
             device_projection: None,
             device_coefficients: None,
             basis_storage: Vec::new(),
+            preconditioned_storage: Vec::new(),
             basis_refs: Vec::new(),
         }
     }
 
     pub fn dimension(&self) -> usize {
         self.n
+    }
+
+    /// Reserve device vectors for an entire cycle, including flexible basis storage.
+    ///
+    /// Unlike warming with one solve, this covers later RHS cases that need more
+    /// iterations. Use the same pool for reservation and solves. Shorter restart
+    /// cycles retain the larger projection buffers; this method
+    /// reserves the dimension-sized vectors independently of convergence history.
+    ///
+    /// # Errors
+    /// Rejects zero capacity or overflow and propagates quota/backend failures.
+    /// Successfully reserved buffers remain cached if a later allocation fails.
+    pub fn try_reserve_cycle(
+        &mut self,
+        pool: &MemoryPool<B>,
+        max_iterations: usize,
+        flexible: bool,
+    ) -> Result<(), GmresBackendError> {
+        let capacity_error = || GmresBackendError::Workspace {
+            reason: "invalid GMRES cycle reservation capacity".into(),
+        };
+        if max_iterations == 0 || self.n == 0 {
+            return Err(capacity_error());
+        }
+        // Up to m+1 Arnoldi vectors, m flexible vectors, and five residual,
+        // operator/preconditioner and final-update temporaries coexist.
+        let count = max_iterations
+            .checked_mul(if flexible { 2 } else { 1 })
+            .and_then(|v| v.checked_add(6))
+            .ok_or_else(capacity_error)?;
+        self.n
+            .checked_mul(count)
+            .and_then(|v| v.checked_mul(size_of::<T>()))
+            .ok_or_else(capacity_error)?;
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| GmresBackendError::Workspace {
+                reason: "workspace cache mutex is poisoned".into(),
+            })?;
+        let needed = count.saturating_sub(cache.iter().filter(|b| b.len() == self.n).count());
+        cache
+            .try_reserve(needed)
+            .map_err(|error| GmresBackendError::Allocation {
+                label: "GMRES reserved vector slots",
+                reason: error.to_string(),
+            })?;
+        for _ in 0..needed {
+            cache.push(pool.try_alloc::<T>(self.n).map_err(|error| {
+                GmresBackendError::Allocation {
+                    label: "GMRES reserved cycle vector",
+                    reason: error.to_string(),
+                }
+            })?);
+        }
+        Ok(())
     }
 
     /// Number of retained device buffers available for reuse.
@@ -404,6 +458,7 @@ impl<B: Backend, T: DeviceScalar> GmresWorkspace<B, T> {
     /// Release retained scratch buffers and refund their pool reservations.
     pub fn clear(&mut self) -> Result<(), GmresBackendError> {
         self.basis_storage = Vec::new();
+        self.preconditioned_storage = Vec::new();
         self.basis_refs = Vec::new();
         self.device_projection = None;
         self.device_coefficients = None;
@@ -426,17 +481,12 @@ impl<B: Backend, T: DeviceScalar> GmresWorkspace<B, T> {
         pool: &MemoryPool<B>,
         max_iterations: usize,
     ) -> Result<(), GmresBackendError> {
-        // Exact-size match: the host staging vecs are cleared and resized to
-        // exactly `max_iterations` every cycle by `prepare`, while restart
-        // cycles vary in length (a short final cycle when
-        // max_iterations % restart != 0). Retaining a larger device buffer
-        // across a shorter cycle breaks the exact-length D2H/H2D transfers,
-        // so any size mismatch reallocates. Pool-backed allocation keeps the
-        // steady-state cost at zero for fixed-size cycles.
+        // Transfers use only the active prefix, so shorter restart cycles can
+        // retain the largest coefficient and projection buffers seen so far.
         if self
             .device_projection
             .as_ref()
-            .is_none_or(|buffer| buffer.len() != max_iterations)
+            .is_none_or(|buffer| buffer.len() < max_iterations)
         {
             self.device_projection =
                 Some(pool.try_alloc::<T>(max_iterations).map_err(|error| {
@@ -449,7 +499,7 @@ impl<B: Backend, T: DeviceScalar> GmresWorkspace<B, T> {
         if self
             .device_coefficients
             .as_ref()
-            .is_none_or(|buffer| buffer.len() != max_iterations)
+            .is_none_or(|buffer| buffer.len() < max_iterations)
         {
             self.device_coefficients =
                 Some(pool.try_alloc::<T>(max_iterations).map_err(|error| {
@@ -616,6 +666,8 @@ where
         config,
         &mut host,
         &mut basis_refs,
+        false,
+        None,
         None,
         None,
         None,
@@ -657,6 +709,8 @@ where
         config,
         &mut host,
         &mut basis_refs,
+        false,
+        None,
         None,
         None,
         None,
@@ -674,6 +728,52 @@ pub fn gmres_backend_preconditioned_pooled_with_workspace<B, A, P, T>(
     x0: Option<&B::Buffer<T>>,
     out: &mut B::Buffer<T>,
     config: &GmresBackendConfig<T>,
+) -> Result<GmresBackendStatus<T>, GmresBackendError>
+where
+    B: Backend,
+    T: DeviceScalar,
+    A: BackendOperator<B, T> + ?Sized,
+    P: BackendPreconditioner<B, T> + ?Sized,
+{
+    gmres_backend_workspace(pool, workspace, a, precond, b, x0, out, config, false)
+}
+
+/// Pool-backed flexible GMRES retaining each preconditioned Arnoldi vector.
+///
+/// The preconditioner may change between applications. The solution update uses
+/// the saved vectors directly, without applying the preconditioner again.
+///
+/// # Errors
+/// Returns checked allocation, workspace, operator, or backend failures.
+pub fn fgmres_backend_preconditioned_pooled_with_workspace<B, A, P, T>(
+    pool: &MemoryPool<B>,
+    workspace: &mut GmresWorkspace<B, T>,
+    a: &A,
+    precond: &P,
+    b: &B::Buffer<T>,
+    x0: Option<&B::Buffer<T>>,
+    out: &mut B::Buffer<T>,
+    config: &GmresBackendConfig<T>,
+) -> Result<GmresBackendStatus<T>, GmresBackendError>
+where
+    B: Backend,
+    T: DeviceScalar,
+    A: BackendOperator<B, T> + ?Sized,
+    P: BackendPreconditioner<B, T> + ?Sized,
+{
+    gmres_backend_workspace(pool, workspace, a, precond, b, x0, out, config, true)
+}
+
+fn gmres_backend_workspace<B, A, P, T>(
+    pool: &MemoryPool<B>,
+    workspace: &mut GmresWorkspace<B, T>,
+    a: &A,
+    precond: &P,
+    b: &B::Buffer<T>,
+    x0: Option<&B::Buffer<T>>,
+    out: &mut B::Buffer<T>,
+    config: &GmresBackendConfig<T>,
+    flexible: bool,
 ) -> Result<GmresBackendStatus<T>, GmresBackendError>
 where
     B: Backend,
@@ -719,6 +819,8 @@ where
         config,
         &mut host,
         &mut basis_refs,
+        flexible,
+        Some(&mut workspace.preconditioned_storage),
         Some(&mut workspace.basis_storage),
         workspace
             .device_projection
@@ -749,6 +851,8 @@ fn gmres_backend_preconditioned_alloc<B, A, P, T, Alloc>(
     config: &GmresBackendConfig<T>,
     host: &mut GmresHostScratch<T>,
     basis_refs: &mut Vec<&'static B::Buffer<T>>,
+    flexible: bool,
+    preconditioned_storage: Option<&mut Vec<Alloc::Buffer>>,
     basis_storage: Option<&mut Vec<Alloc::Buffer>>,
     mut device_projection: Option<&mut B::Buffer<T>>,
     device_coefficients: Option<&mut B::Buffer<T>>,
@@ -823,11 +927,15 @@ where
     }
 
     let b_norm = backend.try_nrm2_with_mode::<T>(ReductionMode::Fast, b)?;
-    if b_norm == zero_real {
-        return Err(GmresBackendError::ZeroRhs);
-    }
+    // Homogeneous systems are valid, including warm starts with nonzero residual.
+    // Use absolute convergence when no RHS norm is available for normalization.
+    let residual_scale = if b_norm == zero_real {
+        T::Real::one()
+    } else {
+        b_norm
+    };
     let beta = backend.try_nrm2_with_mode::<T>(ReductionMode::Fast, r0.raw())?;
-    let initial_resid_rel = beta / b_norm;
+    let initial_resid_rel = beta / residual_scale;
     if initial_resid_rel <= tol {
         return Ok(GmresBackendStatus {
             iterations: 0,
@@ -862,6 +970,19 @@ where
                 },
             })?;
     }
+    let mut local_preconditioned = Vec::new();
+    let z_guard =
+        BasisStorageGuard::new(preconditioned_storage.unwrap_or(&mut local_preconditioned));
+    if flexible {
+        z_guard
+            .storage
+            .borrow_mut()
+            .try_reserve(max_iter)
+            .map_err(|_| GmresBackendError::Allocation {
+                label: "preconditioned_basis",
+                reason: "FGMRES basis slot allocation failed".into(),
+            })?;
+    }
     let v = &basis_guard.storage;
     let mut v0 = alloc.alloc(n, "V[0]")?;
     backend.try_copy_d2d(r0.raw(), v0.raw_mut())?;
@@ -875,8 +996,6 @@ where
     // `prepare` clears these staging vecs, so resize always lands exactly on
     // `max_iter` — matching the exact-size device buffers above, whose
     // D2H/H2D transfers require length equality.
-    host.device_projection_host.resize(max_iter, T::zero());
-    host.device_coefficients_host.resize(max_iter, T::zero());
     host.g.push(T::from_real(beta));
 
     let mut iterations_done = 0_usize;
@@ -906,6 +1025,11 @@ where
         }
         a.try_apply(backend, z.raw(), w.raw_mut())
             .map_err(GmresBackendError::from)?;
+        if flexible {
+            let mut saved = alloc.alloc(n, "Z[j]")?;
+            backend.try_copy_d2d(z.raw(), saved.raw_mut())?;
+            z_guard.storage.borrow_mut().push(saved);
+        }
 
         // CGS2 against V[0..=j] using backend-fused basis projections.
         host.h_col.clear();
@@ -920,9 +1044,11 @@ where
                     w.raw(),
                     projection,
                 )?;
-                backend.try_copy_d2h(projection, &mut host.device_projection_host)?;
-                host.dots1
-                    .copy_from_slice(&host.device_projection_host[..j + 1]);
+                backend.try_copy_view_d2h(
+                    projection,
+                    crate::BufferView::new(projection.len(), 0, j + 1, 1)?,
+                    &mut host.dots1,
+                )?;
                 // The native projection is already in the exact coefficient
                 // buffer consumed by the fused update. Negating it in place
                 // removes the per-Arnoldi-iteration H2D control transfer.
@@ -952,9 +1078,11 @@ where
                     w.raw(),
                     projection,
                 )?;
-                backend.try_copy_d2h(projection, &mut host.device_projection_host)?;
-                host.dots2
-                    .copy_from_slice(&host.device_projection_host[..j + 1]);
+                backend.try_copy_view_d2h(
+                    projection,
+                    crate::BufferView::new(projection.len(), 0, j + 1, 1)?,
+                    &mut host.dots2,
+                )?;
                 backend.try_scale(T::zero() - T::one(), projection)?;
                 backend.try_axpy_many_device::<T>(projection, basis_refs, w.raw_mut())?;
             } else {
@@ -1060,7 +1188,7 @@ where
 
         // Residual = |g[j+1]| (note: norm of the complex/real entry).
         let resid_abs = host.g[j + 1].magnitude();
-        let resid_rel = resid_abs / b_norm;
+        let resid_rel = resid_abs / residual_scale;
         final_resid_rel = resid_rel;
         if resid_rel <= tol {
             break;
@@ -1089,15 +1217,21 @@ where
         host.y[i] = sum / host.h[i][i];
     }
 
-    // Δx_unprec = Σ y[i] · V[i]
+    // Stationary: combine V then apply M. Flexible: combine saved Z directly.
     let mut dx_unprec = alloc.alloc(n, "dx_unprec")?;
     backend.try_scale::<T>(T::zero(), dx_unprec.raw_mut())?;
-    let v_ref = v.borrow();
+    let v_ref = if flexible {
+        z_guard.storage.borrow()
+    } else {
+        v.borrow()
+    };
     with_basis_refs(basis_refs, &v_ref, k, |basis_refs| {
         if let Some(coefficients) = device_coefficients {
-            host.device_coefficients_host.fill(T::zero());
-            host.device_coefficients_host[..k].copy_from_slice(&host.y);
-            backend.try_copy_h2d(&host.device_coefficients_host, coefficients)?;
+            backend.try_copy_view_h2d(
+                &host.y,
+                coefficients,
+                crate::BufferView::new(coefficients.len(), 0, k, 1)?,
+            )?;
             backend.try_axpy_many_device::<T>(coefficients, basis_refs, dx_unprec.raw_mut())
         } else {
             backend.try_axpy_many::<T>(&host.y, basis_refs, dx_unprec.raw_mut())
@@ -1105,14 +1239,16 @@ where
     })?;
     drop(v_ref);
 
-    // Right-preconditioning: Δx = M⁻¹ · Δx_unprec
-    let mut dx = alloc.alloc(n, "dx")?;
-    precond
-        .try_apply(backend, dx_unprec.raw(), dx.raw_mut())
-        .map_err(GmresBackendError::from)?;
-
-    // out += dx
-    backend.try_axpy::<T>(T::one(), dx.raw(), out)?;
+    if flexible {
+        backend.try_axpy::<T>(T::one(), dx_unprec.raw(), out)?;
+    } else {
+        // A stationary linear preconditioner commutes with the basis combination.
+        let mut dx = alloc.alloc(n, "dx")?;
+        precond
+            .try_apply(backend, dx_unprec.raw(), dx.raw_mut())
+            .map_err(GmresBackendError::from)?;
+        backend.try_axpy::<T>(T::one(), dx.raw(), out)?;
+    }
 
     // The Hessenberg/Givens estimate is useful for the inner loop, but it
     // is not a sufficient convergence contract: loss of orthogonality and
@@ -1131,7 +1267,7 @@ where
             },
         });
     }
-    let true_residual_rel = true_residual / b_norm;
+    let true_residual_rel = true_residual / residual_scale;
     let converged = true_residual_rel <= tol;
     // Reuse the work vector for ||A*x|| so the backend result carries the
     // same normwise backward-error contract as the host solver.  This is a
@@ -1572,8 +1708,42 @@ mod tests {
             &mut out,
             &GmresBackendConfig::default(),
         );
-        // Zero RHS is the documented error case.
-        assert!(matches!(result, Err(GmresBackendError::ZeroRhs)));
+        let status = result.unwrap();
+        assert!(status.converged);
+        assert_eq!(status.iterations, 0);
+        assert_eq!(status.final_residual, 0.0);
+        let mut solution = [1.0; 5];
+        backend.copy_d2h(&out, &mut solution);
+        assert_eq!(solution, [0.0; 5]);
+    }
+
+    #[test]
+    fn gmres_zero_rhs_corrects_nonzero_initial_guess() {
+        let backend = CpuBackend::new();
+        let (row_ptr, col_idx, values) = tridiag_5x5();
+        let a = BackendCsr::from_host(&backend, 5, 5, &row_ptr, &col_idx, &values);
+        let b = make_buf::<f64>(&backend, &[0.0; 5]);
+        let initial = make_buf::<f64>(&backend, &[1.0, -0.5, 0.7, 0.2, -0.9]);
+        let mut out = backend.raw_alloc::<f64>(5).unwrap();
+        let status = gmres_backend_preconditioned(
+            &backend,
+            &a,
+            &IdentityBackendPreconditioner,
+            &b,
+            Some(&initial),
+            &mut out,
+            &GmresBackendConfig {
+                max_iterations: 10,
+                tolerance: 1e-10,
+            },
+        )
+        .unwrap();
+        assert!(status.converged);
+        assert!(status.iterations > 0);
+        assert!(status.final_residual < 1e-10);
+        let mut solution = [1.0; 5];
+        backend.copy_d2h(&out, &mut solution);
+        assert!(solution.iter().all(|v| v.abs() < 1e-10));
     }
 
     #[test]
@@ -1669,3 +1839,6 @@ fn gmres_backend_reuses_basis_reference_storage() {
         "Arnoldi iterations must not allocate a fresh reference Vec"
     );
 }
+
+#[cfg(test)]
+mod reservation_tests;

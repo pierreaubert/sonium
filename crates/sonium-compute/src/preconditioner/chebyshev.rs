@@ -35,12 +35,12 @@
 //!
 //! # Cost per apply
 //!
-//! - 1 diagonal-CSR SpMV (`D⁻¹ r`) at start
-//! - For each k = 1..K: 1 full SpMV (`A z`) + 1 diagonal-CSR SpMV +
-//!   ~3 axpys
-//!
-//! For degree K: `K-1` full SpMVs and `K` diagonal SpMVs. Memory: 4
-//! workspace buffers of length `n` (allocated once, reused across apply).
+//! CUDA uses one native diagonal scale at start, then a full SpMV/SpMM and
+//! one fused residual/recurrence/solution update per remaining step. Columns
+//! share the inverse diagonal without duplicating it. Other backends retain
+//! the checked diagonal-CSR and vector-operation fallback. Five workspace
+//! buffers are retained separately for scalar and block application; output
+//! is published only after the complete polynomial succeeds.
 //!
 //! # When to use
 //!
@@ -58,7 +58,8 @@
 //!   `ω ∈ [0.5, 0.8]` is more robust.
 
 use crate::gmres::{BackendCsr, BackendPreconditioner};
-use crate::operator::{DeviceOperator, PersistentDeviceCsr, PrebakedSpmv, validate_csr_inputs};
+use crate::operator::{PersistentDeviceCsr, validate_csr_inputs};
+use super::matrix::PreconditionerMatrix;
 use crate::{Backend, DeviceBufferLike, DeviceScalar, PreconditionerFailureInjectionPoint};
 use num_traits::{Float, FromPrimitive, One, Zero};
 use std::sync::Mutex;
@@ -67,13 +68,14 @@ use std::sync::Mutex;
 /// over scalar `T`. Eigenvalue interval `[λ_max/ratio, λ_max]` is
 /// stored in `T::Real` (Chebyshev assumes positive-real spectrum).
 pub struct ChebyshevBackend<'a, B: Backend, T: DeviceScalar = f64> {
-    a: &'a BackendCsr<B, T>,
-    a_prebaked: PrebakedSpmv<'a, B, T>,
+    a: PreconditionerMatrix<'a, B, T>,
     diag_inv: PersistentDeviceCsr<B, T>,
     lambda_max: T::Real,
     eigenvalue_ratio: T::Real,
     degree: usize,
     workspace: Mutex<ChebyshevWorkspace<B, T>>,
+    // Scalar recovery must not evict the latest block application scratch.
+    block_workspace: Mutex<ChebyshevWorkspace<B, T>>,
     runtime_diagnostics: crate::DevicePreconditionerDiagnostics,
 }
 
@@ -148,6 +150,82 @@ impl<'a, B: Backend, T: DeviceScalar> ChebyshevBackend<'a, B, T> {
         eigenvalue_ratio: T::Real,
         lambda_max: T::Real,
     ) -> crate::BackendResult<Self> {
+        Self::try_from_matrix(
+            backend,
+            a.m,
+            diag_host,
+            degree,
+            eigenvalue_ratio,
+            lambda_max,
+            || PreconditionerMatrix::borrowed(backend, a),
+        )
+    }
+
+    /// Build an owned preconditioner with a supplied spectral bound.
+    ///
+    /// # Errors
+    /// Rejects invalid polynomial parameters or diagonal and propagates backend failures.
+    pub fn try_from_owned_csr(
+        backend: &B,
+        a: PersistentDeviceCsr<B, T>,
+        diag_host: &[T],
+        degree: usize,
+        eigenvalue_ratio: T::Real,
+        lambda_max: T::Real,
+    ) -> crate::BackendResult<Self> {
+        let n = a.m();
+        Self::try_from_matrix(
+            backend,
+            n,
+            diag_host,
+            degree,
+            eigenvalue_ratio,
+            lambda_max,
+            || {
+                Ok(PreconditionerMatrix::Owned {
+                    matrix: a,
+                    valid: true,
+                })
+            },
+        )
+    }
+
+    /// Refresh owned numeric data and its spectral bound without replacing device storage.
+    ///
+    /// Device values must be finite and match the retained sparsity pattern.
+    /// Validation errors preserve the old state. Backend failures require a
+    /// successful refresh before further applications, including degree-one solves.
+    ///
+    /// # Errors
+    /// Rejects borrowed matrices, invalid shape, diagonal or bound, and backend failures.
+    pub fn try_update_numeric(
+        &mut self,
+        backend: &B,
+        values: &B::Buffer<T>,
+        diagonal: &[T],
+        lambda_max: T::Real,
+    ) -> crate::BackendResult<()> {
+        if !lambda_max.is_finite() || lambda_max <= T::Real::zero() {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "chebyshev_update",
+                reason: "spectral bound must be finite and positive".into(),
+            });
+        }
+        self.a
+            .try_refresh(backend, values, diagonal, &mut self.diag_inv)?;
+        self.lambda_max = lambda_max;
+        Ok(())
+    }
+
+    fn try_from_matrix(
+        backend: &B,
+        rows: usize,
+        diag_host: &[T],
+        degree: usize,
+        eigenvalue_ratio: T::Real,
+        lambda_max: T::Real,
+        make_matrix: impl FnOnce() -> crate::BackendResult<PreconditionerMatrix<'a, B, T>>,
+    ) -> crate::BackendResult<Self> {
         if degree == 0 {
             return Err(crate::BackendError::InvalidArgument {
                 operation: "chebyshev_constructor",
@@ -167,10 +245,14 @@ impl<'a, B: Backend, T: DeviceScalar> ChebyshevBackend<'a, B, T> {
                 reason: "lambda_max must be finite and > 0.0".into(),
             });
         }
-        if diag_host.len() != a.m {
+        if diag_host.len() != rows {
             return Err(crate::BackendError::InvalidArgument {
                 operation: "chebyshev_constructor",
-                reason: format!("diagonal length {} != A row count {}", diag_host.len(), a.m),
+                reason: format!(
+                    "diagonal length {} != A row count {}",
+                    diag_host.len(),
+                    rows
+                ),
             });
         }
         if diag_host.iter().any(|value| !value.is_finite()) {
@@ -195,7 +277,7 @@ impl<'a, B: Backend, T: DeviceScalar> ChebyshevBackend<'a, B, T> {
         backend.try_inject_preconditioner_failure(
             PreconditionerFailureInjectionPoint::HierarchyUpload,
         )?;
-        let a_prebaked = PrebakedSpmv::try_from_csr(backend, a)?;
+        let a = make_matrix()?;
         backend.try_inject_preconditioner_failure(
             PreconditionerFailureInjectionPoint::DiagonalUpload,
         )?;
@@ -220,17 +302,34 @@ impl<'a, B: Backend, T: DeviceScalar> ChebyshevBackend<'a, B, T> {
                 .raw_alloc::<T>(n)
                 .map_err(crate::BackendError::from)?,
         };
+        let block_workspace = ChebyshevWorkspace {
+            result: backend
+                .raw_alloc::<T>(0)
+                .map_err(crate::BackendError::from)?,
+            d: backend
+                .raw_alloc::<T>(0)
+                .map_err(crate::BackendError::from)?,
+            az: backend
+                .raw_alloc::<T>(0)
+                .map_err(crate::BackendError::from)?,
+            res: backend
+                .raw_alloc::<T>(0)
+                .map_err(crate::BackendError::from)?,
+            d_new: backend
+                .raw_alloc::<T>(0)
+                .map_err(crate::BackendError::from)?,
+        };
         let runtime_diagnostics = crate::DevicePreconditionerDiagnostics::default();
         runtime_diagnostics.record_setup();
 
         Ok(Self {
             a,
-            a_prebaked,
             diag_inv,
             lambda_max,
             eigenvalue_ratio,
             degree,
             workspace: Mutex::new(workspace),
+            block_workspace: Mutex::new(block_workspace),
             runtime_diagnostics,
         })
     }
@@ -286,6 +385,78 @@ impl<'a, B: Backend, T: DeviceScalar> ChebyshevBackend<'a, B, T> {
         Self::try_with_lambda_max(backend, a, &diag, degree, eigenvalue_ratio, lambda_max)
     }
 
+    /// Build an owned preconditioner using the matching host CSR for spectral estimation.
+    ///
+    /// # Errors
+    /// Rejects invalid CSR/parameters and propagates backend failures.
+    pub fn try_from_owned_csr_host(
+        backend: &B,
+        a: PersistentDeviceCsr<B, T>,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[T],
+        degree: usize,
+        eigenvalue_ratio: T::Real,
+    ) -> crate::BackendResult<Self> {
+        let (diagonal, bound) = Self::host_spectrum(a.m(), a.n(), row_ptr, col_idx, values)?;
+        Self::try_from_owned_csr(backend, a, &diagonal, degree, eigenvalue_ratio, bound)
+    }
+
+    /// Refresh owned values and recompute the bound from matching host CSR data.
+    ///
+    /// Host and device values must describe the same retained sparsity pattern.
+    ///
+    /// # Errors
+    /// Rejects invalid host data or borrowed storage and propagates refresh failures.
+    pub fn try_update_from_csr_host(
+        &mut self,
+        backend: &B,
+        device_values: &B::Buffer<T>,
+        row_ptr: &[i32],
+        col_idx: &[i32],
+        values: &[T],
+    ) -> crate::BackendResult<()> {
+        let matrix = self.a.matrix();
+        let (diagonal, bound) = Self::host_spectrum(matrix.m, matrix.n, row_ptr, col_idx, values)?;
+        self.try_update_numeric(backend, device_values, &diagonal, bound)
+    }
+
+    fn host_spectrum(
+        m: usize,
+        n: usize,
+        rows: &[i32],
+        columns: &[i32],
+        values: &[T],
+    ) -> crate::BackendResult<(Vec<T>, T::Real)> {
+        validate_csr_inputs(m, n, rows, columns, values)?;
+        if m != n {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "chebyshev_host_spectrum",
+                reason: "matrix must be square".into(),
+            });
+        }
+        let mut diagonal = vec![T::zero(); m];
+        for row in 0..m {
+            for index in rows[row] as usize..rows[row + 1] as usize {
+                if columns[index] as usize == row {
+                    diagonal[row] = values[index];
+                    break;
+                }
+            }
+        }
+        if diagonal
+            .iter()
+            .any(|d| !d.is_finite() || d.norm_sqr().sqrt() <= T::Real::epsilon())
+        {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "chebyshev_host_spectrum",
+                reason: "diagonal must be finite and invertible".into(),
+            });
+        }
+        let bound = estimate_lambda_max_host::<T>(m, rows, columns, values, &diagonal);
+        Ok((diagonal, bound))
+    }
+
     pub fn degree(&self) -> usize {
         self.degree
     }
@@ -311,7 +482,7 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
 
     #[allow(dead_code)]
     fn apply_legacy_unchecked(&self, backend: &B, r: &B::Buffer<T>, z: &mut B::Buffer<T>) {
-        let n = self.a.m;
+        let n = self.a.matrix().m;
         let Some(two) = T::Real::from_f64(2.0) else {
             log::error!(target: "sonium_compute::preconditioner", "Chebyshev recurrence constant 2 is not representable");
             return;
@@ -340,7 +511,7 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
             &self.diag_inv.matrix().col_idx,
             &self.diag_inv.matrix().values,
         );
-        let a_prebaked = self.a.prebake(backend);
+        let a_prebaked = self.a.matrix().prebake(backend);
 
         let Ok(mut d) = backend.raw_alloc::<T>(n) else {
             log::error!(target: "sonium_compute::preconditioner", "Chebyshev workspace allocation failed");
@@ -407,7 +578,8 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
         z: &mut B::Buffer<T>,
     ) -> crate::BackendResult<()> {
         backend.try_inject_preconditioner_failure(PreconditionerFailureInjectionPoint::Launch)?;
-        let n = self.a.m;
+        self.a.ensure_valid()?;
+        let n = self.a.matrix().m;
         if r.len() != n || z.len() != n {
             return Err(crate::BackendError::InvalidArgument {
                 operation: "chebyshev_apply",
@@ -465,8 +637,10 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
         ensure_buffer_exact(backend, az, n)?;
         ensure_buffer_exact(backend, res, n)?;
         ensure_buffer_exact(backend, d_new, n)?;
-        self.diag_inv.try_apply(backend, r, d)?;
-        backend.try_scale::<T>(T::from_real(inv_theta), d)?;
+        if !backend.try_diagonal_scale_native(&self.diag_inv.matrix().values, r, d, inv_theta)? {
+            self.diag_inv.try_apply(backend, r, d)?;
+            backend.try_scale::<T>(T::from_real(inv_theta), d)?;
+        }
         backend.try_copy_d2d(d, result)?;
         if self.degree == 1 {
             return backend.try_copy_d2d(result, z);
@@ -475,7 +649,13 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
             let rho_new = one / (two * sigma - rho);
             let coeff_old = rho_new * rho;
             let coeff_res = two * rho_new / delta;
-            self.a_prebaked.try_apply(backend, result, az)?;
+            self.a.try_apply(backend, result, az)?;
+            if backend.try_chebyshev_update_native(
+                &self.diag_inv.matrix().values, r, az, d, result, coeff_res, coeff_old,
+            )? {
+                rho = rho_new;
+                continue;
+            }
             backend.try_scale::<T>(-T::one(), az)?;
             backend.try_axpy::<T>(T::one(), r, az)?;
             self.diag_inv.try_apply(backend, az, res)?;
@@ -507,7 +687,7 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
         r: &B::Buffer<T>,
         z: &mut B::Buffer<T>,
     ) {
-        let n = self.a.m;
+        let n = self.a.matrix().m;
         let Some(two) = T::Real::from_f64(2.0) else {
             log::error!(target: "sonium_compute::preconditioner", "Chebyshev recurrence constant 2 is not representable");
             return;
@@ -532,7 +712,7 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
             &self.diag_inv.matrix().col_idx,
             &self.diag_inv.matrix().values,
         );
-        let a_prebaked = self.a.prebake(backend);
+        let a_prebaked = self.a.matrix().prebake(backend);
 
         let Some(len) = n.checked_mul(rhs) else {
             log::error!(target: "sonium_compute::preconditioner", "Chebyshev multi-RHS length overflow");
@@ -606,7 +786,8 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
         z: &mut B::Buffer<T>,
     ) -> crate::BackendResult<()> {
         backend.try_inject_preconditioner_failure(PreconditionerFailureInjectionPoint::Launch)?;
-        let n = self.a.m;
+        self.a.ensure_valid()?;
+        let n = self.a.matrix().m;
         let len = n
             .checked_mul(rhs)
             .ok_or(crate::BackendError::InvalidArgument {
@@ -622,6 +803,9 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
                     z.len()
                 ),
             });
+        }
+        if rhs == 1 {
+            return self.try_apply_untracked(backend, r, z);
         }
         let two = T::Real::from_f64(2.0).ok_or(crate::BackendError::InvalidArgument {
             operation: "chebyshev_apply_colmajor",
@@ -649,7 +833,7 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
         let mut rho = one / sigma;
         let inv_theta = one / theta;
         let mut workspace =
-            self.workspace
+            self.block_workspace
                 .lock()
                 .map_err(|_| crate::BackendError::OperationFailed {
                     operation: "chebyshev_apply_colmajor",
@@ -670,8 +854,10 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
         ensure_buffer_exact(backend, az, len)?;
         ensure_buffer_exact(backend, res, len)?;
         ensure_buffer_exact(backend, d_new, len)?;
-        self.diag_inv.try_apply_colmajor(backend, rhs, r, d)?;
-        backend.try_scale::<T>(T::from_real(inv_theta), d)?;
+        if !backend.try_diagonal_scale_colmajor_native(rhs, &self.diag_inv.matrix().values, r, d, inv_theta)? {
+            self.diag_inv.try_apply_colmajor(backend, rhs, r, d)?;
+            backend.try_scale::<T>(T::from_real(inv_theta), d)?;
+        }
         backend.try_copy_d2d(d, result)?;
         if self.degree == 1 {
             return backend.try_copy_d2d(result, z);
@@ -680,8 +866,14 @@ impl<B: Backend, T: DeviceScalar> BackendPreconditioner<B, T> for ChebyshevBacke
             let rho_new = one / (two * sigma - rho);
             let coeff_old = rho_new * rho;
             let coeff_res = two * rho_new / delta;
-            self.a_prebaked
+            self.a
                 .try_apply_colmajor(backend, rhs, result, az)?;
+            if backend.try_chebyshev_update_colmajor_native(
+                rhs, &self.diag_inv.matrix().values, r, az, d, result, coeff_res, coeff_old,
+            )? {
+                rho = rho_new;
+                continue;
+            }
             backend.try_scale::<T>(-T::one(), az)?;
             backend.try_axpy::<T>(T::one(), r, az)?;
             self.diag_inv.try_apply_colmajor(backend, rhs, az, res)?;

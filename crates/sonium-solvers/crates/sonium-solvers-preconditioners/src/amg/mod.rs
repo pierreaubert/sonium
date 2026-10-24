@@ -42,8 +42,22 @@
 
 #[path = "../amg_checkpoint.rs"]
 mod amg_checkpoint;
+#[cfg(test)]
+mod backend_l1_tests;
+#[cfg(test)]
+mod backend_pcg_tests;
+mod backend_profile;
+mod backend_refresh;
+#[doc(inline)]
+pub use backend_profile::{BackendAmgPhase, BackendAmgPhaseProfile};
+#[cfg(test)]
+mod backend_refresh_tests;
+#[cfg(test)]
+mod backend_zero_tests;
 mod coarsening;
 mod coloring;
+#[cfg(feature = "cuda")]
+mod cuda_c64;
 #[cfg(feature = "experimental-gnn")]
 mod gnn_coarsening;
 mod interpolation;
@@ -368,8 +382,8 @@ pub struct AmgConfig {
     /// diagonal: entries with `|a_ij| < galerkin_drop_tol * |a_ii|` are
     /// removed after each `R A P` product. 0.0 keeps the full product
     /// (hypre default behavior); larger values trade coarse-correction
-    /// quality for sparser hierarchies. Not covered by the v1 checkpoint
-    /// format (checkpoint restore uses the default).
+    /// quality for sparser hierarchies. Preserved by v2 checkpoints; legacy v1
+    /// checkpoints restore the historical 0.001 default.
     pub galerkin_drop_tol: f64,
 
     /// Maximum interpolation stencil size per row
@@ -482,6 +496,34 @@ impl Default for AmgConfig {
 }
 
 impl AmgConfig {
+    /// Configure stationary, symmetric backend AMG cycles for SPD/HPD PCG.
+    ///
+    /// Use with `BackendAmgPreconditioner::try_from_csr` on a validated SPD/HPD
+    /// matrix. Equal L1-Jacobi pre/post sweeps, R=Pᴴ, and undropped Galerkin
+    /// operators preserve symmetry. Row-norm scaling bounds the normalized HPD
+    /// spectrum by one, making relaxation and its fixed coarse polynomial
+    /// positive definite. The backend uses a fixed coarse sweep count, without
+    /// tolerance-dependent inner iterations or a substituted serial smoother.
+    ///
+    /// This is a backend preset: the host smoother implementation is different.
+    /// Altering the smoother, restriction, dropping, cycle or coarse solver can
+    /// invalidate PCG assumptions. This configuration does not validate the input
+    /// matrix, guarantee mesh-independent convergence, or accelerate host setup.
+    pub fn for_backend_pcg() -> Self {
+        Self {
+            coarsening: AmgCoarsening::Cljp,
+            restriction: AmgRestriction::ConjugateTranspose,
+            smoother: AmgSmoother::L1Jacobi,
+            cycle: AmgCycle::VCycle,
+            k_cycle_iterations: 0,
+            f_point_smoothing: false,
+            num_pre_smooth: 1,
+            num_post_smooth: 1,
+            galerkin_drop_tol: 0.0,
+            ..Self::default()
+        }
+    }
+
     /// Validate configuration values that can make hierarchy construction
     /// undefined or silently fall back to a different algorithm.
     ///
@@ -987,6 +1029,22 @@ trait BackendAmgDirectSolver<
     T: ComplexField<Real = <T as sonium_compute::DeviceScalar>::Real> + sonium_compute::DeviceScalar,
 >: Send + Sync
 {
+    fn supports_numeric_refresh(&self) -> bool {
+        false
+    }
+
+    fn refresh(
+        &mut self,
+        _backend: &B,
+        _matrix: &CsrMatrix<T>,
+    ) -> sonium_compute::BackendResult<()> {
+        Err(sonium_compute::BackendError::Unsupported {
+            backend: type_name::<B>(),
+            operation: "amg_numeric_refresh_direct_coarse",
+            scalar: type_name::<T>(),
+        })
+    }
+
     fn solve(
         &self,
         backend: &B,
@@ -1040,7 +1098,7 @@ impl BackendAmgDirectSolver<sonium_compute::CudaBackend, num_complex::Complex32>
 ///
 /// Setup reuses the existing CPU AMG hierarchy builder, then uploads each
 /// level to a [`sonium_compute::Backend`]. Apply runs a multigrid cycle with
-/// backend SpMV/BLAS operations only. GPU-safe Jacobi and Chebyshev smoothing
+/// backend SpMV/BLAS operations only. GPU-safe Jacobi, L1-Jacobi and Chebyshev smoothing
 /// are supported; serial CPU smoothers fall back to Jacobi on apply.
 pub struct BackendAmgPreconditioner<
     B: sonium_compute::Backend,
@@ -1052,6 +1110,10 @@ pub struct BackendAmgPreconditioner<
     coarse_direct: Option<Box<dyn BackendAmgDirectSolver<B, T>>>,
     workspace: Mutex<BackendAmgWorkspace<B, T>>,
     checkpoint_bytes: Vec<u8>,
+    numeric_valid: bool,
+    phase_profile: Option<Vec<[backend_profile::PhaseCounters; 6]>>,
+    small_jacobi_enabled: bool,
+    fused_jacobi_enabled: bool,
     apply_count: AtomicU64,
     total_apply_ns: AtomicU64,
     runtime_diagnostics: sonium_compute::DevicePreconditionerDiagnostics,
@@ -1087,9 +1149,9 @@ pub struct BackendAmgDiagnostics {
     pub has_coarse_direct_solver: bool,
     /// Number of recorded backend preconditioner applications.
     pub apply_count: u64,
-    /// Total recorded backend application time in milliseconds.
+    /// Total host submission time in milliseconds; GPU completion is not implied.
     pub total_apply_ms: f64,
-    /// Mean recorded backend application time in milliseconds.
+    /// Mean host submission time in milliseconds; GPU completion is not implied.
     pub mean_apply_ms: f64,
     /// Normalized action/failure counters for the backend boundary.
     pub runtime: sonium_compute::DevicePreconditionerDiagnosticsSnapshot,
@@ -1331,9 +1393,12 @@ where
             .unwrap_or_else(|error| panic!("backend AMG checkpoint restore failed: {error}"))
     }
 
-    /// Return the portable host checkpoint used to construct this backend
-    /// hierarchy. No device readback is required.
+    /// Return the current successfully published hierarchy checkpoint without device readback.
+    ///
+    /// # Errors
+    /// Rejects export after an interrupted numeric refresh until recovery succeeds.
     pub fn to_checkpoint_bytes(&self) -> sonium_compute::BackendResult<Vec<u8>> {
+        self.ensure_numeric_valid()?;
         Ok(self.checkpoint_bytes.clone())
     }
 
@@ -1428,13 +1493,24 @@ where
                         colors.push(buf);
                     }
                 }
+                // L1-Jacobi uses the inverse row norm, not the inverse diagonal.
+                // Retain the selected scaling once for every device cycle.
+                let scaling = if host_amg.config.smoother == AmgSmoother::L1Jacobi {
+                    level
+                        .l1_diag
+                        .iter()
+                        .map(|&norm| <T as ComplexField>::from_real(norm).inv())
+                        .collect::<Vec<_>>()
+                } else {
+                    level.diag_inv.clone()
+                };
                 Ok(BackendAmgLevel {
                     matrix,
                     prolongation,
                     restriction,
                     diag_inv: sonium_compute::PersistentDeviceCsr::try_from_host_diagonal(
                         backend,
-                        level.diag_inv.as_slice(),
+                        scaling.as_slice(),
                     )?,
                     lambda_max: level.lambda_max,
                     num_dofs: level.num_dofs,
@@ -1478,6 +1554,10 @@ where
             coarse_direct,
             workspace: Mutex::new(workspace),
             checkpoint_bytes,
+            numeric_valid: true,
+            phase_profile: None,
+            small_jacobi_enabled: false,
+            fused_jacobi_enabled: false,
             apply_count: AtomicU64::new(0),
             total_apply_ns: AtomicU64::new(0),
             runtime_diagnostics,
@@ -1573,6 +1653,7 @@ where
         x: &mut B::Buffer<T>,
         b: &B::Buffer<T>,
         cycle: AmgCycle,
+        x_is_zero: bool,
     ) -> sonium_compute::BackendResult<()> {
         let level =
             self.levels
@@ -1590,47 +1671,65 @@ where
         let is_coarsest = level_idx == self.levels.len() - 1 || level.prolongation.is_none();
 
         if is_coarsest {
+            let started = self.profile_start(backend)?;
             if let Some(coarse_direct) = self.coarse_direct.as_ref() {
                 backend.try_inject_preconditioner_failure(
                     sonium_compute::PreconditionerFailureInjectionPoint::CoarseSolve,
                 )?;
                 match coarse_direct.solve(backend, b, x)? {
-                    true => return Ok(()),
+                    true => {
+                        self.profile_finish(
+                            backend,
+                            level_idx,
+                            BackendAmgPhase::CoarseSolve,
+                            started,
+                        )?;
+                        return Ok(());
+                    }
                     false => self.runtime_diagnostics.record_fallback(),
                 }
             }
-            self.smooth(
+            self.smooth_initial(
                 backend,
                 level_idx,
                 level_workspace,
                 x,
                 b,
                 BACKEND_AMG_COARSE_SWEEPS,
+                x_is_zero,
             )?;
+            self.profile_finish(backend, level_idx, BackendAmgPhase::CoarseSolve, started)?;
             return Ok(());
         }
 
-        self.smooth(
+        let started = self.profile_start(backend)?;
+        self.smooth_initial(
             backend,
             level_idx,
             level_workspace,
             x,
             b,
             self.config.num_pre_smooth,
+            x_is_zero,
         )?;
+        self.profile_finish(backend, level_idx, BackendAmgPhase::PreSmooth, started)?;
 
+        let started = self.profile_start(backend)?;
         level
             .matrix
             .try_apply(backend, x, &mut level_workspace.residual)?;
-        backend.try_scale::<T>(
-            -<T as sonium_compute::DeviceScalar>::one(),
-            &mut level_workspace.residual,
-        )?;
-        backend.try_axpy::<T>(
-            <T as sonium_compute::DeviceScalar>::one(),
-            b,
-            &mut level_workspace.residual,
-        )?;
+        if !backend.try_residual_update_native(b, &mut level_workspace.residual)? {
+            backend.try_scale::<T>(
+                -<T as sonium_compute::DeviceScalar>::one(),
+                &mut level_workspace.residual,
+            )?;
+            backend.try_axpy::<T>(
+                <T as sonium_compute::DeviceScalar>::one(),
+                b,
+                &mut level_workspace.residual,
+            )?;
+        }
+        self.profile_finish(backend, level_idx, BackendAmgPhase::Residual, started)?;
 
         let restriction =
             level
@@ -1646,7 +1745,9 @@ where
                 reason: format!("level {level_idx} is missing coarse residual workspace"),
             },
         )?;
+        let started = self.profile_start(backend)?;
         restriction.try_apply(backend, &level_workspace.residual, r_coarse)?;
+        self.profile_finish(backend, level_idx, BackendAmgPhase::Restriction, started)?;
 
         let e_coarse = level_workspace.e_coarse.as_mut().ok_or(
             sonium_compute::BackendError::InvalidArgument {
@@ -1654,7 +1755,6 @@ where
                 reason: format!("level {level_idx} is missing coarse correction workspace"),
             },
         )?;
-        backend.try_scale::<T>(<T as sonium_compute::DeviceScalar>::zero(), e_coarse)?;
 
         match cycle {
             AmgCycle::VCycle => {
@@ -1665,6 +1765,7 @@ where
                     e_coarse,
                     r_coarse,
                     AmgCycle::VCycle,
+                    true,
                 )?;
             }
             AmgCycle::WCycle => {
@@ -1675,6 +1776,7 @@ where
                     e_coarse,
                     r_coarse,
                     AmgCycle::WCycle,
+                    true,
                 )?;
                 self.mg_cycle(
                     backend,
@@ -1683,6 +1785,7 @@ where
                     e_coarse,
                     r_coarse,
                     AmgCycle::WCycle,
+                    false,
                 )?;
             }
             AmgCycle::FCycle => {
@@ -1693,6 +1796,7 @@ where
                     e_coarse,
                     r_coarse,
                     AmgCycle::FCycle,
+                    true,
                 )?;
                 self.mg_cycle(
                     backend,
@@ -1701,6 +1805,7 @@ where
                     e_coarse,
                     r_coarse,
                     AmgCycle::VCycle,
+                    false,
                 )?;
             }
         }
@@ -1713,13 +1818,16 @@ where
                     operation: "amg_apply",
                     reason: format!("level {level_idx} is missing prolongation"),
                 })?;
+        let started = self.profile_start(backend)?;
         prolongation.try_apply(backend, e_coarse, &mut level_workspace.correction)?;
         backend.try_axpy::<T>(
             <T as sonium_compute::DeviceScalar>::one(),
             &level_workspace.correction,
             x,
         )?;
+        self.profile_finish(backend, level_idx, BackendAmgPhase::Prolongation, started)?;
 
+        let started = self.profile_start(backend)?;
         self.smooth(
             backend,
             level_idx,
@@ -1728,7 +1836,71 @@ where
             b,
             self.config.num_post_smooth,
         )?;
+        self.profile_finish(backend, level_idx, BackendAmgPhase::PostSmooth, started)?;
         Ok(())
+    }
+
+    // A fresh correction is a semantic zero, regardless of old scratch contents.
+    // Jacobi and Chebyshev start with scaled diagonal application. W/F revisits
+    // call this with false to preserve their accumulated coarse correction.
+    fn smooth_initial(
+        &self,
+        backend: &B,
+        level_idx: usize,
+        workspace: &mut BackendAmgLevelWorkspace<B, T>,
+        x: &mut B::Buffer<T>,
+        b: &B::Buffer<T>,
+        num_sweeps: usize,
+        x_is_zero: bool,
+    ) -> sonium_compute::BackendResult<()> {
+        if !x_is_zero {
+            return self.smooth(backend, level_idx, workspace, x, b, num_sweeps);
+        }
+        if num_sweeps > 0 && self.config.smoother == AmgSmoother::Chebyshev {
+            backend.try_inject_preconditioner_failure(
+                sonium_compute::PreconditionerFailureInjectionPoint::Smoother,
+            )?;
+            return Self::smooth_chebyshev(
+                backend,
+                &self.levels[level_idx],
+                workspace,
+                x,
+                b,
+                true,
+                num_sweeps,
+            );
+        }
+        if num_sweeps > 0
+            && matches!(
+                self.config.smoother,
+                AmgSmoother::Jacobi | AmgSmoother::L1Jacobi
+            )
+        {
+            backend.try_inject_preconditioner_failure(
+                sonium_compute::PreconditionerFailureInjectionPoint::Smoother,
+            )?;
+            let weight = if self.config.smoother == AmgSmoother::L1Jacobi {
+                1.0
+            } else {
+                self.config.jacobi_weight
+            };
+            let omega = <T as sonium_compute::DeviceScalar>::Real::from_f64(weight).ok_or(
+                sonium_compute::BackendError::InvalidArgument {
+                    operation: "amg_smoother",
+                    reason: "Jacobi weight is not representable".into(),
+                },
+            )?;
+            let diagonal = &self.levels[level_idx].diag_inv;
+            if !backend.try_diagonal_scale_native(&diagonal.matrix().values, b, x, omega)? {
+                diagonal.try_apply(backend, b, x)?;
+                backend.try_scale::<T>(<T as sonium_compute::DeviceScalar>::from_real(omega), x)?;
+            }
+            return self.smooth(backend, level_idx, workspace, x, b, num_sweeps - 1);
+        }
+        if !backend.try_zero_native(x)? {
+            backend.try_scale::<T>(<T as sonium_compute::DeviceScalar>::zero(), x)?;
+        }
+        self.smooth(backend, level_idx, workspace, x, b, num_sweeps)
     }
 
     fn smooth(
@@ -1757,23 +1929,22 @@ where
                 })?;
         match self.config.smoother {
             AmgSmoother::Chebyshev => {
-                let lambda_max =
-                    level
-                        .lambda_max
-                        .ok_or(sonium_compute::BackendError::InvalidArgument {
-                            operation: "amg_smoother",
-                            reason: format!("level {level_idx} has no Chebyshev eigenvalue bound"),
-                        })?;
-                Self::smooth_chebyshev(backend, level, workspace, x, b, lambda_max, num_sweeps)?;
+                Self::smooth_chebyshev(backend, level, workspace, x, b, false, num_sweeps)?;
             }
             AmgSmoother::Jacobi | AmgSmoother::L1Jacobi => {
-                let omega =
-                    <T as sonium_compute::DeviceScalar>::Real::from_f64(self.config.jacobi_weight)
-                        .ok_or(sonium_compute::BackendError::InvalidArgument {
-                            operation: "amg_smoother",
-                            reason: "Jacobi weight is not representable".into(),
-                        })?;
-                Self::smooth_jacobi(backend, level, workspace, x, b, omega, num_sweeps)?;
+                // Match host L1-Jacobi: row-norm scaling already supplies damping.
+                let weight = if self.config.smoother == AmgSmoother::L1Jacobi {
+                    1.0
+                } else {
+                    self.config.jacobi_weight
+                };
+                let omega = <T as sonium_compute::DeviceScalar>::Real::from_f64(weight).ok_or(
+                    sonium_compute::BackendError::InvalidArgument {
+                        operation: "amg_smoother",
+                        reason: "Jacobi weight is not representable".into(),
+                    },
+                )?;
+                self.smooth_jacobi(backend, level, workspace, x, b, omega, num_sweeps)?;
             }
             AmgSmoother::SymmetricGaussSeidel | AmgSmoother::CfSymmetricGaussSeidel => {
                 // These smoothers are serial host implementations in the
@@ -1788,7 +1959,7 @@ where
                             operation: "amg_smoother",
                             reason: "Jacobi weight is not representable".into(),
                         })?;
-                Self::smooth_jacobi(backend, level, workspace, x, b, omega, num_sweeps)?;
+                self.smooth_jacobi(backend, level, workspace, x, b, omega, num_sweeps)?;
             }
             AmgSmoother::MulticolorGaussSeidel => {
                 if level.colors.is_empty() {
@@ -1802,7 +1973,7 @@ where
                         operation: "amg_smoother",
                         reason: "Jacobi weight is not representable".into(),
                     })?;
-                    Self::smooth_jacobi(backend, level, workspace, x, b, omega, num_sweeps)?;
+                    self.smooth_jacobi(backend, level, workspace, x, b, omega, num_sweeps)?;
                 } else {
                     Self::smooth_multicolor_gs(backend, level, x, b, num_sweeps)?;
                 }
@@ -1812,6 +1983,7 @@ where
     }
 
     fn smooth_jacobi(
+        &self,
         backend: &B,
         level: &BackendAmgLevel<B, T>,
         workspace: &mut BackendAmgLevelWorkspace<B, T>,
@@ -1820,8 +1992,50 @@ where
         omega: <T as sonium_compute::DeviceScalar>::Real,
         num_sweeps: usize,
     ) -> sonium_compute::BackendResult<()> {
+        if self.small_jacobi_enabled {
+            let csr = level.matrix.matrix();
+            if backend.try_small_csr_jacobi_native(
+                &csr.row_ptr,
+                &csr.col_idx,
+                &csr.values,
+                &level.diag_inv.matrix().values,
+                b,
+                x,
+                omega,
+                num_sweeps,
+            )? {
+                return Ok(());
+            }
+        }
         for _ in 0..num_sweeps {
+            if self.fused_jacobi_enabled {
+                let csr = level.matrix.matrix();
+                if backend.try_csr_jacobi_step_native(
+                    &csr.row_ptr,
+                    &csr.col_idx,
+                    &csr.values,
+                    &level.diag_inv.matrix().values,
+                    b,
+                    x,
+                    &mut workspace.ax,
+                    omega,
+                )? {
+                    // The old iterate remains immutable during the launch. Reuse
+                    // its allocation as scratch for the next simultaneous sweep.
+                    std::mem::swap(x, &mut workspace.ax);
+                    continue;
+                }
+            }
             level.matrix.try_apply(backend, x, &mut workspace.ax)?;
+            if backend.try_jacobi_update_native(
+                &level.diag_inv.matrix().values,
+                b,
+                &workspace.ax,
+                x,
+                omega,
+            )? {
+                continue;
+            }
             backend.try_scale::<T>(
                 -<T as sonium_compute::DeviceScalar>::one(),
                 &mut workspace.ax,
@@ -1894,11 +2108,17 @@ where
         workspace: &mut BackendAmgLevelWorkspace<B, T>,
         x: &mut B::Buffer<T>,
         b: &B::Buffer<T>,
-        lambda_max: <T as sonium_compute::DeviceScalar>::Real,
+        x_is_zero: bool,
         num_sweeps: usize,
     ) -> sonium_compute::BackendResult<()> {
-        use num_traits::One;
+        use num_traits::{One, Zero};
 
+        let lambda_max = level
+            .lambda_max
+            .ok_or(sonium_compute::BackendError::InvalidArgument {
+                operation: "amg_smoother",
+                reason: "Chebyshev level has no eigenvalue bound".into(),
+            })?;
         let thirty = <T as sonium_compute::DeviceScalar>::Real::from_f64(30.0).ok_or(
             sonium_compute::BackendError::InvalidArgument {
                 operation: "amg_smoother",
@@ -1919,24 +2139,63 @@ where
         let sigma = theta / delta;
         let mut rho = one / sigma;
 
-        level.matrix.try_apply(backend, x, &mut workspace.ax)?;
-        backend.try_scale::<T>(
-            -<T as sonium_compute::DeviceScalar>::one(),
-            &mut workspace.ax,
-        )?;
-        backend.try_axpy::<T>(
-            <T as sonium_compute::DeviceScalar>::one(),
-            b,
-            &mut workspace.ax,
-        )?;
-        level
-            .diag_inv
-            .try_apply(backend, &workspace.ax, &mut workspace.d)?;
-        backend.try_scale::<T>(
-            <T as sonium_compute::DeviceScalar>::from_real(one / theta),
-            &mut workspace.d,
-        )?;
-        backend.try_axpy::<T>(<T as sonium_compute::DeviceScalar>::one(), &workspace.d, x)?;
+        let native_first = if x_is_zero {
+            false
+        } else {
+            level.matrix.try_apply(backend, x, &mut workspace.ax)?;
+            backend.try_chebyshev_update_native(
+                &level.diag_inv.matrix().values,
+                b,
+                &workspace.ax,
+                &mut workspace.d,
+                x,
+                one / theta,
+                <T as sonium_compute::DeviceScalar>::Real::zero(),
+            )?
+        };
+        if !native_first {
+            // A fresh correction ignores stale scratch. Keep the recurrence's first
+            // direction even when A*0 and the residual construction can be skipped.
+            let residual = if x_is_zero {
+                b
+            } else {
+                backend.try_scale::<T>(
+                    -<T as sonium_compute::DeviceScalar>::one(),
+                    &mut workspace.ax,
+                )?;
+                backend.try_axpy::<T>(
+                    <T as sonium_compute::DeviceScalar>::one(),
+                    b,
+                    &mut workspace.ax,
+                )?;
+                &workspace.ax
+            };
+            // The inverse diagonal has one stored value per row. Native scaling
+            // avoids a sparse dispatch and folds in the Chebyshev coefficient.
+            if !backend.try_diagonal_scale_native(
+                &level.diag_inv.matrix().values,
+                residual,
+                &mut workspace.d,
+                one / theta,
+            )? {
+                level
+                    .diag_inv
+                    .try_apply(backend, residual, &mut workspace.d)?;
+                backend.try_scale::<T>(
+                    <T as sonium_compute::DeviceScalar>::from_real(one / theta),
+                    &mut workspace.d,
+                )?;
+            }
+            if x_is_zero {
+                backend.try_copy_d2d(&workspace.d, x)?;
+            } else {
+                backend.try_axpy::<T>(
+                    <T as sonium_compute::DeviceScalar>::one(),
+                    &workspace.d,
+                    x,
+                )?;
+            }
+        }
 
         for _ in 1..num_sweeps {
             let rho_new = one / (two * sigma - rho);
@@ -1944,6 +2203,18 @@ where
             let coeff_res = <T as sonium_compute::DeviceScalar>::from_real(two * rho_new / delta);
 
             level.matrix.try_apply(backend, x, &mut workspace.ax)?;
+            if backend.try_chebyshev_update_native(
+                &level.diag_inv.matrix().values,
+                b,
+                &workspace.ax,
+                &mut workspace.d,
+                x,
+                two * rho_new / delta,
+                rho_new * rho,
+            )? {
+                rho = rho_new;
+                continue;
+            }
             backend.try_scale::<T>(
                 -<T as sonium_compute::DeviceScalar>::one(),
                 &mut workspace.ax,
@@ -1953,10 +2224,17 @@ where
                 b,
                 &mut workspace.ax,
             )?;
-            level
-                .diag_inv
-                .try_apply(backend, &workspace.ax, &mut workspace.d_new)?;
-            backend.try_scale::<T>(coeff_res, &mut workspace.d_new)?;
+            if !backend.try_diagonal_scale_native(
+                &level.diag_inv.matrix().values,
+                &workspace.ax,
+                &mut workspace.d_new,
+                two * rho_new / delta,
+            )? {
+                level
+                    .diag_inv
+                    .try_apply(backend, &workspace.ax, &mut workspace.d_new)?;
+                backend.try_scale::<T>(coeff_res, &mut workspace.d_new)?;
+            }
             backend.try_axpy::<T>(coeff_old, &workspace.d, &mut workspace.d_new)?;
             backend.try_axpy::<T>(
                 <T as sonium_compute::DeviceScalar>::one(),
@@ -2166,6 +2444,7 @@ where
         r: &B::Buffer<T>,
         z: &mut B::Buffer<T>,
     ) -> sonium_compute::BackendResult<()> {
+        self.ensure_numeric_valid()?;
         backend.try_inject_preconditioner_failure(
             sonium_compute::PreconditionerFailureInjectionPoint::Launch,
         )?;
@@ -2193,12 +2472,8 @@ where
                     operation: "amg_apply",
                     reason: "workspace mutex poisoned".into(),
                 })?;
-        backend.try_scale::<T>(
-            <T as sonium_compute::DeviceScalar>::zero(),
-            &mut workspace.result,
-        )?;
         let BackendAmgWorkspace { levels, result, .. } = &mut *workspace;
-        self.mg_cycle(backend, 0, levels, result, r, self.config.cycle)?;
+        self.mg_cycle(backend, 0, levels, result, r, self.config.cycle, true)?;
         backend.try_copy_d2d(result, z)?;
         self.record_apply_elapsed(started);
         Ok(())
@@ -2226,6 +2501,7 @@ where
         r: &B::Buffer<T>,
         z: &mut B::Buffer<T>,
     ) -> sonium_compute::BackendResult<()> {
+        self.ensure_numeric_valid()?;
         backend.try_inject_preconditioner_failure(
             sonium_compute::PreconditionerFailureInjectionPoint::Launch,
         )?;
@@ -2269,16 +2545,20 @@ where
                 &mut workspace.block_input,
                 sonium_compute::BufferView::contiguous(0, n),
             )?;
-            backend.try_scale::<T>(
-                <T as sonium_compute::DeviceScalar>::zero(),
-                &mut workspace.result,
-            )?;
             let BackendAmgWorkspace {
                 levels,
                 result,
                 block_input,
             } = &mut *workspace;
-            self.mg_cycle(backend, 0, levels, result, block_input, self.config.cycle)?;
+            self.mg_cycle(
+                backend,
+                0,
+                levels,
+                result,
+                block_input,
+                self.config.cycle,
+                true,
+            )?;
             backend.try_copy_views_d2d(
                 result,
                 sonium_compute::BufferView::contiguous(0, n),
@@ -2652,8 +2932,13 @@ where
     let four_thirds = T::Real::from_f64(4.0).unwrap() / T::Real::from_f64(3.0).unwrap();
     let omega = four_thirds / spectral_radius;
 
-    let prolongation =
-        interpolation::smooth_prolongation(current_matrix, &level_diag_inv, &p_tent, omega);
+    let prolongation = interpolation::smooth_prolongation(
+        current_matrix,
+        &level_diag_inv,
+        &p_tent,
+        omega,
+        config.max_interp_elements,
+    );
     let restriction = transpose_or_adjoint(&prolongation, config);
 
     let mut c2f = vec![0usize; num_aggregates];
@@ -2730,8 +3015,13 @@ where
     let four_thirds = T::Real::from_f64(4.0).unwrap() / T::Real::from_f64(3.0).unwrap();
     let omega = four_thirds / spectral_radius;
 
-    let prolongation =
-        interpolation::smooth_prolongation(current_matrix, &level_diag_inv, &p_tent, omega);
+    let prolongation = interpolation::smooth_prolongation(
+        current_matrix,
+        &level_diag_inv,
+        &p_tent,
+        omega,
+        config.max_interp_elements,
+    );
     let restriction = transpose_or_adjoint(&prolongation, config);
 
     let mut c2f = vec![0usize; num_aggregates];

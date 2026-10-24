@@ -16,13 +16,30 @@
 // API shape stable; the larger error is an intentional trade-off here.
 #![allow(clippy::result_large_err)]
 
+#[cfg(test)]
+mod block_restart_tests;
+#[cfg(test)]
+mod flexible_tests;
+#[cfg(test)]
+mod admission_tests;
+mod pcg_session;
+mod session;
+
+#[doc(inline)]
+pub use pcg_session::{DevicePcgAssumption, DevicePcgSession, DevicePcgStatus, validate_backend_pcg};
+
+#[doc(inline)]
+pub use session::{DeviceGmresSession, DeviceInitialGuess};
+
 use num_traits::Float;
 use sonium_compute::pool::Buffer;
 use sonium_compute::{
     Backend, BackendContextDisposition, BackendOutputDisposition, BlockGmresConfig,
-    BlockGmresError, BlockGmresStatus, BlockGmresWorkspace, DeviceOperator, DevicePreconditioner,
-    DeviceScalar, GmresBackendConfig, GmresBackendError, GmresBackendStatus, GmresWorkspace,
-    MemoryPool, TransferStatsSnapshot, gmres_backend_block_preconditioned_with_workspace,
+    BlockGmresError, BlockGmresStatus, BlockGmresWorkspace, DeviceBufferLike, DeviceOperator,
+    DevicePreconditioner, DeviceScalar, GmresBackendConfig, GmresBackendError, GmresBackendStatus,
+    GmresWorkspace, MemoryPool, TransferStatsSnapshot,
+    fgmres_backend_preconditioned_pooled_with_workspace,
+    gmres_backend_block_preconditioned_with_workspace,
     gmres_backend_preconditioned_pooled_with_workspace,
 };
 use std::sync::Arc;
@@ -352,11 +369,36 @@ impl BackendKrylovError {
     }
 }
 
+// The legacy constructor preserves its backend allocation policy. New retained
+// callers use `with_pool` so restart and scalar-fallback storage are accounted.
+enum BlockRestart<B: Backend, T: DeviceScalar> {
+    Pooled(Buffer<T, B>),
+    Legacy(B::Buffer<T>),
+}
+
+impl<B: Backend, T: DeviceScalar> BlockRestart<B, T> {
+    fn raw(&self) -> &B::Buffer<T> {
+        match self {
+            Self::Pooled(buffer) => buffer.raw(),
+            Self::Legacy(buffer) => buffer,
+        }
+    }
+    fn raw_mut(&mut self) -> &mut B::Buffer<T> {
+        match self {
+            Self::Pooled(buffer) => buffer.raw_mut(),
+            Self::Legacy(buffer) => buffer,
+        }
+    }
+}
+
 /// Reusable scalar and block device workspaces.
 pub struct BackendKrylovWorkspace<B: Backend, T: DeviceScalar> {
     dimension: usize,
     scalar: GmresWorkspace<B, T>,
+    scalar_restart: Option<Buffer<T, B>>,
     block: BlockGmresWorkspace<B, T>,
+    block_restart: Option<BlockRestart<B, T>>,
+    block_pool: Option<MemoryPool<B>>,
 }
 
 impl<B: Backend, T: DeviceScalar> BackendKrylovWorkspace<B, T> {
@@ -365,8 +407,27 @@ impl<B: Backend, T: DeviceScalar> BackendKrylovWorkspace<B, T> {
         Self {
             dimension,
             scalar: GmresWorkspace::new(dimension),
+            scalar_restart: None,
             block: BlockGmresWorkspace::new(dimension),
+            block_restart: None,
+            block_pool: None,
         }
+    }
+
+    /// Create reusable block scratch with pooled restart and scalar-fallback storage.
+    ///
+    /// Use `pool.backend()` for every solve with this workspace. The compute
+    /// block substrate still owns its existing backend-allocated basis buffers;
+    /// this constructor does not imply complete block-workspace quota coverage.
+    /// Active-width buffers are cached across deflation; memory grows with the
+    /// visited widths until `clear`. Cached restart values are never used as an
+    /// implicit initial guess.
+    #[must_use]
+    pub fn with_pool(dimension: usize, pool: &MemoryPool<B>) -> Self {
+        let mut workspace = Self::new(dimension);
+        workspace.block = BlockGmresWorkspace::with_retained_shapes(dimension, pool);
+        workspace.block_pool = Some(pool.clone());
+        workspace
     }
 
     #[must_use]
@@ -389,21 +450,29 @@ impl<B: Backend, T: DeviceScalar> BackendKrylovWorkspace<B, T> {
                 ),
                 source,
             })?;
+        self.scalar_restart = None;
         self.block.clear();
+        self.block_restart = None;
         Ok(())
     }
 
     fn scalar_metrics(&self) -> (usize, usize) {
         (
-            self.scalar.cached_buffer_count().unwrap_or(0),
-            self.scalar.cached_bytes().unwrap_or(0),
+            self.scalar.cached_buffer_count().unwrap_or(0)
+                + usize::from(self.scalar_restart.is_some()),
+            self.scalar.cached_bytes().unwrap_or(0)
+                + self.scalar_restart.as_ref().map_or(0, Buffer::byte_size),
         )
     }
 
     fn block_metrics(&self) -> (usize, usize) {
         (
-            self.block.device_buffer_count(),
-            self.block.device_capacity(),
+            self.block.device_buffer_count() + usize::from(self.block_restart.is_some()),
+            self.block.device_capacity()
+                + self
+                    .block_restart
+                    .as_ref()
+                    .map_or(0, |buffer| buffer.raw().len()),
         )
     }
 }
@@ -448,6 +517,14 @@ fn capability_for<B: Backend, T: DeviceScalar>(
     scalar: BackendKrylovScalar,
 ) -> BackendKrylovCapability {
     let caps = backend.capabilities();
+    capability_from_report::<T>(&caps, method, scalar)
+}
+
+fn capability_from_report<T: DeviceScalar>(
+    caps: &sonium_compute::BackendCapabilities,
+    method: BackendKrylovMethod,
+    scalar: BackendKrylovScalar,
+) -> BackendKrylovCapability {
     let scalar_state = caps.blas1.state_for::<T>();
     let block = matches!(
         method,
@@ -476,6 +553,8 @@ fn capability_for<B: Backend, T: DeviceScalar>(
     let csr_spmm = caps.csr_spmm.state_for::<T>();
     let native_execution = [
         scalar_state,
+        operator_state,
+        preconditioner_state,
         axpy_many,
         multi_dot,
         strided_projection,
@@ -530,13 +609,29 @@ fn least_native_state(
     CapabilityState::Native
 }
 
-fn preflight<B: Backend, T: DeviceScalar>(
+/// Validate Krylov primitive admission before allocating retained solve state.
+///
+/// Reads runtime capabilities without device work. This checks the declared
+/// CSR/identity cell; arbitrary operator and preconditioner actions remain
+/// responsible for their own dependencies and residency contracts.
+///
+/// # Errors
+/// Rejects unsupported primitives, or host fallback when native execution is required.
+pub fn validate_backend_krylov<B: Backend, T: DeviceScalar>(
     backend: &B,
     method: BackendKrylovMethod,
     require_native: bool,
 ) -> Result<(), BackendKrylovError> {
     let scalar = scalar_kind::<T>();
     let cell = capability_for::<B, T>(backend, method, scalar);
+    validate_capability_cell::<T>(&cell, require_native)
+}
+
+fn validate_capability_cell<T: DeviceScalar>(
+    cell: &BackendKrylovCapability,
+    require_native: bool,
+) -> Result<(), BackendKrylovError> {
+    let method = cell.method;
     let available = [
         cell.scalar_state,
         cell.operator_state,
@@ -580,10 +675,8 @@ fn preflight<B: Backend, T: DeviceScalar>(
 /// Refuse a non-native execution cell when the caller required native
 /// execution.
 ///
-/// Split from [`preflight`] so the refusal branch is directly unit-testable:
-/// on backends that are native everywhere (CPU, current CUDA tables) no
-/// integration input can reach it, but the branch must still fire if a
-/// fallback cell ever appears.
+/// Split from [`validate_backend_krylov`] so refusal is directly unit-testable:
+/// runtime module availability may change a native cell into a host fallback.
 fn ensure_native_execution(
     method: BackendKrylovMethod,
     backend: &'static str,
@@ -743,10 +836,9 @@ where
 
 /// Backend-resident FGMRES entry point.
 ///
-/// A fixed device preconditioner is a valid FGMRES specialization. Variable
-/// device preconditioners should implement the same checked action contract;
-/// the fixed specialization is exposed here so callers never have to route
-/// a CUDA solve through the host-slice FGMRES implementation.
+/// Retains each preconditioned Arnoldi vector, allowing the checked device
+/// preconditioner to change between applications. Restart cycles reuse pooled
+/// storage and certify convergence against the original operator.
 #[allow(clippy::too_many_arguments)]
 pub fn try_fgmres_backend_preconditioned<B, A, P, T>(
     backend: &B,
@@ -815,7 +907,7 @@ where
         },
         other => other,
     })?;
-    preflight::<B, T>(backend, method, config.require_native)?;
+    validate_backend_krylov::<B, T>(backend, method, config.require_native)?;
     if workspace.dimension() != a.n() {
         return Err(BackendKrylovError::InvalidArgument {
             method,
@@ -853,7 +945,6 @@ where
         });
     }
     let before = backend.transfer_stats();
-    let mut restart_initial: Option<Buffer<T, B>> = None;
     let mut total_iterations = 0usize;
     let mut restarts = 0usize;
     let mut last = GmresBackendStatus {
@@ -894,11 +985,19 @@ where
             max_iterations: cycle_limit,
             tolerance: config.tolerance,
         };
-        let initial = restart_initial
-            .as_ref()
-            .map(Buffer::raw)
-            .or(if total_iterations == 0 { x0 } else { None });
-        last = gmres_backend_preconditioned_pooled_with_workspace(
+        // Cached restart storage contains a previous solve until this solve
+        // completes its first cycle. Never use it as an implicit initial guess.
+        let initial = if total_iterations == 0 {
+            x0
+        } else {
+            workspace.scalar_restart.as_ref().map(Buffer::raw)
+        };
+        let solve_cycle = if method == BackendKrylovMethod::Fgmres {
+            fgmres_backend_preconditioned_pooled_with_workspace
+        } else {
+            gmres_backend_preconditioned_pooled_with_workspace
+        };
+        last = solve_cycle(
             pool,
             &mut workspace.scalar,
             a,
@@ -927,11 +1026,11 @@ where
                 workspace_device_capacity: workspace.scalar_metrics().1,
             });
         }
-        if last.iterations == 0 {
+        if last.iterations == 0 || total_iterations >= config.max_iterations {
             break;
         }
-        if restart_initial.is_none() {
-            restart_initial = Some(pool.try_alloc::<T>(a.n()).map_err(|error| {
+        if workspace.scalar_restart.is_none() {
+            workspace.scalar_restart = Some(pool.try_alloc::<T>(a.n()).map_err(|error| {
                 map_gmres_error(
                     backend,
                     method,
@@ -943,20 +1042,19 @@ where
                 )
             })?);
         }
-        let restart =
-            restart_initial
-                .as_mut()
-                .ok_or_else(|| BackendKrylovError::InvalidArgument {
+        let restart = workspace.scalar_restart.as_mut().ok_or_else(|| {
+            BackendKrylovError::InvalidArgument {
+                method,
+                reason: "restart buffer was not retained after allocation".into(),
+                diagnostic: BackendKrylovError::diagnostic_for(
                     method,
-                    reason: "restart buffer was not retained after allocation".into(),
-                    diagnostic: BackendKrylovError::diagnostic_for(
-                        method,
-                        backend_name,
-                        total_iterations,
-                        BackendOutputDisposition::Preserved,
-                        BackendContextDisposition::Reusable,
-                    ),
-                })?;
+                    backend_name,
+                    total_iterations,
+                    BackendOutputDisposition::Preserved,
+                    BackendContextDisposition::Reusable,
+                ),
+            }
+        })?;
         backend
             .try_copy_d2d(out, restart.raw_mut())
             .map_err(|source| {
@@ -1095,7 +1193,7 @@ where
         },
         other => other,
     })?;
-    preflight::<B, T>(backend, method, config.require_native)?;
+    validate_backend_krylov::<B, T>(backend, method, config.require_native)?;
     if workspace.dimension() != a.n() {
         return Err(BackendKrylovError::InvalidArgument {
             method,
@@ -1133,7 +1231,16 @@ where
         });
     }
     let before = backend.transfer_stats();
-    let mut restart_initial: Option<B::Buffer<T>> = None;
+    let block_len = a.n().checked_mul(rhs).ok_or_else(|| {
+        map_block_error(
+            backend,
+            method,
+            BlockGmresError::InvalidArgument("block extent overflows usize".into()),
+            0,
+        )
+    })?;
+    // Only a restart completed during this call may become the next initial guess.
+    let mut restart_ready = false;
     let mut total_iterations = 0usize;
     let mut restarts = 0usize;
     let mut last = BlockGmresStatus {
@@ -1170,9 +1277,11 @@ where
         let cycle_limit = config
             .restart
             .min(config.max_iterations.saturating_sub(total_iterations));
-        let initial = restart_initial
-            .as_ref()
-            .or(if total_iterations == 0 { x0 } else { None });
+        let initial = if restart_ready {
+            workspace.block_restart.as_ref().map(BlockRestart::raw)
+        } else {
+            x0
+        };
         last = gmres_backend_block_preconditioned_with_workspace(
             backend,
             a,
@@ -1195,8 +1304,22 @@ where
         if last.block_iterations == 0 {
             break;
         }
-        if restart_initial.is_none() {
-            restart_initial = Some(backend.raw_alloc::<T>(a.n()).map_err(|error| {
+        if total_iterations >= config.max_iterations {
+            break;
+        }
+        if workspace
+            .block_restart
+            .as_ref()
+            .is_none_or(|buffer| buffer.raw().len() != block_len)
+        {
+            let allocation = if let Some(pool) = &workspace.block_pool {
+                pool.try_alloc::<T>(block_len).map(BlockRestart::Pooled)
+            } else {
+                // Compatibility path: retain the existing backend allocation,
+                // now sized for every RHS rather than only the first column.
+                backend.raw_alloc::<T>(block_len).map(BlockRestart::Legacy)
+            };
+            workspace.block_restart = Some(allocation.map_err(|error| {
                 map_block_error(
                     backend,
                     method,
@@ -1208,20 +1331,18 @@ where
                 )
             })?);
         }
-        let restart =
-            restart_initial
-                .as_mut()
-                .ok_or_else(|| BackendKrylovError::InvalidArgument {
+        let restart = workspace
+            .block_restart
+            .as_mut()
+            .ok_or_else(|| {
+                map_block_error(
+                    backend,
                     method,
-                    reason: "block restart buffer was not retained after allocation".into(),
-                    diagnostic: BackendKrylovError::diagnostic_for(
-                        method,
-                        backend_name,
-                        total_iterations,
-                        BackendOutputDisposition::Preserved,
-                        BackendContextDisposition::Reusable,
-                    ),
-                })?;
+                    BlockGmresError::InvalidArgument("missing block restart storage".into()),
+                    total_iterations,
+                )
+            })?
+            .raw_mut();
         backend.try_copy_d2d(out, restart).map_err(|source| {
             map_block_error(
                 backend,
@@ -1230,6 +1351,7 @@ where
                 total_iterations,
             )
         })?;
+        restart_ready = true;
         restarts = restarts.saturating_add(1);
     }
     Ok(BackendKrylovStatus {

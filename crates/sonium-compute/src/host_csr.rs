@@ -33,6 +33,9 @@ pub enum HostCsrError {
     ColumnOutOfBounds,
     #[error("CSR dimensions overflow host index space")]
     DimensionOverflow,
+    /// The first row does not begin at the start of the entry arrays.
+    #[error("row_ptrs[0] must equal zero")]
+    NonzeroRowStart,
 }
 
 /// Owned CSR storage returned by checked sparse transformations.
@@ -65,6 +68,10 @@ impl<T> OwnedHostCsr<T> {
 
 impl<'a, T> HostCsrRef<'a, T> {
     /// Construct a checked borrowed CSR view.
+    ///
+    /// # Errors
+    /// Rejects inconsistent lengths, nonzero starting offsets, invalid terminal
+    /// offsets, nonmonotone rows, out-of-range columns and dimension overflow.
     pub fn try_new(
         num_rows: usize,
         num_cols: usize,
@@ -77,6 +84,9 @@ impl<'a, T> HostCsrRef<'a, T> {
             .ok_or(HostCsrError::DimensionOverflow)?;
         if row_ptrs.len() != expected_row_ptrs {
             return Err(HostCsrError::RowPointerCount);
+        }
+        if row_ptrs[0] != 0 {
+            return Err(HostCsrError::NonzeroRowStart);
         }
         if col_indices.len() != values.len() {
             return Err(HostCsrError::MismatchedNnz);
@@ -99,6 +109,10 @@ impl<'a, T> HostCsrRef<'a, T> {
         })
     }
 
+    /// Construct a borrowed CSR view, panicking on invalid structure.
+    ///
+    /// # Panics
+    /// Panics on any structural error reported by [`Self::try_new`].
     pub fn new(
         num_rows: usize,
         num_cols: usize,
@@ -106,39 +120,8 @@ impl<'a, T> HostCsrRef<'a, T> {
         col_indices: &'a [usize],
         values: &'a [T],
     ) -> Self {
-        assert_eq!(
-            row_ptrs.len(),
-            num_rows + 1,
-            "row_ptrs must have num_rows + 1 entries"
-        );
-        assert_eq!(
-            col_indices.len(),
-            values.len(),
-            "col_indices and values must have matching lengths"
-        );
-        assert_eq!(
-            row_ptrs[num_rows],
-            values.len(),
-            "row_ptrs[num_rows] must equal nnz"
-        );
-
-        for window in row_ptrs.windows(2) {
-            assert!(
-                window[0] <= window[1],
-                "row_ptrs must be monotonically nondecreasing"
-            );
-        }
-        for &col in col_indices {
-            assert!(col < num_cols, "CSR column index out of bounds");
-        }
-
-        Self {
-            num_rows,
-            num_cols,
-            row_ptrs,
-            col_indices,
-            values,
-        }
+        Self::try_new(num_rows, num_cols, row_ptrs, col_indices, values)
+            .unwrap_or_else(|error| panic!("{error}"))
     }
 
     pub fn nnz(&self) -> usize {
@@ -307,5 +290,96 @@ mod tests {
         let col_indices = [2];
         let values = [1.0_f64];
         let _ = HostCsrRef::new(1, 2, &row_ptrs, &col_indices, &values);
+    }
+    #[test]
+    fn checked_views_and_transforms_reject_nonzero_row_start() {
+        // Both an ordinary matrix and a zero-row shape can hide unused entries.
+        for rows in [&[1, 1][..], &[1][..]] {
+            let matrix = HostCsrRef {
+                num_rows: rows.len() - 1,
+                num_cols: 1,
+                row_ptrs: rows,
+                col_indices: &[0],
+                values: &[2.0_f64],
+            };
+            assert_eq!(
+                HostCsrRef::try_new(
+                    matrix.num_rows,
+                    matrix.num_cols,
+                    rows,
+                    matrix.col_indices,
+                    matrix.values
+                )
+                .unwrap_err(),
+                HostCsrError::NonzeroRowStart
+            );
+            assert_eq!(
+                matrix.try_transpose().unwrap_err(),
+                HostCsrError::NonzeroRowStart
+            );
+            assert_eq!(
+                matrix.try_hermitian().unwrap_err(),
+                HostCsrError::NonzeroRowStart
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "row_ptrs[0] must equal zero")]
+    fn panicking_constructor_rejects_nonzero_row_start() {
+        let _ = HostCsrRef::new(1, 1, &[1, 1], &[0], &[2.0_f64]);
+    }
+
+    #[test]
+    fn checked_empty_shapes_and_dimension_overflow() {
+        for (m, n, rows) in [(0, 0, &[0][..]), (0, 3, &[0][..]), (2, 0, &[0, 0, 0][..])] {
+            let matrix = HostCsrRef::try_new(m, n, rows, &[], &[] as &[f64]).unwrap();
+            let transposed = matrix.try_transpose().unwrap();
+            assert_eq!((transposed.num_rows, transposed.num_cols), (n, m));
+            assert_eq!(transposed.row_ptrs, vec![0; n + 1]);
+        }
+        assert_eq!(
+            HostCsrRef::try_new(usize::MAX, 0, &[], &[], &[] as &[f64]).unwrap_err(),
+            HostCsrError::DimensionOverflow
+        );
+    }
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn native_cuda_sparse_admission_rejects_nonzero_start_before_device_work() {
+        use crate::{AdjointDeviceCsr, CudaBackend, DeviceCsr, PersistentDeviceCsr};
+        let backend = match CudaBackend::new_default() {
+            Ok(backend) => backend,
+            Err(error) => {
+                assert!(
+                    std::env::var("SONIUM_REQUIRE_CUDA").as_deref() != Ok("1"),
+                    "{error}"
+                );
+                return;
+            }
+        };
+        fn reject<T: DeviceScalar>(backend: &CudaBackend) {
+            let values = [T::one()];
+            // Public fields permit bypassing the checked constructor; upload
+            // entrypoints must still reject malformed external interchange data.
+            let matrix = HostCsrRef {
+                num_rows: 1,
+                num_cols: 1,
+                row_ptrs: &[1, 1],
+                col_indices: &[0],
+                values: &values,
+            };
+            let before = backend.begin_runtime_stats();
+            assert!(DeviceCsr::try_from_host_csr_ref(backend, matrix).is_err());
+            assert!(PersistentDeviceCsr::try_from_host_csr_ref(backend, matrix).is_err());
+            assert!(AdjointDeviceCsr::try_from_host_csr_ref(backend, matrix).is_err());
+            let stats = backend.runtime_stats_since(before);
+            assert_eq!(stats.allocation_operations, 0);
+            assert_eq!(stats.kernel_launches, 0);
+            assert_eq!(stats.transfer.h2d_bytes + stats.transfer.d2h_bytes, 0);
+        }
+        reject::<f32>(&backend);
+        reject::<f64>(&backend);
+        reject::<num_complex::Complex32>(&backend);
+        reject::<num_complex::Complex64>(&backend);
     }
 }

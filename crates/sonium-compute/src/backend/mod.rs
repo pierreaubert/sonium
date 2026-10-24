@@ -1737,6 +1737,274 @@ pub trait Backend: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Test finiteness without staging the input through host memory.
+    ///
+    /// Returns `None` when no native implementation exists. A supported
+    /// implementation may transfer a compact status word to the host.
+    ///
+    /// # Errors
+    /// Returns checked storage, execution or allocation failures.
+    fn try_all_finite_native<T: DeviceScalar>(
+        &self,
+        _values: &Self::Buffer<T>,
+    ) -> BackendResult<Option<bool>> {
+        Ok(None)
+    }
+
+    /// Zero a buffer natively, including previously non-finite entries.
+    ///
+    /// Returns false without mutation when unavailable. No host array staging
+    /// occurs; multiplying old contents by zero does not satisfy this contract.
+    ///
+    /// # Errors
+    /// Returns checked storage or execution failures.
+    fn try_zero_native<T: DeviceScalar>(
+        &self,
+        _values: &mut Self::Buffer<T>,
+    ) -> BackendResult<bool> {
+        Ok(false)
+    }
+
+    /// Replace a resident matrix action with `rhs - action` in place.
+    ///
+    /// Returns false without mutation when unavailable. Never stages arrays on
+    /// the host. Nonfinite arithmetic follows the scalar subtraction semantics.
+    ///
+    /// # Errors
+    /// Rejects unequal lengths, invalid storage and backend execution failures.
+    fn try_residual_update_native<T: DeviceScalar>(
+        &self,
+        rhs: &Self::Buffer<T>,
+        action: &mut Self::Buffer<T>,
+    ) -> BackendResult<bool> {
+        if rhs.len() != action.len() {
+            return Err(BackendError::InvalidArgument {
+                operation: "residual_update_native",
+                reason: "unequal buffer lengths".into(),
+            });
+        }
+        Ok(false)
+    }
+
+    /// Overwrite output with `omega * diagonal * input` on the device.
+    ///
+    /// Returns false without mutation if unavailable. Never reads old output or
+    /// stages arrays on the host, so non-finite scratch contents are overwritten.
+    ///
+    /// # Errors
+    /// Rejects unequal lengths, non-finite damping, or backend execution failures.
+    fn try_diagonal_scale_native<T: DeviceScalar>(
+        &self,
+        diagonal: &Self::Buffer<T>,
+        input: &Self::Buffer<T>,
+        output: &mut Self::Buffer<T>,
+        omega: T::Real,
+    ) -> BackendResult<bool> {
+        if diagonal.len() != output.len() || input.len() != output.len() || !omega.is_finite() {
+            return Err(BackendError::InvalidArgument {
+                operation: "diagonal_scale_native",
+                reason: "unequal buffer lengths or non-finite damping".into(),
+            });
+        }
+        Ok(false)
+    }
+
+    /// Scale column-major vectors by one shared diagonal on the device.
+    ///
+    /// Each column has `diagonal.len()` entries. Preserves the scalar hook's
+    /// overwrite and residency contract; unavailable paths return false unchanged.
+    ///
+    /// # Errors
+    /// Rejects shape overflow, mismatched lengths, non-finite damping or backend failures.
+    fn try_diagonal_scale_colmajor_native<T: DeviceScalar>(
+        &self,
+        rhs: usize,
+        diagonal: &Self::Buffer<T>,
+        input: &Self::Buffer<T>,
+        output: &mut Self::Buffer<T>,
+        omega: T::Real,
+    ) -> BackendResult<bool> {
+        if diagonal.len().checked_mul(rhs) != Some(output.len())
+            || input.len() != output.len()
+            || !omega.is_finite()
+        {
+            return Err(BackendError::InvalidArgument {
+                operation: "diagonal_scale_colmajor_native",
+                reason: "invalid block shape or non-finite damping".into(),
+            });
+        }
+        if rhs == 1 {
+            self.try_diagonal_scale_native(diagonal, input, output, omega)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Try simultaneous Jacobi sweeps on a small resident CSR system.
+    ///
+    /// Returns false unchanged when unavailable. Never stages arrays on the host.
+    /// Malformed resident indices may produce NaNs; callers must certify results.
+    ///
+    /// # Errors
+    /// Rejects inconsistent lengths, nonfinite damping, or backend failures.
+    fn try_small_csr_jacobi_native<T: DeviceScalar>(
+        &self,
+        rows: &Self::Buffer<i32>,
+        columns: &Self::Buffer<i32>,
+        values: &Self::Buffer<T>,
+        inverse: &Self::Buffer<T>,
+        b: &Self::Buffer<T>,
+        x: &mut Self::Buffer<T>,
+        omega: T::Real,
+        _sweeps: usize,
+    ) -> BackendResult<bool> {
+        if x.len().checked_add(1) != Some(rows.len())
+            || columns.len() != values.len()
+            || inverse.len() != x.len()
+            || b.len() != x.len()
+            || !omega.is_finite()
+        {
+            return Err(BackendError::InvalidArgument {
+                operation: "small_csr_jacobi_native",
+                reason: "inconsistent lengths or nonfinite damping".into(),
+            });
+        }
+        Ok(false)
+    }
+
+    /// Try one fused CSR Jacobi sweep into a separate output buffer.
+    ///
+    /// Computes `output = x + omega * inverse * (b - A*x)`. Returns false
+    /// unchanged when unavailable. Inputs remain immutable for the entire sweep.
+    /// Malformed resident indices may produce NaNs; certify results separately.
+    /// No allocation or host staging is permitted.
+    ///
+    /// # Errors
+    /// Rejects inconsistent lengths, nonfinite damping, or native failures.
+    fn try_csr_jacobi_step_native<T: DeviceScalar>(
+        &self,
+        rows: &Self::Buffer<i32>,
+        columns: &Self::Buffer<i32>,
+        values: &Self::Buffer<T>,
+        inverse: &Self::Buffer<T>,
+        b: &Self::Buffer<T>,
+        x: &Self::Buffer<T>,
+        output: &mut Self::Buffer<T>,
+        omega: T::Real,
+    ) -> BackendResult<bool> {
+        if x.len().checked_add(1) != Some(rows.len())
+            || columns.len() != values.len() || inverse.len() != x.len()
+            || b.len() != x.len() || output.len() != x.len() || !omega.is_finite()
+        {
+            return Err(BackendError::InvalidArgument {
+                operation: "csr_jacobi_step_native",
+                reason: "inconsistent lengths or nonfinite damping".into(),
+            });
+        }
+        Ok(false)
+    }
+
+    /// Try a native fused update: x += omega * inverse * (b - ax).
+    ///
+    /// Returns false without modifying output when no native implementation exists.
+    /// Callers can then use ordinary backend operations. This method never stages
+    /// arrays through host memory. A failed launch returns an error, not false.
+    ///
+    /// # Errors
+    /// Rejects unequal lengths, non-finite damping, or backend execution failures.
+    fn try_jacobi_update_native<T: DeviceScalar>(
+        &self,
+        inverse: &Self::Buffer<T>,
+        b: &Self::Buffer<T>,
+        ax: &Self::Buffer<T>,
+        x: &mut Self::Buffer<T>,
+        omega: T::Real,
+    ) -> BackendResult<bool> {
+        if inverse.len() != x.len()
+            || b.len() != x.len()
+            || ax.len() != x.len()
+            || !omega.is_finite()
+        {
+            return Err(BackendError::InvalidArgument {
+                operation: "jacobi_update_native",
+                reason: "unequal buffer lengths or non-finite damping".into(),
+            });
+        }
+        Ok(false)
+    }
+
+    /// Update a Chebyshev direction and solution together on the device.
+    ///
+    /// Computes `direction = beta * direction + alpha * inverse * (b - ax)`,
+    /// then `x += direction`, componentwise. When beta is zero, old direction
+    /// contents are not read, including non-finite scratch. Returns false without
+    /// mutation if unavailable; never allocates scratch or stages host arrays.
+    ///
+    /// # Errors
+    /// Rejects unequal lengths, non-finite coefficients, or backend execution failures.
+    fn try_chebyshev_update_native<T: DeviceScalar>(
+        &self,
+        inverse: &Self::Buffer<T>,
+        b: &Self::Buffer<T>,
+        ax: &Self::Buffer<T>,
+        direction: &mut Self::Buffer<T>,
+        x: &mut Self::Buffer<T>,
+        alpha: T::Real,
+        beta: T::Real,
+    ) -> BackendResult<bool> {
+        if inverse.len() != x.len()
+            || b.len() != x.len()
+            || ax.len() != x.len()
+            || direction.len() != x.len()
+            || !alpha.is_finite()
+            || !beta.is_finite()
+        {
+            return Err(BackendError::InvalidArgument {
+                operation: "chebyshev_update_native",
+                reason: "unequal buffer lengths or non-finite coefficients".into(),
+            });
+        }
+        Ok(false)
+    }
+
+    /// Update column-major Chebyshev directions and solutions with one shared diagonal.
+    ///
+    /// Each column has `inverse.len()` entries. Uses the scalar hook's recurrence,
+    /// including ignoring old direction contents when beta is zero. Unavailable
+    /// paths return false without mutation, allocation or host array staging.
+    ///
+    /// # Errors
+    /// Rejects shape overflow, mismatched lengths, non-finite coefficients or backend failures.
+    fn try_chebyshev_update_colmajor_native<T: DeviceScalar>(
+        &self,
+        rhs: usize,
+        inverse: &Self::Buffer<T>,
+        b: &Self::Buffer<T>,
+        ax: &Self::Buffer<T>,
+        direction: &mut Self::Buffer<T>,
+        x: &mut Self::Buffer<T>,
+        alpha: T::Real,
+        beta: T::Real,
+    ) -> BackendResult<bool> {
+        if inverse.len().checked_mul(rhs) != Some(x.len())
+            || b.len() != x.len()
+            || ax.len() != x.len()
+            || direction.len() != x.len()
+            || !alpha.is_finite()
+            || !beta.is_finite()
+        {
+            return Err(BackendError::InvalidArgument {
+                operation: "chebyshev_update_colmajor_native",
+                reason: "invalid block shape or non-finite coefficients".into(),
+            });
+        }
+        if rhs == 1 {
+            self.try_chebyshev_update_native(inverse, b, ax, direction, x, alpha, beta)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Convert an upper-precision device buffer into its lower-precision
     /// partner.
     ///
@@ -2187,6 +2455,26 @@ pub trait Backend: Send + Sync + 'static {
         self.validate_vector_backend_limits::<T>("axpy", x.len())?;
         catch_backend_panic("axpy", || self.axpy(alpha, x, y))?;
         self.check_pending_error()
+    }
+
+    /// Optionally compute `output = alpha*x + beta*y` in one native pass.
+    ///
+    /// Returns false without modifying output when unsupported. Inputs and output
+    /// must have equal lengths and coefficients must be finite. No allocation or
+    /// host transfer is permitted. Callers may use copy/scale/AXPY after false.
+    ///
+    /// # Errors
+    /// Reports invalid arguments and native failures. Output is unspecified after
+    /// an execution failure; callers must invalidate any dependent solve state.
+    fn try_linear_combination2_native<T: DeviceScalar>(
+        &self,
+        _alpha: T,
+        _x: &Self::Buffer<T>,
+        _beta: T,
+        _y: &Self::Buffer<T>,
+        _output: &mut Self::Buffer<T>,
+    ) -> BackendResult<bool> {
+        Ok(false)
     }
 
     /// Validate a vector length before a checked BLAS-1 or reduction call

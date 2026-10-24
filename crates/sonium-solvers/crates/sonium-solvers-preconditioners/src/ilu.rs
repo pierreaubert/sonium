@@ -961,6 +961,16 @@ impl<T: ComplexField> IluPreconditioner<T> {
         (self.factors, self.perm)
     }
 
+    /// Borrow the canonical ILU(0) factors (device upload path).
+    pub(crate) fn factors(&self) -> &Ilu0Factors<T> {
+        &self.factors
+    }
+
+    /// Borrow the fill-reducing permutation, if one was applied.
+    pub(crate) fn permutation(&self) -> Option<&[usize]> {
+        self.perm.as_deref()
+    }
+
     /// Construct ILU(0) and reject non-finite input or skipped pivots rather
     /// than silently fabricating a fallback inverse diagonal.
     pub fn try_from_csr(

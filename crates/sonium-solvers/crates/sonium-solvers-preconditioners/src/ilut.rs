@@ -20,6 +20,12 @@ use sonium_solvers_direct::sparse_lu::colamd_ordering;
 use sonium_solvers_sparse::CsrMatrix;
 use std::collections::BTreeSet;
 
+#[cfg(feature = "cuda")]
+mod cuda;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use cuda::CudaIlutPreconditioner;
+
 /// Version of the portable ILUT/ILUTP factor checkpoint format.
 pub const ILUT_CHECKPOINT_FORMAT_VERSION: u16 = 1;
 const ILUT_CHECKPOINT_MAGIC: &[u8; 8] = b"SILTCP01";

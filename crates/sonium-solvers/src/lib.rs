@@ -301,6 +301,9 @@ pub use time_integration::{
 };
 
 // Re-export high-level solver
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use solve::{CudaLinearSolveSession, CudaLinearSolveStatus, CudaLinearUpdateStatus};
 pub use solve::{
     AssumptionProvenance, LinearSolveBackend, LinearSolveBackendProvenance, LinearSolveConfig,
     LinearSolveError, LinearSolveFallback, LinearSolveResult, LinearSolverType,
@@ -309,7 +312,7 @@ pub use solve::{
     solve_real_with_guess, solve_real_with_guess_and_assumption, solve_saddle_point,
     solve_saddle_point_with_assumptions, solve_saddle_point_with_guess,
     solve_saddle_point_with_guess_and_assumptions, solve_with_assumption, solve_with_backend,
-    solve_with_guess, solve_with_guess_and_assumption,
+    solve_with_backend_and_assumption, solve_with_guess, solve_with_guess_and_assumption,
 };
 
 // Re-export preconditioners
@@ -318,18 +321,19 @@ pub use preconditioners::GnnCoarseningWeights;
 pub use preconditioners::{
     AdditiveSchwarzPreconditioner, AmgCoarsening, AmgConfig, AmgCycle, AmgDiagnostics,
     AmgInterpolation, AmgPhysicsProfile, AmgPreconditioner, AmgRestriction, AmgSmoother,
-    BackendAmgPreconditioner, BlockJacobiBackend, BlockJacobiPreconditioner,
-    BlockJacobiRuntimeDiagnostics, BlockPreconditionerConfig, ChebyshevBackend,
-    ChebyshevBackendF32, ChebyshevConfig, ChebyshevError, ChebyshevPreconditioner,
-    DiagonalPreconditioner, GeneoSetupError, HiluConfig, HiluPreconditioner,
-    IdentityPreconditioner, IluColoringPreconditioner, IluConfig, IluFixedPointPreconditioner,
-    IluPreconditioner, IlutConfig, IlutPreconditioner, LscBlocks, MaterialSocConfig, ParIlutConfig,
-    ParIlutPreconditioner, PcdBlocks, PointJacobiBackend, PolynomialJacobiBackend,
-    SADDLE_POINT_CHECKPOINT_FORMAT_VERSION, SCHWARZ_CHECKPOINT_FORMAT_VERSION,
-    SaddlePointBlockAssumption, SaddlePointBlockAssumptions, SaddlePointBlockProvenance,
-    SaddlePointBlockValidation, SaddlePointConfig, SaddlePointPreconditioner, SchurStrategy,
-    SchwarzCoarseSetup, SchwarzRuntimeDiagnostics, SweepingSchwarzPreconditioner,
-    btdiagb_schur_from_monolithic, coordinate_layers, has_saddle_point_structure,
+    BackendAmgPhase, BackendAmgPhaseProfile, BackendAmgPreconditioner, BlockJacobiBackend,
+    BlockJacobiPreconditioner, BlockJacobiRuntimeDiagnostics, BlockPreconditionerConfig,
+    ChebyshevBackend, ChebyshevBackendF32, ChebyshevConfig, ChebyshevError,
+    ChebyshevPreconditioner, DiagonalPreconditioner, GeneoSetupError, HiluConfig,
+    HiluPreconditioner, IdentityPreconditioner, IluColoringPreconditioner, IluConfig,
+    IluFixedPointPreconditioner, IluPreconditioner, IlutConfig, IlutPreconditioner, LscBlocks,
+    MaterialSocConfig, ParIlutConfig, ParIlutPreconditioner, PcdBlocks, PointJacobiBackend,
+    PolynomialJacobiBackend, SADDLE_POINT_CHECKPOINT_FORMAT_VERSION,
+    SCHWARZ_CHECKPOINT_FORMAT_VERSION, SaddlePointBlockAssumption, SaddlePointBlockAssumptions,
+    SaddlePointBlockProvenance, SaddlePointBlockValidation, SaddlePointConfig,
+    SaddlePointPreconditioner, SchurStrategy, SchwarzCoarseSetup, SchwarzRuntimeDiagnostics,
+    SweepingSchwarzPreconditioner, btdiagb_schur_from_monolithic, coordinate_layers,
+    has_saddle_point_structure,
 };
 
 // Re-export eigenvalue solvers

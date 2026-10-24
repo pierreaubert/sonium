@@ -817,6 +817,144 @@ impl<B: Backend, T: DeviceScalar> PersistentDeviceCsr<B, T> {
         backend.try_copy_h2d(values_host, &mut matrix.values)
     }
 
+    /// Copy resident numeric values without rebuilding sparse descriptors.
+    ///
+    /// The source must belong to the same backend context. Numeric validity is
+    /// the producer's responsibility; no device values are downloaded for checks.
+    ///
+    /// # Errors
+    /// Rejects length or storage-aliasing mismatches and propagates checked
+    /// backend copy failures. Backend errors may leave values unusable.
+    pub fn try_copy_values_from_device(
+        &mut self,
+        backend: &B,
+        values: &B::Buffer<T>,
+    ) -> crate::BackendResult<()> {
+        if values.len() != self.matrix.nnz {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "persistent_csr_device_update",
+                reason: "device value count must match CSR nnz".into(),
+            });
+        }
+        let matrix =
+            Arc::get_mut(&mut self.matrix).ok_or_else(|| crate::BackendError::OperationFailed {
+                operation: "persistent_csr_device_update",
+                reason: "resident CSR storage is aliased".into(),
+            })?;
+        backend.try_copy_d2d(values, &mut matrix.values)
+    }
+
+    /// Combine resident numeric bases without rebuilding the sparse descriptor.
+    ///
+    /// Sets values to `base + sum(alpha * term)`, in slice order. All buffers
+    /// must belong to this operator's backend context. Sparsity, storage addresses
+    /// and descriptors remain unchanged; no host staging or scratch is introduced.
+    ///
+    /// # Errors
+    /// Rejects mismatched lengths, non-finite coefficients or aliased storage
+    /// before mutation. Backend errors may leave a partial update; complete a
+    /// successful replacement before applying the operator again.
+    pub fn try_combine_values(
+        &mut self,
+        backend: &B,
+        base: &B::Buffer<T>,
+        terms: &[(T, &B::Buffer<T>)],
+    ) -> crate::BackendResult<()> {
+        self.combine_values(backend, None, base, terms)
+    }
+
+    /// Combine a scaled resident base and terms while preserving sparse storage.
+    ///
+    /// Sets values to `base_scale * base + sum(alpha * term)`. Buffers must
+    /// belong to this backend context. No host staging or scratch is introduced.
+    ///
+    /// # Errors
+    /// Rejects invalid lengths, non-finite coefficients or aliased matrix storage.
+    /// Backend failures can leave partial values; complete a replacement before use.
+    pub fn try_combine_scaled_values(
+        &mut self,
+        backend: &B,
+        base_scale: T,
+        base: &B::Buffer<T>,
+        terms: &[(T, &B::Buffer<T>)],
+    ) -> crate::BackendResult<()> {
+        self.combine_values(backend, Some(base_scale), base, terms)
+    }
+
+    fn combine_values(
+        &mut self,
+        backend: &B,
+        base_scale: Option<T>,
+        base: &B::Buffer<T>,
+        terms: &[(T, &B::Buffer<T>)],
+    ) -> crate::BackendResult<()> {
+        if base_scale.is_some_and(|scale| !scale.is_finite())
+            || base.len() != self.nnz()
+            || terms
+                .iter()
+                .any(|(alpha, values)| !alpha.is_finite() || values.len() != self.nnz())
+        {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "persistent_csr_combine_values",
+                reason: "all bases must match nnz and coefficients must be finite".into(),
+            });
+        }
+        let matrix =
+            Arc::get_mut(&mut self.matrix).ok_or_else(|| crate::BackendError::OperationFailed {
+                operation: "persistent_csr_combine_values",
+                reason: "resident CSR storage is aliased".into(),
+            })?;
+        if let [(beta, y)] = terms
+            && backend.try_linear_combination2_native(
+                base_scale.unwrap_or_else(T::one),
+                base,
+                *beta,
+                y,
+                &mut matrix.values,
+            )?
+        {
+            return Ok(());
+        }
+        backend.try_copy_d2d(base, &mut matrix.values)?;
+        if let Some(scale) = base_scale {
+            backend.try_scale(scale, &mut matrix.values)?;
+        }
+        for &(alpha, values) in terms {
+            backend.try_axpy(alpha, values, &mut matrix.values)?;
+        }
+        Ok(())
+    }
+
+    /// Promote resident numeric values without rebuilding the sparse descriptor.
+    ///
+    /// The source must belong to the same backend context. Numeric validity is
+    /// the producer's responsibility; values are not downloaded for validation.
+    ///
+    /// # Errors
+    /// Rejects a mismatched length or aliased storage. Propagates conversion
+    /// failures; complete a successful replacement before reusing failed output.
+    pub fn try_cast_values_from_lower(
+        &mut self,
+        backend: &B,
+        values: &B::Buffer<T::Lower>,
+    ) -> crate::BackendResult<()>
+    where
+        T: LowerPrecision,
+    {
+        if values.len() != self.nnz() {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "persistent_csr_cast_values",
+                reason: "source value count must match CSR nnz".into(),
+            });
+        }
+        let matrix =
+            Arc::get_mut(&mut self.matrix).ok_or_else(|| crate::BackendError::OperationFailed {
+                operation: "persistent_csr_cast_values",
+                reason: "resident CSR storage is aliased".into(),
+            })?;
+        backend.try_cast_from_lower::<T>(values, &mut matrix.values)
+    }
+
     /// Update the resident CSR values from a higher-precision host slice,
     /// casting on the way in (device-side cast where the backend supports
     /// it, see [`Backend::try_copy_h2d_cast`]).
@@ -873,6 +1011,43 @@ impl<B: Backend, T: DeviceScalar> PersistentDeviceCsr<B, T> {
             });
         }
         backend.try_spmv_prebaked::<T>(&self.prebaked, x, y)
+    }
+
+    /// Form `b - A*x` with retained sparse storage and native vector fusion.
+    ///
+    /// Supports rectangular matrices with `x` of length `n` and `b`/`out` of
+    /// length `m`. Reuses the existing descriptor and caller-owned output.
+    /// Backends without native residual updates use checked scale and AXPY.
+    ///
+    /// # Errors
+    /// Rejects incompatible lengths before mutation and propagates backend
+    /// failures. Execution failures may leave partial output; do not publish it.
+    pub fn try_residual(
+        &self,
+        backend: &B,
+        x: &B::Buffer<T>,
+        b: &B::Buffer<T>,
+        out: &mut B::Buffer<T>,
+    ) -> crate::BackendResult<()> {
+        if x.len() != self.n() || b.len() != self.m() || out.len() != self.m() {
+            return Err(crate::BackendError::InvalidArgument {
+                operation: "persistent_csr_residual",
+                reason: format!(
+                    "expected x={}, b/out={}, got {}/{}/{}",
+                    self.n(),
+                    self.m(),
+                    x.len(),
+                    b.len(),
+                    out.len()
+                ),
+            });
+        }
+        self.try_apply(backend, x, out)?;
+        if !backend.try_residual_update_native(b, out)? {
+            backend.try_scale::<T>(-T::one(), out)?;
+            backend.try_axpy::<T>(T::one(), b, out)?;
+        }
+        Ok(())
     }
 
     pub fn try_apply_colmajor(
@@ -1075,8 +1250,11 @@ impl<'a, B: Backend, T: DeviceScalar> DeviceOperator<B, T> for PrebakedAdjointSp
             });
         }
         backend.try_spmv_prebaked::<T>(&self.forward, x, out)?;
-        backend.try_scale::<T>(-T::one(), out)?;
-        backend.try_axpy::<T>(T::one(), b, out)
+        if !backend.try_residual_update_native(b, out)? {
+            backend.try_scale::<T>(-T::one(), out)?;
+            backend.try_axpy::<T>(T::one(), b, out)?;
+        }
+        Ok(())
     }
 
     fn try_apply_colmajor(
@@ -1634,8 +1812,11 @@ impl<B: Backend, T: DeviceScalar> DeviceOperator<B, T> for DeviceCsr<B, T> {
             &self.values,
         )?;
         backend.try_spmv_prebaked::<T>(&prebaked, x, out)?;
-        backend.try_scale::<T>(-T::one(), out)?;
-        backend.try_axpy::<T>(T::one(), b, out)
+        if !backend.try_residual_update_native(b, out)? {
+            backend.try_scale::<T>(-T::one(), out)?;
+            backend.try_axpy::<T>(T::one(), b, out)?;
+        }
+        Ok(())
     }
 
     fn apply_colmajor(&self, backend: &B, rhs: usize, x: &B::Buffer<T>, y: &mut B::Buffer<T>) {
@@ -1695,6 +1876,22 @@ impl<B: Backend, T: DeviceScalar> DeviceOperator<B, T> for PersistentDeviceCsr<B
         PersistentDeviceCsr::try_apply(self, backend, x, y)
     }
 
+    fn residual(&self, backend: &B, x: &B::Buffer<T>, b: &B::Buffer<T>, out: &mut B::Buffer<T>) {
+        if let Err(error) = PersistentDeviceCsr::try_residual(self, backend, x, b, out) {
+            log::error!("persistent CSR residual failed: {error}");
+        }
+    }
+
+    fn try_residual(
+        &self,
+        backend: &B,
+        x: &B::Buffer<T>,
+        b: &B::Buffer<T>,
+        out: &mut B::Buffer<T>,
+    ) -> crate::BackendResult<()> {
+        PersistentDeviceCsr::try_residual(self, backend, x, b, out)
+    }
+
     fn apply_colmajor(&self, backend: &B, rhs: usize, x: &B::Buffer<T>, y: &mut B::Buffer<T>) {
         if let Err(error) = self.try_apply_colmajor(backend, rhs, x, y) {
             log::error!(
@@ -1731,6 +1928,16 @@ impl<B: Backend, T: DeviceScalar> DeviceOperator<B, T> for AdjointDeviceCsr<B, T
         y: &mut B::Buffer<T>,
     ) -> crate::BackendResult<()> {
         self.forward.try_apply(backend, x, y)
+    }
+
+    fn try_residual(
+        &self,
+        backend: &B,
+        x: &B::Buffer<T>,
+        b: &B::Buffer<T>,
+        out: &mut B::Buffer<T>,
+    ) -> crate::BackendResult<()> {
+        self.forward.try_residual(backend, x, b, out)
     }
 
     fn apply_colmajor(&self, backend: &B, rhs: usize, x: &B::Buffer<T>, y: &mut B::Buffer<T>) {
@@ -1847,8 +2054,11 @@ impl<B: Backend, T: DeviceScalar> DeviceOperator<B, T> for PooledDeviceCsr<B, T>
             self.values.raw(),
         )?;
         backend.try_spmv_prebaked::<T>(&prebaked, x, out)?;
-        backend.try_scale::<T>(-T::one(), out)?;
-        backend.try_axpy::<T>(T::one(), b, out)
+        if !backend.try_residual_update_native(b, out)? {
+            backend.try_scale::<T>(-T::one(), out)?;
+            backend.try_axpy::<T>(T::one(), b, out)?;
+        }
+        Ok(())
     }
 
     fn apply_colmajor(&self, backend: &B, rhs: usize, x: &B::Buffer<T>, y: &mut B::Buffer<T>) {
@@ -2010,8 +2220,11 @@ impl<'a, B: Backend, T: DeviceScalar> DeviceOperator<B, T> for PrebakedSpmv<'a, 
             });
         }
         backend.try_spmv_prebaked::<T>(&self.prebaked, x, out)?;
-        backend.try_scale::<T>(-T::one(), out)?;
-        backend.try_axpy::<T>(T::one(), b, out)
+        if !backend.try_residual_update_native(b, out)? {
+            backend.try_scale::<T>(-T::one(), out)?;
+            backend.try_axpy::<T>(T::one(), b, out)?;
+        }
+        Ok(())
     }
 
     fn apply_colmajor(&self, backend: &B, rhs: usize, x: &B::Buffer<T>, y: &mut B::Buffer<T>) {
@@ -3302,6 +3515,42 @@ mod tests {
     }
 
     #[test]
+    fn persistent_csr_accepts_resident_value_updates() {
+        let backend = CpuBackend::new();
+        let matrix =
+            DeviceCsr::try_from_host(&backend, 2, 2, &[0, 1, 2], &[0, 1], &[2.0_f64, 3.0]).unwrap();
+        let mut persistent = PersistentDeviceCsr::try_from_device_csr(&backend, matrix).unwrap();
+        let pool = MemoryPool::new(backend, crate::MemoryPoolConfig::with_cap(4096)).unwrap();
+        let mut values = pool.try_alloc::<f64>(2).unwrap();
+        let mut x = pool.try_alloc::<f64>(2).unwrap();
+        let mut y = pool.try_alloc::<f64>(2).unwrap();
+        pool.backend()
+            .try_copy_h2d(&[4., 5.], values.raw_mut())
+            .unwrap();
+        pool.backend().try_copy_h2d(&[1., 2.], x.raw_mut()).unwrap();
+        persistent
+            .try_copy_values_from_device(pool.backend(), values.raw())
+            .unwrap();
+        persistent
+            .try_apply(pool.backend(), x.raw(), y.raw_mut())
+            .unwrap();
+        let mut actual = [0.; 2];
+        pool.backend().try_copy_d2h(y.raw(), &mut actual).unwrap();
+        assert_eq!(actual, [4., 10.]);
+        let short = pool.try_alloc::<f64>(1).unwrap();
+        assert!(
+            persistent
+                .try_copy_values_from_device(pool.backend(), short.raw())
+                .is_err()
+        );
+        persistent
+            .try_apply(pool.backend(), x.raw(), y.raw_mut())
+            .unwrap();
+        pool.backend().try_copy_d2h(y.raw(), &mut actual).unwrap();
+        assert_eq!(actual, [4., 10.]);
+    }
+
+    #[test]
     fn persistent_csr_updates_values_without_rebuilding_operator_storage() {
         let backend = CpuBackend::new();
         let matrix =
@@ -3381,5 +3630,59 @@ mod tests {
         // 3*1 + (1+i)*i = 3-1+i = 2+i.
         assert!((result[0] - Complex32::new(10.0, 0.5)).norm() < 1e-5);
         assert!((result[1] - Complex32::new(2.0, 1.0)).norm() < 1e-5);
+    }
+}
+
+#[cfg(test)]
+mod scaled_combination_tests {
+    use super::*;
+    use crate::{CpuBackend, MemoryPoolConfig};
+
+    fn check<B: Backend, T: DeviceScalar + PartialEq + std::fmt::Debug>(backend: B) {
+        let pool = MemoryPool::new(backend, MemoryPoolConfig::with_cap(1 << 20)).unwrap();
+        let backend = pool.backend();
+        let one = T::one();
+        let two = one + one;
+        let three = two + one;
+        let mut matrix = PersistentDeviceCsr::try_from_host_csr_ref(
+            backend,
+            HostCsrRef::new(2, 2, &[0, 1, 2], &[0, 1], &[one, one]),
+        )
+        .unwrap();
+        let mut base = pool.try_alloc(2).unwrap();
+        let mut term = pool.try_alloc(2).unwrap();
+        backend.try_copy_h2d(&[one, two], base.raw_mut()).unwrap();
+        backend.try_copy_h2d(&[three, one], term.raw_mut()).unwrap();
+        matrix
+            .try_combine_scaled_values(backend, two, base.raw(), &[(three, term.raw())])
+            .unwrap();
+        let expected = [two * one + three * three, two * two + three * one];
+        let mut actual = [T::zero(); 2];
+        backend
+            .try_copy_d2h(&matrix.matrix().values, &mut actual)
+            .unwrap();
+        for (a, b) in actual.into_iter().zip(expected) {
+            assert_eq!(a, b);
+        }
+        let short = pool.try_alloc::<T>(1).unwrap();
+        assert!(
+            matrix
+                .try_combine_scaled_values(backend, two, short.raw(), &[])
+                .is_err()
+        );
+        backend
+            .try_copy_d2h(&matrix.matrix().values, &mut actual)
+            .unwrap();
+        for (a, b) in actual.into_iter().zip(expected) {
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn scaled_sparse_combination_all_scalars() {
+        check::<_, f32>(CpuBackend::new());
+        check::<_, f64>(CpuBackend::new());
+        check::<_, num_complex::Complex32>(CpuBackend::new());
+        check::<_, num_complex::Complex64>(CpuBackend::new());
     }
 }

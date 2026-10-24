@@ -14,7 +14,7 @@ use sonium_solvers_core::traits::{ComplexField, SolverError};
 use sonium_solvers_sparse::CsrMatrix;
 
 /// Version of the portable host-AMG checkpoint envelope.
-pub const AMG_CHECKPOINT_FORMAT_VERSION: u16 = 1;
+pub const AMG_CHECKPOINT_FORMAT_VERSION: u16 = 2;
 const MAGIC: &[u8; 8] = b"SAMGCP1\0";
 
 fn error(message: impl Into<String>) -> SolverError {
@@ -293,10 +293,11 @@ fn write_config(writer: &mut Writer, config: &AmgConfig) -> Result<(), SolverErr
     }
     writer.option_f64(config.max_grid_complexity)?;
     writer.option_f64(config.max_operator_complexity)?;
+    writer.f64(config.galerkin_drop_tol)?;
     Ok(())
 }
 
-fn read_config(reader: &mut Reader<'_>) -> Result<AmgConfig, SolverError> {
+fn read_config(reader: &mut Reader<'_>, version: u16) -> Result<AmgConfig, SolverError> {
     let coarsening = match reader.u8()? {
         0 => AmgCoarsening::RugeStuben,
         1 => AmgCoarsening::Pmis,
@@ -370,7 +371,7 @@ fn read_config(reader: &mut Reader<'_>) -> Result<AmgConfig, SolverError> {
     } else {
         None
     };
-    let config = AmgConfig {
+    let mut config = AmgConfig {
         coarsening,
         interpolation,
         restriction,
@@ -402,6 +403,9 @@ fn read_config(reader: &mut Reader<'_>) -> Result<AmgConfig, SolverError> {
         max_grid_complexity: reader.option_f64()?,
         max_operator_complexity: reader.option_f64()?,
     };
+    if version >= 2 {
+        config.galerkin_drop_tol = reader.f64()?;
+    }
     config.validate()?;
     Ok(config)
 }
@@ -438,12 +442,16 @@ impl<T: ComplexField> AmgPreconditioner<T> {
     }
 
     /// Restore a host AMG preconditioner from [`Self::to_checkpoint_bytes`].
+    ///
+    /// Version 1 omitted the Galerkin drop tolerance and restores its historical
+    /// value of 0.001. Version 2 preserves the serialized tolerance, including zero.
     pub fn from_checkpoint_bytes(bytes: &[u8]) -> Result<Self, SolverError> {
         let mut reader = Reader::new(bytes);
         if reader.take(MAGIC.len())? != MAGIC {
             return Err(error("invalid AMG checkpoint magic"));
         }
-        if reader.u16()? != AMG_CHECKPOINT_FORMAT_VERSION {
+        let version = reader.u16()?;
+        if !matches!(version, 1 | AMG_CHECKPOINT_FORMAT_VERSION) {
             return Err(error("unsupported AMG checkpoint version"));
         }
         let scalar_size = reader.u8()? as usize;
@@ -463,7 +471,7 @@ impl<T: ComplexField> AmgPreconditioner<T> {
         }
         let rows = reader.u64()?;
         let cols = reader.u64()?;
-        let config = read_config(&mut reader)?;
+        let config = read_config(&mut reader, version)?;
         let row_ptrs = reader.usize_vec("row pointers")?;
         let col_indices = reader.usize_vec("column indices")?;
         let values = reader.scalars::<T>("matrix values")?;
@@ -472,5 +480,42 @@ impl<T: ComplexField> AmgPreconditioner<T> {
         }
         let matrix = CsrMatrix::try_from_raw_parts(rows, cols, row_ptrs, col_indices, values)?;
         Self::try_from_csr(&matrix, config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn v2_preserves_drop_policy_and_reads_legacy_v1() {
+        for tolerance in [0.0, 0.02] {
+            let host = AmgPreconditioner::try_from_csr(
+                &CsrMatrix::<f64>::identity(3),
+                AmgConfig {
+                    galerkin_drop_tol: tolerance,
+                    ..AmgConfig::for_backend_pcg()
+                },
+            )
+            .unwrap();
+            let bytes = host.to_checkpoint_bytes().unwrap();
+            let restored = AmgPreconditioner::<f64>::from_checkpoint_bytes(&bytes).unwrap();
+            assert_eq!(restored.config.galerkin_drop_tol, tolerance);
+            let mut reader = Reader::new(&bytes);
+            // Magic, version, four scalar/flag bytes, then two u64 dimensions.
+            reader.take(MAGIC.len() + 2 + 4 + 8 + 8).unwrap();
+            read_config(&mut reader, 2).unwrap();
+            let drop_offset = reader.offset - 8;
+            let mut legacy = bytes.clone();
+            legacy.drain(drop_offset..drop_offset + 8);
+            legacy[8..10].copy_from_slice(&1_u16.to_le_bytes());
+            let restored = AmgPreconditioner::<f64>::from_checkpoint_bytes(&legacy).unwrap();
+            assert_eq!(restored.config.galerkin_drop_tol, 0.001);
+            for bad in [f64::NAN, -0.1, 0.2] {
+                let mut corrupt = bytes.clone();
+                corrupt[drop_offset..drop_offset + 8].copy_from_slice(&bad.to_le_bytes());
+                assert!(AmgPreconditioner::<f64>::from_checkpoint_bytes(&corrupt).is_err());
+            }
+        }
     }
 }

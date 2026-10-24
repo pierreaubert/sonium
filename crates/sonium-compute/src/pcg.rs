@@ -246,6 +246,20 @@ where
         backend.try_copy_d2d(b, r.raw_mut())?;
     }
 
+    // A retained solution can already satisfy the new system. Check before
+    // applying M or forming a zero search direction (which would break down).
+    if x0.is_some() {
+        let initial_residual =
+            backend.try_nrm2_with_mode::<T>(ReductionMode::Fast, r.raw())? / b_norm;
+        if initial_residual <= config.tolerance {
+            return Ok(PcgBackendStatus {
+                iterations: 0,
+                final_residual: initial_residual,
+                converged: true,
+            });
+        }
+    }
+
     // Breakdown guard mirrors the host solver: relative to ||b|| with an
     // absolute floor, so tiny-but-valid pivots on scaled problems survive.
     let breakdown_threshold = (b_norm * T::Real::from_f64(1e-20).unwrap_or_else(T::Real::zero))
@@ -334,6 +348,47 @@ mod tests {
         assert_eq!(ws.cached_buffer_count(), 0);
         ws.ensure(&pool).unwrap();
         assert_eq!(ws.cached_buffer_count(), 4);
+    }
+
+    #[test]
+    fn accepts_converged_warm_start_before_search_direction_breakdown() {
+        use crate::{DeviceCsr, IdentityDevicePreconditioner, MemoryPoolConfig};
+        let pool = MemoryPool::new(CpuBackend, MemoryPoolConfig::with_cap(1 << 20)).unwrap();
+        let backend = pool.backend();
+        let (rows, columns, values) = fixture(4);
+        let a = DeviceCsr::try_from_host(backend, 4, 4, &rows, &columns, &values).unwrap();
+        let mut workspace = PcgBackendWorkspace::<_, f64>::new(4);
+        let mut rhs = pool.try_alloc(4).unwrap();
+        let mut guess = pool.try_alloc(4).unwrap();
+        let mut out = pool.try_alloc(4).unwrap();
+        backend
+            .try_copy_h2d(&[1.0, 0.0, 0.0, 1.0], rhs.raw_mut())
+            .unwrap();
+        for perturbation in [0.0, 1e-12] {
+            let expected = [1.0 + perturbation, 1.0, 1.0, 1.0];
+            backend.try_copy_h2d(&expected, guess.raw_mut()).unwrap();
+            let status = pcg_backend_preconditioned(
+                backend,
+                &pool,
+                &mut workspace,
+                &a,
+                &IdentityDevicePreconditioner,
+                rhs.raw(),
+                Some(guess.raw()),
+                out.raw_mut(),
+                &PcgBackendConfig {
+                    max_iterations: 4,
+                    tolerance: 1e-10,
+                },
+            )
+            .unwrap();
+            assert!(status.converged);
+            assert_eq!(status.iterations, 0);
+            assert!(status.final_residual <= 1e-10);
+            let mut observed = [0.0; 4];
+            backend.try_copy_d2h(out.raw(), &mut observed).unwrap();
+            assert_eq!(observed, expected);
+        }
     }
 
     #[test]

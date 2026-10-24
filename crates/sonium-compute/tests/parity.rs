@@ -5393,23 +5393,127 @@ mod cuda_fmm_residency {
                 ),
             ),
         ] {
-            backend.reset_runtime_stats();
+            // Warm each orientation, then measure reuse with counter deltas;
+            // resetting runtime stats does not reset lifetime allocation counts.
             operator
                 .try_apply_device(&input, &mut output, transpose)
-                .expect("resident MLFMM action");
-            let stats = backend.runtime_stats();
-            assert_eq!(stats.transfer.h2d_operations, 0);
-            assert_eq!(stats.transfer.d2h_operations, 0);
-            assert!(stats.kernel_launches > 0);
-            let mut actual = vec![Complex64::new(0.0, 0.0); 2];
-            backend.copy_d2h(output.raw(), &mut actual);
-            for (actual, expected) in actual.iter().zip(expected_output) {
-                assert!(
-                    (*actual - expected).norm() < 1.0e-11,
-                    "{actual:?} != {expected:?}"
-                );
+                .unwrap();
+            for raw in [false, true] {
+                let before = backend.begin_runtime_stats();
+                if raw {
+                    operator
+                        .try_apply_raw(input.raw(), output.raw_mut(), transpose)
+                        .unwrap();
+                } else {
+                    operator
+                        .try_apply_device(&input, &mut output, transpose)
+                        .expect("resident MLFMM action");
+                }
+                let stats = backend.runtime_stats_since(before);
+                assert_eq!(stats.allocation_operations, 0);
+                assert_eq!(stats.transfer.h2d_operations, 0);
+                assert_eq!(stats.transfer.d2h_operations, 0);
+                assert!(stats.kernel_launches > 0);
+                let mut actual = vec![Complex64::new(0.0, 0.0); 2];
+                backend.copy_d2h(output.raw(), &mut actual);
+                for (actual, expected) in actual.iter().zip(&expected_output) {
+                    assert!(
+                        (*actual - *expected).norm() < 1.0e-11,
+                        "{actual:?} != {expected:?}"
+                    );
+                }
             }
         }
+        let foreign_pool = MemoryPool::new(
+            CudaBackend::new_default().unwrap(),
+            MemoryPoolConfig::with_cap(1 << 20),
+        )
+        .unwrap();
+        let foreign = foreign_pool.try_alloc::<Complex64>(2).unwrap();
+        let mut foreign_output = foreign_pool.try_alloc::<Complex64>(2).unwrap();
+        let mut short = pool.try_alloc::<Complex64>(1).unwrap();
+        let block_input = pool.try_alloc::<Complex64>(4).unwrap();
+        let mut block_output = pool.try_alloc::<Complex64>(4).unwrap();
+        let before = backend.begin_runtime_stats();
+        for action in [Transpose::NoTrans, Transpose::Trans, Transpose::ConjTrans] {
+            assert!(
+                operator
+                    .try_apply_raw(foreign.raw(), output.raw_mut(), action)
+                    .is_err()
+            );
+            assert!(
+                operator
+                    .try_apply_raw(input.raw(), foreign_output.raw_mut(), action)
+                    .is_err()
+            );
+            assert!(
+                operator
+                    .try_apply_raw(input.raw(), short.raw_mut(), action)
+                    .is_err()
+            );
+        }
+        assert!(
+            sonium_compute::DeviceOperator::try_apply(
+                &operator,
+                foreign_pool.backend(),
+                input.raw(),
+                output.raw_mut()
+            )
+            .is_err()
+        );
+        assert!(
+            sonium_compute::DeviceOperator::try_residual(
+                &operator,
+                backend,
+                input.raw(),
+                foreign.raw(),
+                output.raw_mut()
+            )
+            .is_err()
+        );
+        assert!(matches!(
+            sonium_compute::DeviceOperator::try_apply_colmajor(
+                &operator,
+                backend,
+                2,
+                block_input.raw(),
+                block_output.raw_mut()
+            ),
+            Err(sonium_compute::BackendError::Unsupported { .. })
+        ));
+        let stats = backend.runtime_stats_since(before);
+        assert_eq!(
+            stats.kernel_launches + stats.library_operations + stats.allocation_operations,
+            0
+        );
+        assert_eq!(
+            stats.transfer.h2d_bytes + stats.transfer.d2h_bytes + stats.transfer.d2d_bytes,
+            0
+        );
+        sonium_compute::DeviceOperator::try_apply(&operator, backend, input.raw(), output.raw_mut())
+            .unwrap();
+        let sentinel = vec![Complex64::new(12.0, -3.0); 2];
+        backend.try_copy_h2d(&sentinel, output.raw_mut()).unwrap();
+        backend.inject_failure(sonium_compute::CudaFailureInjectionPoint::Launch);
+        assert!(
+            operator
+                .try_apply_raw(input.raw(), output.raw_mut(), Transpose::ConjTrans)
+                .is_err()
+        );
+        backend.recover_after_error().unwrap();
+        let mut preserved = vec![Complex64::default(); 2];
+        backend.try_copy_d2h(output.raw(), &mut preserved).unwrap();
+        assert_eq!(preserved, sentinel);
+        backend.inject_failure(sonium_compute::CudaFailureInjectionPoint::Synchronization);
+        assert!(
+            operator
+                .try_apply_raw(input.raw(), output.raw_mut(), Transpose::NoTrans)
+                .is_err()
+        );
+        assert!(
+            backend.recover_after_error().is_err(),
+            "synchronization failure requires a new context"
+        );
     }
 
     #[test]
@@ -5495,6 +5599,71 @@ mod cuda_fmm_residency {
         expected_forward[1] = low_forward[0];
         expected_forward[3] = low_forward[1];
 
+        // Krylov consumes raw buffers through DeviceOperator, not the pooled API.
+        let before = pool.backend().begin_runtime_stats();
+        sonium_compute::DeviceOperator::try_apply(
+            &hmatrix,
+            pool.backend(),
+            x.raw(),
+            forward.raw_mut(),
+        )
+        .unwrap();
+        sonium_compute::DeviceOperator::try_residual(
+            &hmatrix,
+            pool.backend(),
+            x.raw(),
+            forward.raw(),
+            transpose.raw_mut(),
+        )
+        .unwrap();
+        let stats = pool.backend().runtime_stats_since(before);
+        assert_eq!(stats.allocation_operations, 0);
+        assert_eq!(stats.transfer.h2d_bytes, 0);
+        assert_eq!(stats.transfer.d2h_bytes, 0);
+        let mut residual = vec![Complex64::new(0.0, 0.0); 4];
+        pool.backend()
+            .try_copy_d2h(transpose.raw(), &mut residual)
+            .unwrap();
+        assert!(residual.iter().all(|v| v.norm() < 1e-12));
+        let other_backend = CudaBackend::new_default().unwrap();
+        assert!(
+            sonium_compute::DeviceOperator::try_apply(
+                &hmatrix,
+                &other_backend,
+                x.raw(),
+                forward.raw_mut(),
+            )
+            .is_err()
+        );
+        let short = pool.try_alloc::<Complex64>(3).unwrap();
+        assert!(
+            sonium_compute::DeviceOperator::try_residual(
+                &hmatrix,
+                pool.backend(),
+                x.raw(),
+                short.raw(),
+                transpose.raw_mut(),
+            )
+            .is_err()
+        );
+        pool.backend()
+            .inject_failure(sonium_compute::CudaFailureInjectionPoint::Launch);
+        assert!(
+            sonium_compute::DeviceOperator::try_residual(
+                &hmatrix,
+                pool.backend(),
+                x.raw(),
+                forward.raw(),
+                transpose.raw_mut(),
+            )
+            .is_err()
+        );
+        pool.backend().recover_after_error().unwrap();
+        pool.backend()
+            .try_copy_d2h(transpose.raw(), &mut residual)
+            .unwrap();
+        assert!(residual.iter().all(|v| v.norm() < 1e-12));
+
         let transpose_projection = u[0] * x_host[1] + u[1] * x_host[3];
         let mut expected_transpose = vec![Complex64::new(0.0, 0.0); 4];
         expected_transpose[1] = dense[0] * x_host[0] + dense[2] * x_host[2];
@@ -5508,6 +5677,30 @@ mod cuda_fmm_residency {
         expected_hermitian[3] = dense[1].conj() * x_host[0] + dense[3].conj() * x_host[2];
         expected_hermitian[0] = v[0].conj() * hermitian_projection;
         expected_hermitian[2] = v[1].conj() * hermitian_projection;
+
+        // Raw transpose/Hermitian adapters are the retained Krylov boundary.
+        let before = pool.backend().begin_runtime_stats();
+        hmatrix.try_apply_transpose_raw(x.raw(), transpose.raw_mut()).unwrap();
+        hmatrix.try_apply_hermitian_raw(x.raw(), hermitian.raw_mut()).unwrap();
+        let stats = pool.backend().runtime_stats_since(before);
+        assert_eq!(stats.allocation_operations, 0);
+        assert_eq!(stats.transfer.h2d_bytes + stats.transfer.d2h_bytes, 0);
+        let mut raw_transpose = vec![Complex64::default(); 4];
+        let mut raw_hermitian = vec![Complex64::default(); 4];
+        pool.backend().try_copy_d2h(transpose.raw(), &mut raw_transpose).unwrap();
+        pool.backend().try_copy_d2h(hermitian.raw(), &mut raw_hermitian).unwrap();
+        for (actual, expected) in [(&raw_transpose, &expected_transpose), (&raw_hermitian, &expected_hermitian)] {
+            assert!(actual.iter().zip(expected).all(|(a,b)| (*a-*b).norm() < 1e-12));
+        }
+        let foreign_pool = MemoryPool::new(other_backend, MemoryPoolConfig::with_cap(1 << 20)).unwrap();
+        let mut foreign = foreign_pool.try_alloc::<Complex64>(4).unwrap();
+        let before = pool.backend().begin_runtime_stats();
+        assert!(hmatrix.try_apply_transpose_raw(foreign.raw(), transpose.raw_mut()).is_err());
+        assert!(hmatrix.try_apply_hermitian_raw(x.raw(), foreign.raw_mut()).is_err());
+        assert!(hmatrix.try_apply_transpose_raw(short.raw(), transpose.raw_mut()).is_err());
+        let stats = pool.backend().runtime_stats_since(before);
+        assert_eq!(stats.kernel_launches + stats.allocation_operations, 0);
+        assert_eq!(stats.transfer.h2d_bytes + stats.transfer.d2h_bytes, 0);
 
         let forward_inner_product: Complex64 = x_host
             .iter()

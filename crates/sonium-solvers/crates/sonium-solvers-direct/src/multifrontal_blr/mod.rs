@@ -318,6 +318,7 @@ impl MultifrontalSymbolic {
     /// # Errors
     ///
     /// Returns [`BlrError::NotSquare`] for a non-square matrix,
+    /// [`BlrError::NonFiniteMatrix`] for non-finite values,
     /// [`BlrError::InvalidCsrStructure`] for malformed CSR, and
     /// [`BlrError::InvalidConfiguration`] for a non-finite or
     /// negative numeric configuration field.
@@ -353,6 +354,12 @@ impl MultifrontalSymbolic {
                 rows: matrix.num_rows,
                 cols: matrix.num_cols,
             });
+        }
+        // Check finiteness before `validate_structure`, which folds
+        // non-finite values into its generic structural error and would
+        // mask the typed `NonFiniteMatrix` variant.
+        if let Some(index) = first_non_finite(&matrix.values) {
+            return Err(BlrError::NonFiniteMatrix { index });
         }
         matrix
             .validate_structure()

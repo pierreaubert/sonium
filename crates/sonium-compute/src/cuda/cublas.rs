@@ -86,6 +86,10 @@ use crate::tensor_contract::batched_local_contract;
 
 #[path = "cufft.rs"]
 mod cufft;
+#[path = "dense_lu.rs"]
+mod dense_lu;
+#[path = "bem_incident.rs"]
+mod bem_incident;
 use cufft::CudaFft;
 
 // ---------------------------------------------------------------------------
@@ -145,6 +149,7 @@ pub struct CudaDenseLuC32 {
 /// pivots, and solve workspace on the device gives CUDA BEM gates an explicit
 /// Complex64 solve boundary instead of silently dropping to a host solve.
 pub struct CudaDenseLuC64 {
+    valid: bool,
     n: usize,
     factors: CudaBuffer<Complex64>,
     ipiv: CudaBuffer<i32>,
@@ -569,6 +574,11 @@ pub struct CudaBackend {
     fmm_kernels: Option<CudaFmmKernels>,
     multi_dot_kernels: Option<CudaMultiDotKernels>,
     local_kernels: Option<CudaLocalKernels>,
+    fused_numeric_combinations: bool,
+    csr_preprocess: Option<csr_preprocess::CsrPreprocess>,
+    pub(super) hex_kernels: Mutex<Option<Arc<super::fem_hex::CudaHexKernels>>>,
+    pub(super) tet_kernels: Mutex<[Option<Arc<super::fem_tet::CudaTetKernels>>; 2]>,
+    pub(super) quadrature_kernel: Mutex<Option<Arc<CudaFunction>>>,
     multi_dot_workspace: Mutex<CudaMultiDotWorkspace>,
     real_transform_workspace: Mutex<CudaRealTransformWorkspace>,
     allocation_stats: Arc<CudaAllocationStats>,
@@ -718,6 +728,8 @@ struct CudaSpmmWorkspace {
 }
 
 struct CudaBemKernels {
+    incident_rhs_c64: CudaFunction,
+    dense_system_c64: CudaFunction,
     regular_pair_c32: CudaFunction,
     regular_pair_c64: CudaFunction,
     regular_pair_real_f64: CudaFunction,
@@ -790,7 +802,59 @@ struct CudaFmmKernels {
     dense_matvec_scatter_accum_strided_c64: CudaFunction,
 }
 
+#[cfg(test)]
+#[path = "residual_tests.rs"]
+mod residual_tests;
+
+#[path = "dense_diagonal.rs"]
+mod dense_diagonal;
+#[path = "small_jacobi.rs"]
+mod small_jacobi;
+#[path = "csr_jacobi.rs"]
+mod csr_jacobi;
+#[path = "linear_combination.rs"]
+mod linear_combination;
+#[path = "csr_preprocess.rs"]
+mod csr_preprocess;
+#[doc(inline)]
+pub use dense_diagonal::CudaDenseJacobi;
+
 struct CudaLocalKernels {
+    csr_jacobi_f32: CudaFunction,
+    csr_jacobi_f64: CudaFunction,
+    csr_jacobi_c32: CudaFunction,
+    csr_jacobi_c64: CudaFunction,
+
+    combination_f32: CudaFunction,
+    combination_f64: CudaFunction,
+    combination_c32: CudaFunction,
+    combination_c64: CudaFunction,
+
+    small_jacobi_f32: CudaFunction,
+    small_jacobi_f64: CudaFunction,
+    small_jacobi_c32: CudaFunction,
+    small_jacobi_c64: CudaFunction,
+    inverse_diagonal_f32: CudaFunction,
+    inverse_diagonal_f64: CudaFunction,
+    inverse_diagonal_c32: CudaFunction,
+    inverse_diagonal_c64: CudaFunction,
+
+    residual_f32: CudaFunction,
+    residual_f64: CudaFunction,
+    residual_c32: CudaFunction,
+    residual_c64: CudaFunction,
+    chebyshev_f32: CudaFunction,
+    chebyshev_f64: CudaFunction,
+    chebyshev_c32: CudaFunction,
+    chebyshev_c64: CudaFunction,
+    diagonal_f32: CudaFunction,
+    diagonal_f64: CudaFunction,
+    diagonal_c32: CudaFunction,
+    diagonal_c64: CudaFunction,
+    jacobi_f32: CudaFunction,
+    jacobi_f64: CudaFunction,
+    jacobi_c32: CudaFunction,
+    jacobi_c64: CudaFunction,
     segmented_f32: CudaFunction,
     segmented_f64: CudaFunction,
     segmented_c32: CudaFunction,
@@ -846,6 +910,58 @@ impl CudaLocalKernels {
             compile_native_ptx(arch, LOCAL_KERNELS_CU).map_err(|error| format!("{error:?}"))?;
         let module = ctx.load_module(ptx).map_err(|error| format!("{error:?}"))?;
         Ok(Self {
+            residual_f32: module.load_function("sonium_residual_update_f32")
+                .map_err(|error| format!("{error:?}"))?,
+            residual_f64: module.load_function("sonium_residual_update_f64")
+                .map_err(|error| format!("{error:?}"))?,
+            residual_c32: module.load_function("sonium_residual_update_c32")
+                .map_err(|error| format!("{error:?}"))?,
+            residual_c64: module.load_function("sonium_residual_update_c64")
+                .map_err(|error| format!("{error:?}"))?,
+            chebyshev_f32: module.load_function("sonium_chebyshev_update_f32")
+                .map_err(|error| format!("{error:?}"))?,
+            chebyshev_f64: module.load_function("sonium_chebyshev_update_f64")
+                .map_err(|error| format!("{error:?}"))?,
+            chebyshev_c32: module.load_function("sonium_chebyshev_update_c32")
+                .map_err(|error| format!("{error:?}"))?,
+            chebyshev_c64: module.load_function("sonium_chebyshev_update_c64")
+                .map_err(|error| format!("{error:?}"))?,
+            inverse_diagonal_f32: module.load_function("sonium_inverse_diagonal_f32")
+                .map_err(|error| format!("{error:?}"))?,
+            inverse_diagonal_f64: module.load_function("sonium_inverse_diagonal_f64")
+                .map_err(|error| format!("{error:?}"))?,
+            inverse_diagonal_c32: module.load_function("sonium_inverse_diagonal_c32")
+                .map_err(|error| format!("{error:?}"))?,
+            inverse_diagonal_c64: module.load_function("sonium_inverse_diagonal_c64")
+                .map_err(|error| format!("{error:?}"))?,
+            diagonal_f32: module.load_function("sonium_diagonal_scale_f32")
+                .map_err(|error| format!("{error:?}"))?,
+            diagonal_f64: module.load_function("sonium_diagonal_scale_f64")
+                .map_err(|error| format!("{error:?}"))?,
+            diagonal_c32: module.load_function("sonium_diagonal_scale_c32")
+                .map_err(|error| format!("{error:?}"))?,
+            diagonal_c64: module.load_function("sonium_diagonal_scale_c64")
+                .map_err(|error| format!("{error:?}"))?,
+            combination_f32: module.load_function("sonium_combination_f32").map_err(|error| format!("{error:?}"))?,
+            combination_f64: module.load_function("sonium_combination_f64").map_err(|error| format!("{error:?}"))?,
+            combination_c32: module.load_function("sonium_combination_c32").map_err(|error| format!("{error:?}"))?,
+            combination_c64: module.load_function("sonium_combination_c64").map_err(|error| format!("{error:?}"))?,
+            csr_jacobi_f32: module.load_function("sonium_csr_jacobi_f32").map_err(|error| format!("{error:?}"))?,
+            csr_jacobi_f64: module.load_function("sonium_csr_jacobi_f64").map_err(|error| format!("{error:?}"))?,
+            csr_jacobi_c32: module.load_function("sonium_csr_jacobi_c32").map_err(|error| format!("{error:?}"))?,
+            csr_jacobi_c64: module.load_function("sonium_csr_jacobi_c64").map_err(|error| format!("{error:?}"))?,
+            small_jacobi_f32: module.load_function("sonium_small_jacobi_f32").map_err(|error| format!("{error:?}"))?,
+            small_jacobi_f64: module.load_function("sonium_small_jacobi_f64").map_err(|error| format!("{error:?}"))?,
+            small_jacobi_c32: module.load_function("sonium_small_jacobi_c32").map_err(|error| format!("{error:?}"))?,
+            small_jacobi_c64: module.load_function("sonium_small_jacobi_c64").map_err(|error| format!("{error:?}"))?,
+            jacobi_f32: module.load_function("sonium_jacobi_update_f32")
+                .map_err(|error| format!("{error:?}"))?,
+            jacobi_f64: module.load_function("sonium_jacobi_update_f64")
+                .map_err(|error| format!("{error:?}"))?,
+            jacobi_c32: module.load_function("sonium_jacobi_update_c32")
+                .map_err(|error| format!("{error:?}"))?,
+            jacobi_c64: module.load_function("sonium_jacobi_update_c64")
+                .map_err(|error| format!("{error:?}"))?,
             segmented_f32: module
                 .load_function("sonium_segmented_sum_f32")
                 .map_err(|error| format!("{error:?}"))?,
@@ -891,6 +1007,10 @@ impl CudaBemKernels {
         let ptx = compile_native_ptx(arch, BEM_KERNELS_CU).map_err(|err| format!("{err:?}"))?;
         let module = ctx.load_module(ptx).map_err(|err| format!("{err:?}"))?;
         Ok(Self {
+            incident_rhs_c64: module.load_function("sonium_bem_incident_rhs_c64")
+                .map_err(|e| format!("load incident RHS: {e:?}"))?,
+            dense_system_c64: module.load_function("sonium_bem_dense_system_c64")
+                .map_err(|err| format!("{err:?}"))?,
             regular_pair_c32: module
                 .load_function("sonium_bem_regular_pair_c32")
                 .map_err(|err| format!("{err:?}"))?,
@@ -1079,6 +1199,7 @@ struct CudaCastKernels {
 }
 
 struct CudaValidationKernels {
+    finite: CudaFunction,
     gather4: CudaFunction,
     segmented_offsets: CudaFunction,
 }
@@ -1089,6 +1210,9 @@ impl CudaValidationKernels {
             .map_err(|error| format!("{error:?}"))?;
         let module = ctx.load_module(ptx).map_err(|error| format!("{error:?}"))?;
         Ok(Self {
+            finite: module
+                .load_function("sonium_validate_finite")
+                .map_err(|error| format!("{error:?}"))?,
             gather4: module
                 .load_function("sonium_validate_gather4")
                 .map_err(|error| format!("{error:?}"))?,
@@ -1168,6 +1292,26 @@ const LOCAL_KERNELS_CU: &str = include_str!("kernels/local_kernels.cu");
 const REAL_TRANSFORM_KERNELS_CU: &str = include_str!("kernels/real_transforms.cu");
 
 impl CudaBackend {
+    /// Require native colored row sweeps without allocating or launching device work.
+    ///
+    /// # Errors
+    /// Rejects unavailable local kernels or unsupported scalar representations.
+    pub fn require_native_gs_color_sweep<T: DeviceScalar>(&self) -> BackendResult<()> {
+        self.check_pending_error()?;
+        let scalar = TypeId::of::<T>();
+        if self.local_kernels.is_some()
+            && (scalar == TypeId::of::<f32>() || scalar == TypeId::of::<f64>()
+                || scalar == TypeId::of::<Complex32>() || scalar == TypeId::of::<Complex64>())
+        {
+            Ok(())
+        } else {
+            Err(BackendError::Unsupported {
+                backend: "cuda", operation: "native_gs_color_sweep",
+                scalar: std::any::type_name::<T>(),
+            })
+        }
+    }
+
     fn record_pending_error(&self, error: BackendError) {
         record_first_pending_error(&self.pending_error, error);
     }
@@ -1412,6 +1556,11 @@ impl CudaBackend {
             fmm_kernels,
             multi_dot_kernels,
             local_kernels,
+            fused_numeric_combinations: false,
+            csr_preprocess: None,
+            hex_kernels: Mutex::new(None),
+            tet_kernels: Mutex::new(std::array::from_fn(|_| None)),
+            quadrature_kernel: Mutex::new(None),
             multi_dot_workspace: Mutex::new(CudaMultiDotWorkspace::default()),
             real_transform_workspace: Mutex::new(CudaRealTransformWorkspace::default()),
             allocation_stats,
@@ -1426,6 +1575,67 @@ impl CudaBackend {
             driver_memory_after_bytes,
             fft,
         })
+    }
+
+    /// Reserve fused multi-dot and basis-update scratch for a full Krylov cycle.
+    ///
+    /// Prevents pointer/result caches from growing as later solves reach longer
+    /// Arnoldi bases. Storage uses the backend allocation ledger; it is not
+    /// charged to a caller's MemoryPool. Smaller reservations retain capacity.
+    ///
+    /// # Errors
+    /// Rejects zero capacity, byte overflow or graph capture and propagates
+    /// allocation/context errors. Completed allocations remain cached on failure.
+    pub fn try_reserve_krylov_reductions<T: DeviceScalar>(
+        &self,
+        basis_capacity: usize,
+    ) -> BackendResult<()> {
+        const OP: &str = "reserve_krylov_reductions";
+        let invalid = || BackendError::InvalidArgument {
+            operation: OP,
+            reason: "invalid basis capacity or graph capture active".into(),
+        };
+        self.check_pending_error()?;
+        if basis_capacity == 0 || basis_capacity > u32::MAX as usize {
+            return Err(invalid());
+        }
+        if self
+            .stream
+            .capture_status()
+            .map_err(|error| BackendError::OperationFailed {
+                operation: OP,
+                reason: format!("{error:?}"),
+            })?
+            != cudarc::driver::sys::CUstreamCaptureStatus::CU_STREAM_CAPTURE_STATUS_NONE
+        {
+            return Err(invalid());
+        }
+        let ptr_bytes = basis_capacity
+            .checked_mul(std::mem::size_of::<usize>())
+            .ok_or_else(invalid)?;
+        let value_bytes = basis_capacity
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(invalid)?;
+        let mut workspace =
+            self.multi_dot_workspace
+                .lock()
+                .map_err(|_| BackendError::OperationFailed {
+                    operation: OP,
+                    reason: "multi-dot workspace mutex poisoned".into(),
+                })?;
+        if workspace.ptr_table_bytes < ptr_bytes {
+            workspace.ptr_table = Some(self.alloc_tracked(ptr_bytes)?);
+            workspace.ptr_table_bytes = ptr_bytes;
+        }
+        if workspace.out_bytes < value_bytes {
+            workspace.out = Some(self.alloc_tracked(value_bytes)?);
+            workspace.out_bytes = value_bytes;
+        }
+        if workspace.alpha_bytes < value_bytes {
+            workspace.alphas = Some(self.alloc_tracked(value_bytes)?);
+            workspace.alpha_bytes = value_bytes;
+        }
+        Ok(())
     }
 
     /// Return counters and memory watermarks accumulated since backend
@@ -1800,8 +2010,27 @@ impl CudaBackend {
     /// private workspaces, so an injected/reported launch failure leaves the
     /// caller output and resident structure available for a retry.
     pub(crate) fn try_fmm_action_preflight(&self) -> BackendResult<()> {
+        self.try_custom_kernel_preflight()
+    }
+
+    /// Check failures before an externally implemented resident CUDA kernel.
+    pub(crate) fn try_custom_kernel_preflight(&self) -> BackendResult<()> {
         self.check_pending_error()?;
         self.try_inject_failure(CudaFailureInjectionPoint::Launch)
+    }
+
+    /// Include externally implemented kernels in the shared launch ledger.
+    pub(crate) fn record_custom_kernel_launch(&self) {
+        self.runtime_stats.record_kernel_launch();
+    }
+
+    /// Preserve device-loss recovery semantics for externally implemented kernels.
+    pub(crate) fn custom_kernel_error(
+        &self,
+        operation: &'static str,
+        reason: String,
+    ) -> BackendError {
+        backend_driver_launch_error(&self.pending_error, operation, reason)
     }
 
     /// Enqueue `dst[p] += phase[p] * src[p]` for Complex64 device buffers.
@@ -4213,6 +4442,71 @@ impl CudaBackend {
         Ok(())
     }
 
+    /// Combine resident BEM pair channels into a column-major dense system.
+    ///
+    /// Routes have `n*n` entries: nonnegative indices select quadrature pairs;
+    /// `-(index+1)` selects regular pairs; i32::MIN denotes an empty entry.
+    /// Each column has ten coefficients:
+    /// four matrix channel weights, four RHS weights, matrix jump and RHS jump.
+    /// Channel order is G, H, Ht, E. Output validation downloads compact flags only.
+    ///
+    /// # Errors
+    /// Rejects invalid lengths, streams, coefficients, route indices and non-finite
+    /// results. A launch/validation failure can modify outputs; callers must not
+    /// publish them until this method succeeds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_bem_dense_system_c64_device(
+        &self, n: usize, regular: &CudaBuffer<BemRegularPairOutF64>,
+        quadrature: &CudaBuffer<BemRegularPairOutF64>, routes: &CudaBuffer<i32>,
+        coefficients: &CudaBuffer<Complex64>, matrix: &mut CudaBuffer<Complex64>,
+        rhs: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        const OP: &str = "bem_dense_system_c64";
+        self.check_pending_error()?;
+        let invalid = |reason: &str| BackendError::InvalidArgument { operation: OP, reason: reason.into() };
+        let count = n.checked_mul(n).ok_or_else(|| invalid("matrix size overflow"))?;
+        let weights = n.checked_mul(10).ok_or_else(|| invalid("coefficient size overflow"))?;
+        if routes.len != count || matrix.len != count || rhs.len != n || coefficients.len != weights {
+            return Err(invalid("route, coefficient and output shapes do not match n"));
+        }
+        if n == 0 { return Ok(()); }
+        for raw in [regular.raw(), quadrature.raw(), routes.raw(), coefficients.raw(), matrix.raw(), rhs.raw()].into_iter().flatten() {
+            if !Arc::ptr_eq(raw.stream(), &self.stream) { return Err(invalid("foreign CUDA stream")); }
+        }
+        if self.try_all_finite_native(coefficients)? != Some(true) {
+            return Err(invalid("coefficients must be finite"));
+        }
+        let kernels = self.bem_kernels.as_ref().ok_or(BackendError::Unsupported {
+            backend: "cuda", operation: OP, scalar: "Complex64",
+        })?;
+        let rows = u32::try_from(n).map_err(|_| invalid("row count exceeds launch range"))?;
+        let n64 = n as u64;
+        let nr = regular.len as u64;
+        let nq = quadrature.len as u64;
+        let regular_raw = regular.raw().or_else(|| quadrature.raw()).ok_or_else(|| invalid("no pair data"))?;
+        let quadrature_raw = quadrature.raw().unwrap_or(regular_raw);
+        self.try_inject_failure(CudaFailureInjectionPoint::Launch)?;
+        self.runtime_stats.record_kernel_launch();
+        // SAFETY: shapes and stream ownership are checked above; the kernel
+        // bounds-checks every route before accessing either pair array.
+        unsafe {
+            self.stream.launch_builder(&kernels.dense_system_c64)
+                .arg(regular_raw).arg(quadrature_raw)
+                .arg(routes.raw().ok_or_else(|| invalid("missing routes"))?)
+                .arg(coefficients.raw().ok_or_else(|| invalid("missing coefficients"))?)
+                .arg(matrix.raw_mut().ok_or_else(|| invalid("missing matrix"))?)
+                .arg(rhs.raw_mut().ok_or_else(|| invalid("missing RHS"))?)
+                .arg(&n64).arg(&nr).arg(&nq)
+                .launch(LaunchConfig { grid_dim: (rows.div_ceil(128), 1, 1), block_dim: (128, 1, 1), shared_mem_bytes: 0 })
+                .map_err(|error| backend_driver_launch_error(&self.pending_error, OP, format!("{error:?}")))?;
+        }
+        if self.try_all_finite_native(matrix)? != Some(true) || self.try_all_finite_native(rhs)? != Some(true) {
+            return Err(invalid("invalid pair route or non-finite assembled system"));
+        }
+        Ok(())
+    }
+
+
     /// Enqueue a precomputed-quadrature BEM pair batch. Pair descriptors,
     /// quadrature geometry, and output remain on the device; this method does
     /// not perform host staging or synchronization.
@@ -5356,143 +5650,6 @@ impl CudaBackend {
         // factorization, while the cuSOLVER launch status above reports
         // submission failures.
 
-        Ok(())
-    }
-
-    /// Factor a dense `Complex64` matrix already laid out in column-major
-    /// order and keep the LU factors on the device.
-    pub fn dense_lu_c64_from_column_major(
-        &self,
-        n: usize,
-        values: &[Complex64],
-    ) -> Result<CudaDenseLuC64, OomError> {
-        if values.len() != n.saturating_mul(n) {
-            return Err(OomError::Invalid(format!(
-                "dense LU: expected {} values for {n}x{n}, got {}",
-                n.saturating_mul(n),
-                values.len()
-            )));
-        }
-
-        let n_i32 = i32::try_from(n)
-            .map_err(|_| OomError::Invalid(format!("dense LU: n={n} exceeds i32::MAX")))?;
-        let mut factors = self.raw_alloc::<Complex64>(values.len())?;
-        self.try_copy_h2d(values, &mut factors)
-            .map_err(backend_error_to_oom)?;
-
-        let mut lwork = 0_i32;
-        let (a_ptr, _a_guard) = buf_ptr_mut(&mut factors, &self.stream)
-            .ok_or_else(|| OomError::Invalid("dense LU: empty matrix".into()))?;
-        self.runtime_stats.record_library_operation();
-        let st = unsafe {
-            cusolver_sys::cusolverDnZgetrf_bufferSize(
-                self.solver,
-                n_i32,
-                n_i32,
-                a_ptr as *mut cusolver_sys::cuDoubleComplex,
-                n_i32,
-                &mut lwork,
-            )
-        };
-        check_cusolver("cusolverDnZgetrf_bufferSize", st)?;
-        drop(_a_guard);
-
-        let mut workspace =
-            self.raw_alloc::<Complex64>(usize::try_from(lwork).map_err(|_| {
-                OomError::Invalid(format!("dense LU: negative workspace size {lwork}"))
-            })?)?;
-        let mut ipiv = self.raw_alloc::<i32>(n)?;
-        let mut info = self.raw_alloc::<i32>(1)?;
-
-        let (a_ptr, _a_guard) = buf_ptr_mut(&mut factors, &self.stream)
-            .ok_or_else(|| OomError::Invalid("dense LU: empty matrix".into()))?;
-        let (work_ptr, _work_guard) = buf_ptr_mut(&mut workspace, &self.stream)
-            .ok_or_else(|| OomError::Invalid("dense LU: empty workspace".into()))?;
-        let (ipiv_ptr, _ipiv_guard) = buf_ptr_mut(&mut ipiv, &self.stream)
-            .ok_or_else(|| OomError::Invalid("dense LU: empty pivot buffer".into()))?;
-        let (info_ptr, _info_guard) = buf_ptr_mut(&mut info, &self.stream)
-            .ok_or_else(|| OomError::Invalid("dense LU: empty info buffer".into()))?;
-        self.runtime_stats.record_library_operation();
-        let st = unsafe {
-            cusolver_sys::cusolverDnZgetrf(
-                self.solver,
-                n_i32,
-                n_i32,
-                a_ptr as *mut cusolver_sys::cuDoubleComplex,
-                n_i32,
-                work_ptr as *mut cusolver_sys::cuDoubleComplex,
-                ipiv_ptr as *mut i32,
-                info_ptr as *mut i32,
-            )
-        };
-        check_cusolver("cusolverDnZgetrf", st)?;
-        drop((_a_guard, _work_guard, _ipiv_guard, _info_guard));
-        self.check_dense_lu_info(&info, "cusolverDnZgetrf")?;
-
-        Ok(CudaDenseLuC64 {
-            n,
-            factors,
-            ipiv,
-            info: Mutex::new(info),
-            workspace,
-        })
-    }
-
-    /// Solve `op(A) * out = rhs` for one `Complex64` right-hand side while
-    /// retaining the LU factors and the right-hand side on the device.
-    pub fn dense_lu_c64_solve(
-        &self,
-        lu: &CudaDenseLuC64,
-        rhs: &CudaBuffer<Complex64>,
-        out: &mut CudaBuffer<Complex64>,
-        operation: Transpose,
-    ) -> Result<(), OomError> {
-        if rhs.len != lu.n || out.len != lu.n {
-            return Err(OomError::Invalid(format!(
-                "dense LU solve: rhs/out length mismatch, n={}, rhs={}, out={}",
-                lu.n, rhs.len, out.len
-            )));
-        }
-        self.try_copy_d2d(rhs, out).map_err(backend_error_to_oom)?;
-
-        let n_i32 = i32::try_from(lu.n).map_err(|_| {
-            OomError::Invalid(format!("dense LU solve: n={} exceeds i32::MAX", lu.n))
-        })?;
-        let (a_ptr, _a_guard) = buf_ptr(&lu.factors, &self.stream)
-            .ok_or_else(|| OomError::Invalid("dense LU solve: empty factor matrix".into()))?;
-        let (ipiv_ptr, _ipiv_guard) = buf_ptr(&lu.ipiv, &self.stream)
-            .ok_or_else(|| OomError::Invalid("dense LU solve: empty pivot buffer".into()))?;
-        let (b_ptr, _b_guard) = buf_ptr_mut(out, &self.stream)
-            .ok_or_else(|| OomError::Invalid("dense LU solve: empty output buffer".into()))?;
-        let mut info = lu
-            .info
-            .lock()
-            .map_err(|_| OomError::Invalid("dense LU solve: info mutex poisoned".into()))?;
-        let (info_ptr, _info_guard) = buf_ptr_mut(&mut info, &self.stream)
-            .ok_or_else(|| OomError::Invalid("dense LU solve: empty info buffer".into()))?;
-        let trans = match operation {
-            Transpose::NoTrans => cusolver_sys::cublasOperation_t::CUBLAS_OP_N,
-            Transpose::Trans => cusolver_sys::cublasOperation_t::CUBLAS_OP_T,
-            Transpose::ConjTrans => cusolver_sys::cublasOperation_t::CUBLAS_OP_C,
-        };
-
-        self.runtime_stats.record_library_operation();
-        let st = unsafe {
-            cusolver_sys::cusolverDnZgetrs(
-                self.solver,
-                trans,
-                n_i32,
-                1,
-                a_ptr as *const cusolver_sys::cuDoubleComplex,
-                n_i32,
-                ipiv_ptr as *const i32,
-                b_ptr as *mut cusolver_sys::cuDoubleComplex,
-                n_i32,
-                info_ptr as *mut i32,
-            )
-        };
-        check_cusolver("cusolverDnZgetrs", st)?;
-        drop((_a_guard, _ipiv_guard, _b_guard, _info_guard));
         Ok(())
     }
 
@@ -8799,7 +8956,8 @@ pub struct CudaCsrPrebaked<'a, T: DeviceScalar> {
     desc: cusparse_sys::cusparseSpMatDescr_t,
     x_desc: cusparse_sys::cusparseDnVecDescr_t,
     y_desc: cusparse_sys::cusparseDnVecDescr_t,
-    desc_lock: Mutex<()>,
+    // Serializes descriptor retargeting and records completed SpMV preprocessing.
+    desc_lock: Mutex<bool>,
     workspace: Option<TrackedCudaSlice>,
     workspace_bytes: usize,
     spmm_workspace: Mutex<CudaSpmmWorkspace>,
@@ -8833,7 +8991,7 @@ impl<T: DeviceScalar> CudaCsrPrebaked<'_, T> {
             desc: std::ptr::null_mut(),
             x_desc: std::ptr::null_mut(),
             y_desc: std::ptr::null_mut(),
-            desc_lock: Mutex::new(()),
+            desc_lock: Mutex::new(false),
             workspace: None,
             workspace_bytes: 0,
             spmm_workspace: Mutex::new(CudaSpmmWorkspace::default()),
@@ -10046,6 +10204,425 @@ impl Backend for CudaBackend {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn try_all_finite_native<T: DeviceScalar>(
+        &self,
+        values: &Self::Buffer<T>,
+    ) -> BackendResult<Option<bool>> {
+        const OP: &str = "all_finite_native";
+        self.check_pending_error()?;
+        let invalid = |reason: &str| BackendError::InvalidArgument {
+            operation: OP, reason: reason.into(),
+        };
+        let bytes = values.len.checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| invalid("buffer byte count overflow"))?;
+        match values.raw() {
+            Some(raw) if raw.len() == bytes && Arc::ptr_eq(raw.stream(), &self.stream) => {}
+            None if values.len == 0 => return Ok(Some(true)),
+            _ => return Err(invalid("invalid buffer storage or foreign stream")),
+        }
+        if values.len == 0 { return Ok(Some(true)); }
+        let id = TypeId::of::<T>();
+        if id != TypeId::of::<f32>() && id != TypeId::of::<f64>()
+            && id != TypeId::of::<Complex32>() && id != TypeId::of::<Complex64>()
+        { return Ok(None); }
+        let Some(kernels) = self.validation_kernels.as_ref() else { return Ok(None); };
+        let work = u32::try_from(values.len).map_err(|_| invalid("length exceeds CUDA launch range"))?;
+        let count = values.len as u64;
+        let value_size = std::mem::size_of::<T>() as u64;
+        let real_size = std::mem::size_of::<T::Real>() as u64;
+        self.try_custom_kernel_preflight()?;
+        let mut workspace = self.multi_dot_workspace.lock().map_err(|_| BackendError::OperationFailed {
+            operation: OP, reason: "validation workspace mutex poisoned".into(),
+        })?;
+        if workspace.validation_status.is_none() {
+            workspace.validation_status = Some(self.alloc_tracked(std::mem::size_of::<i32>())?);
+        }
+        let status = workspace.validation_status.as_mut()
+            .ok_or_else(|| invalid("missing status storage"))?;
+        self.stream.memset_zeros(&mut status.inner)
+            .map_err(|error| backend_driver_transfer_error(&self.pending_error, OP, error))?;
+        let values = values.raw().ok_or_else(|| invalid("missing input storage"))?;
+        self.record_custom_kernel_launch();
+        // SAFETY: TypeId admits the four real/complex scalar layouts. Counts
+        // and byte lengths are checked, pointers share this stream, and each
+        // in-range thread reads one value and atomically updates a four-byte
+        // status word initialized on the same stream before this launch.
+        unsafe {
+            self.stream.launch_builder(&kernels.finite)
+                .arg(values).arg(&count).arg(&value_size).arg(&real_size).arg(&status.inner)
+                .launch(LaunchConfig::for_num_elems(work))
+                .map_err(|error| self.custom_kernel_error(OP, format!("{error:?}")))?;
+        }
+        let mut result = [0_u8; std::mem::size_of::<i32>()];
+        self.stream.memcpy_dtoh(&status.inner, &mut result)
+            .map_err(|error| backend_driver_transfer_error(&self.pending_error, OP, error))?;
+        self.transfer_stats.record_d2h(result.len());
+        Ok(Some(i32::from_ne_bytes(result) == 0))
+    }
+
+    fn try_zero_native<T: DeviceScalar>(
+        &self,
+        values: &mut Self::Buffer<T>,
+    ) -> BackendResult<bool> {
+        const OP: &str = "zero_native";
+        self.check_pending_error()?;
+        let invalid = |reason: &str| BackendError::InvalidArgument {
+            operation: OP, reason: reason.into(),
+        };
+        let bytes = values.len.checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| invalid("buffer byte count overflow"))?;
+        match values.raw() {
+            Some(raw) if raw.len() == bytes && Arc::ptr_eq(raw.stream(), &self.stream) => {}
+            None if values.len == 0 => return Ok(true),
+            _ => return Err(invalid("invalid buffer storage or foreign stream")),
+        }
+        if values.len == 0 { return Ok(true); }
+        let id = TypeId::of::<T>();
+        if id != TypeId::of::<f32>() && id != TypeId::of::<f64>()
+            && id != TypeId::of::<Complex32>() && id != TypeId::of::<Complex64>()
+        { return Ok(false); }
+        self.try_custom_kernel_preflight()?;
+        let raw = values.raw_mut().ok_or_else(|| invalid("missing output storage"))?;
+        self.stream.memset_zeros(raw)
+            .map_err(|error| backend_driver_transfer_error(&self.pending_error, OP, error))?;
+        Ok(true)
+    }
+
+    fn try_residual_update_native<T: DeviceScalar>(
+        &self,
+        rhs: &Self::Buffer<T>,
+        action: &mut Self::Buffer<T>,
+    ) -> BackendResult<bool> {
+        const OP: &str = "residual_update_native";
+        let invalid = |reason: &str| BackendError::InvalidArgument {
+            operation: OP,
+            reason: reason.into(),
+        };
+        self.check_pending_error()?;
+        let n = rhs.len;
+        let bytes = n
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| invalid("buffer byte count overflow"))?;
+        for buffer in [rhs, &*action] {
+            if buffer.len != n {
+                return Err(invalid("unequal buffer lengths"));
+            }
+            match buffer.raw() {
+                Some(raw) if raw.len() == bytes && Arc::ptr_eq(raw.stream(), &self.stream) => {}
+                None if n == 0 => {}
+                _ => return Err(invalid("invalid buffer storage or foreign stream")),
+            }
+        }
+        let count = u32::try_from(n).map_err(|_| invalid("length exceeds CUDA index range"))?;
+        if n == 0 {
+            return Ok(true);
+        }
+        let Some(kernels) = self.local_kernels.as_ref() else {
+            return Ok(false);
+        };
+        let id = TypeId::of::<T>();
+        let function = if id == TypeId::of::<f32>() {
+            &kernels.residual_f32
+        } else if id == TypeId::of::<f64>() {
+            &kernels.residual_f64
+        } else if id == TypeId::of::<Complex32>() {
+            &kernels.residual_c32
+        } else if id == TypeId::of::<Complex64>() {
+            &kernels.residual_c64
+        } else {
+            return Ok(false);
+        };
+        self.try_custom_kernel_preflight()?;
+        let rhs = rhs.raw().ok_or_else(|| invalid("missing RHS storage"))?;
+        let action = action
+            .raw_mut()
+            .ok_or_else(|| invalid("missing action storage"))?;
+        self.record_custom_kernel_launch();
+        // SAFETY: TypeId selects the matching scalar ABI. Both buffers have
+        // checked byte lengths and belong to this stream. Mutable output cannot
+        // alias the shared input through this safe API; each thread writes one row.
+        unsafe {
+            self.stream
+                .launch_builder(function)
+                .arg(rhs)
+                .arg(action)
+                .arg(&count)
+                .launch(LaunchConfig::for_num_elems(count))
+                .map_err(|error| self.custom_kernel_error(OP, format!("{error:?}")))?;
+        }
+        Ok(true)
+    }
+
+    fn try_diagonal_scale_native<T: DeviceScalar>(
+        &self,
+        inverse: &Self::Buffer<T>,
+        b: &Self::Buffer<T>,
+        x: &mut Self::Buffer<T>,
+        omega: T::Real,
+    ) -> BackendResult<bool> {
+        self.try_diagonal_scale_colmajor_native(1, inverse, b, x, omega)
+    }
+
+    fn try_diagonal_scale_colmajor_native<T: DeviceScalar>(
+        &self,
+        rhs: usize,
+        inverse: &Self::Buffer<T>,
+        b: &Self::Buffer<T>,
+        x: &mut Self::Buffer<T>,
+        omega: T::Real,
+    ) -> BackendResult<bool> {
+        const OP: &str = "diagonal_scale_native";
+        let invalid = |reason: &str| BackendError::InvalidArgument {
+            operation: OP,
+            reason: reason.into(),
+        };
+        self.check_pending_error()?;
+        let n = inverse.len.checked_mul(rhs)
+            .ok_or_else(|| invalid("block length overflow"))?;
+        let w = num_traits::ToPrimitive::to_f64(&omega)
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| invalid("non-finite or unrepresentable damping"))?;
+        for (buffer, expected) in [(inverse, inverse.len), (b, n), (&*x, n)] {
+            let bytes = expected.checked_mul(std::mem::size_of::<T>())
+                .ok_or_else(|| invalid("buffer byte count overflow"))?;
+            if buffer.len != expected {
+                return Err(invalid("unequal buffer lengths"));
+            }
+            match buffer.raw() {
+                Some(raw) if raw.len() == bytes && Arc::ptr_eq(raw.stream(), &self.stream) => {}
+                None if expected == 0 => {}
+                _ => return Err(invalid("invalid buffer storage or foreign stream")),
+            }
+        }
+        let rows = u32::try_from(inverse.len)
+            .map_err(|_| invalid("row count exceeds CUDA index range"))?;
+        let count = u32::try_from(n).map_err(|_| invalid("length exceeds CUDA index range"))?;
+        if n == 0 {
+            return Ok(true);
+        }
+        let Some(kernels) = self.local_kernels.as_ref() else {
+            return Ok(false);
+        };
+        let id = TypeId::of::<T>();
+        let function = if id == TypeId::of::<f32>() {
+            &kernels.diagonal_f32
+        } else if id == TypeId::of::<f64>() {
+            &kernels.diagonal_f64
+        } else if id == TypeId::of::<Complex32>() {
+            &kernels.diagonal_c32
+        } else if id == TypeId::of::<Complex64>() {
+            &kernels.diagonal_c64
+        } else {
+            return Ok(false);
+        };
+        self.try_custom_kernel_preflight()?;
+        let inverse = inverse
+            .raw()
+            .ok_or_else(|| invalid("missing inverse storage"))?;
+        let b = b.raw().ok_or_else(|| invalid("missing RHS storage"))?;
+        let x = x
+            .raw_mut()
+            .ok_or_else(|| invalid("missing output storage"))?;
+        self.record_custom_kernel_launch();
+        // SAFETY: TypeId selects the matching scalar ABI; all allocations have
+        // checked byte lengths and share this stream. Each thread owns one x.
+        unsafe {
+            self.stream
+                .launch_builder(function)
+                .arg(inverse)
+                .arg(b)
+                .arg(x)
+                .arg(&w)
+                .arg(&rows)
+                .arg(&count)
+                .launch(LaunchConfig::for_num_elems(count))
+                .map_err(|error| self.custom_kernel_error(OP, format!("{error:?}")))?;
+        }
+        Ok(true)
+    }
+
+    fn try_jacobi_update_native<T: DeviceScalar>(
+        &self,
+        inverse: &Self::Buffer<T>,
+        b: &Self::Buffer<T>,
+        ax: &Self::Buffer<T>,
+        x: &mut Self::Buffer<T>,
+        omega: T::Real,
+    ) -> BackendResult<bool> {
+        const OP: &str = "jacobi_update_native";
+        let invalid = |reason: &str| BackendError::InvalidArgument {
+            operation: OP,
+            reason: reason.into(),
+        };
+        self.check_pending_error()?;
+        let n = x.len;
+        let bytes = n
+            .checked_mul(std::mem::size_of::<T>())
+            .ok_or_else(|| invalid("buffer byte count overflow"))?;
+        let w = num_traits::ToPrimitive::to_f64(&omega)
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| invalid("non-finite or unrepresentable damping"))?;
+        for buffer in [inverse, b, ax, &*x] {
+            if buffer.len != n {
+                return Err(invalid("unequal buffer lengths"));
+            }
+            match buffer.raw() {
+                Some(raw) if raw.len() == bytes && Arc::ptr_eq(raw.stream(), &self.stream) => {}
+                None if n == 0 => {}
+                _ => return Err(invalid("invalid buffer storage or foreign stream")),
+            }
+        }
+        let count = u32::try_from(n).map_err(|_| invalid("length exceeds CUDA index range"))?;
+        if n == 0 {
+            return Ok(true);
+        }
+        let Some(kernels) = self.local_kernels.as_ref() else {
+            return Ok(false);
+        };
+        let id = TypeId::of::<T>();
+        let function = if id == TypeId::of::<f32>() {
+            &kernels.jacobi_f32
+        } else if id == TypeId::of::<f64>() {
+            &kernels.jacobi_f64
+        } else if id == TypeId::of::<Complex32>() {
+            &kernels.jacobi_c32
+        } else if id == TypeId::of::<Complex64>() {
+            &kernels.jacobi_c64
+        } else {
+            return Ok(false);
+        };
+        self.try_custom_kernel_preflight()?;
+        let inverse = inverse
+            .raw()
+            .ok_or_else(|| invalid("missing inverse storage"))?;
+        let b = b.raw().ok_or_else(|| invalid("missing RHS storage"))?;
+        let ax = ax.raw().ok_or_else(|| invalid("missing action storage"))?;
+        let x = x
+            .raw_mut()
+            .ok_or_else(|| invalid("missing output storage"))?;
+        self.record_custom_kernel_launch();
+        // SAFETY: TypeId selects the matching scalar ABI; all allocations have
+        // checked byte lengths and share this stream. Each thread owns one x.
+        unsafe {
+            self.stream
+                .launch_builder(function)
+                .arg(inverse)
+                .arg(b)
+                .arg(ax)
+                .arg(x)
+                .arg(&w)
+                .arg(&count)
+                .launch(LaunchConfig::for_num_elems(count))
+                .map_err(|error| self.custom_kernel_error(OP, format!("{error:?}")))?;
+        }
+        Ok(true)
+    }
+
+    fn try_chebyshev_update_native<T: DeviceScalar>(
+        &self,
+        inverse: &Self::Buffer<T>,
+        b: &Self::Buffer<T>,
+        ax: &Self::Buffer<T>,
+        direction: &mut Self::Buffer<T>,
+        x: &mut Self::Buffer<T>,
+        alpha: T::Real,
+        beta: T::Real,
+    ) -> BackendResult<bool> {
+        self.try_chebyshev_update_colmajor_native(1, inverse, b, ax, direction, x, alpha, beta)
+    }
+
+    fn try_chebyshev_update_colmajor_native<T: DeviceScalar>(
+        &self,
+        rhs: usize,
+        inverse: &Self::Buffer<T>,
+        b: &Self::Buffer<T>,
+        ax: &Self::Buffer<T>,
+        direction: &mut Self::Buffer<T>,
+        x: &mut Self::Buffer<T>,
+        alpha: T::Real,
+        beta: T::Real,
+    ) -> BackendResult<bool> {
+        const OP: &str = "chebyshev_update_native";
+        let invalid = |reason: &str| BackendError::InvalidArgument {
+            operation: OP,
+            reason: reason.into(),
+        };
+        self.check_pending_error()?;
+        let n = inverse.len.checked_mul(rhs)
+            .ok_or_else(|| invalid("block length overflow"))?;
+        let alpha = num_traits::ToPrimitive::to_f64(&alpha)
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| invalid("non-finite or unrepresentable alpha"))?;
+        let beta = num_traits::ToPrimitive::to_f64(&beta)
+            .filter(|v| v.is_finite())
+            .ok_or_else(|| invalid("non-finite or unrepresentable beta"))?;
+        for (buffer, expected) in [(inverse, inverse.len), (b, n), (ax, n), (&*direction, n), (&*x, n)] {
+            let bytes = expected.checked_mul(std::mem::size_of::<T>())
+                .ok_or_else(|| invalid("buffer byte count overflow"))?;
+            if buffer.len != expected {
+                return Err(invalid("unequal buffer lengths"));
+            }
+            match buffer.raw() {
+                Some(raw) if raw.len() == bytes && Arc::ptr_eq(raw.stream(), &self.stream) => {}
+                None if expected == 0 => {}
+                _ => return Err(invalid("invalid buffer storage or foreign stream")),
+            }
+        }
+        let rows = u32::try_from(inverse.len)
+            .map_err(|_| invalid("row count exceeds CUDA index range"))?;
+        let count = u32::try_from(n).map_err(|_| invalid("length exceeds CUDA index range"))?;
+        if n == 0 {
+            return Ok(true);
+        }
+        let Some(kernels) = self.local_kernels.as_ref() else {
+            return Ok(false);
+        };
+        let id = TypeId::of::<T>();
+        let function = if id == TypeId::of::<f32>() {
+            &kernels.chebyshev_f32
+        } else if id == TypeId::of::<f64>() {
+            &kernels.chebyshev_f64
+        } else if id == TypeId::of::<Complex32>() {
+            &kernels.chebyshev_c32
+        } else if id == TypeId::of::<Complex64>() {
+            &kernels.chebyshev_c64
+        } else {
+            return Ok(false);
+        };
+        self.try_custom_kernel_preflight()?;
+        let inverse = inverse
+            .raw()
+            .ok_or_else(|| invalid("missing inverse storage"))?;
+        let b = b.raw().ok_or_else(|| invalid("missing RHS storage"))?;
+        let ax = ax.raw().ok_or_else(|| invalid("missing action storage"))?;
+        let direction = direction
+            .raw_mut()
+            .ok_or_else(|| invalid("missing direction storage"))?;
+        let x = x
+            .raw_mut()
+            .ok_or_else(|| invalid("missing output storage"))?;
+        self.record_custom_kernel_launch();
+        // SAFETY: TypeId selects the matching scalar ABI; all allocations have
+        // checked byte lengths and share this stream. Mutable buffers are
+        // exclusive; each thread owns one direction/x pair.
+        unsafe {
+            self.stream
+                .launch_builder(function)
+                .arg(inverse)
+                .arg(b)
+                .arg(ax)
+                .arg(direction)
+                .arg(x)
+                .arg(&alpha)
+                .arg(&beta)
+                .arg(&rows)
+                .arg(&count)
+                .launch(LaunchConfig::for_num_elems(count))
+                .map_err(|error| self.custom_kernel_error(OP, format!("{error:?}")))?;
+        }
+        Ok(true)
+    }
+
     fn try_gs_color_sweep<T>(
         &self,
         row_ptr: &Self::Buffer<i32>,
@@ -10451,6 +11028,39 @@ impl Backend for CudaBackend {
         } else {
             Ok(())
         }
+    }
+
+    fn try_linear_combination2_native<T: DeviceScalar>(
+        &self,
+        alpha: T,
+        x: &CudaBuffer<T>,
+        beta: T,
+        y: &CudaBuffer<T>,
+        output: &mut CudaBuffer<T>,
+    ) -> BackendResult<bool> {
+        self.try_linear_combination2(alpha, x, beta, y, output)
+    }
+
+    fn try_csr_jacobi_step_native<T: DeviceScalar>(
+        &self, rows: &CudaBuffer<i32>, columns: &CudaBuffer<i32>,
+        values: &CudaBuffer<T>, inverse: &CudaBuffer<T>, b: &CudaBuffer<T>,
+        x: &CudaBuffer<T>, output: &mut CudaBuffer<T>, omega: T::Real,
+    ) -> BackendResult<bool> {
+        self.try_csr_jacobi_step(rows, columns, values, inverse, b, x, output, omega)
+    }
+
+    fn try_small_csr_jacobi_native<T: DeviceScalar>(
+        &self,
+        rows: &CudaBuffer<i32>,
+        columns: &CudaBuffer<i32>,
+        values: &CudaBuffer<T>,
+        inverse: &CudaBuffer<T>,
+        b: &CudaBuffer<T>,
+        x: &mut CudaBuffer<T>,
+        omega: T::Real,
+        sweeps: usize,
+    ) -> BackendResult<bool> {
+        self.try_small_csr_jacobi(rows, columns, values, inverse, b, x, omega, sweeps)
     }
 
     fn capabilities(&self) -> BackendCapabilities {
@@ -11071,6 +11681,94 @@ impl Backend for CudaBackend {
         Ok(())
     }
 
+    fn try_copy_view_d2h<T: BufferElement>(
+        &self,
+        buffer: &Self::Buffer<T>,
+        view: BufferView,
+        host: &mut [T],
+    ) -> BackendResult<()> {
+        const OP: &str = "copy_view_d2h";
+        self.check_pending_error()?;
+        self.checked_view_descriptor(buffer, view.offset, view.len, view.stride)?;
+        let invalid = |reason: &str| BackendError::InvalidArgument {
+            operation: OP, reason: reason.into(),
+        };
+        if host.len() != view.len { return Err(invalid("host/view length mismatch")); }
+        if view.len == 0 { return Ok(()); }
+        let element_size = std::mem::size_of::<T>();
+        let bytes = buffer.len.checked_mul(element_size)
+            .ok_or_else(|| invalid("buffer byte count overflow"))?;
+        match buffer.raw() {
+            Some(raw) if raw.len() == bytes && Arc::ptr_eq(raw.stream(), &self.stream) => {}
+            _ => return Err(invalid("invalid buffer storage or foreign stream")),
+        }
+        self.try_inject_failure(CudaFailureInjectionPoint::TransferD2H)?;
+        let host_size = std::mem::size_of_val(host);
+        // SAFETY: BufferElement admits scalar byte copies. This byte slice
+        // spans exactly the mutable destination host slice, whose borrow remains live.
+        let host_bytes = unsafe { std::slice::from_raw_parts_mut(host.as_mut_ptr().cast::<u8>(), host_size) };
+        let raw = buffer.raw().ok_or_else(|| invalid("missing storage"))?;
+        let chunk = if view.stride == 1 { view.len } else { 1 };
+        let chunk_bytes = chunk.checked_mul(element_size)
+            .ok_or_else(|| invalid("transfer byte count overflow"))?;
+        for index in (0..view.len).step_by(chunk) {
+            let start = view.checked_element_index(index)?.checked_mul(element_size)
+                .ok_or_else(|| invalid("view byte offset overflow"))?;
+            let end = start.checked_add(chunk_bytes)
+                .ok_or_else(|| invalid("view byte end overflow"))?;
+            let host_start = index * element_size;
+            let source = raw.slice(start..end);
+            self.stream.memcpy_dtoh(&source, &mut host_bytes[host_start..host_start + chunk_bytes])
+                .map_err(|error| backend_driver_transfer_error(&self.pending_error, OP, error))?;
+        }
+        self.transfer_stats.record_d2h(host_size);
+        Ok(())
+    }
+
+    fn try_copy_view_h2d<T: BufferElement>(
+        &self,
+        host: &[T],
+        buffer: &mut Self::Buffer<T>,
+        view: BufferView,
+    ) -> BackendResult<()> {
+        const OP: &str = "copy_view_h2d";
+        self.check_pending_error()?;
+        self.checked_view_descriptor(buffer, view.offset, view.len, view.stride)?;
+        let invalid = |reason: &str| BackendError::InvalidArgument {
+            operation: OP, reason: reason.into(),
+        };
+        if host.len() != view.len { return Err(invalid("host/view length mismatch")); }
+        if view.len == 0 { return Ok(()); }
+        let element_size = std::mem::size_of::<T>();
+        let bytes = buffer.len.checked_mul(element_size)
+            .ok_or_else(|| invalid("buffer byte count overflow"))?;
+        match buffer.raw() {
+            Some(raw) if raw.len() == bytes && Arc::ptr_eq(raw.stream(), &self.stream) => {}
+            _ => return Err(invalid("invalid buffer storage or foreign stream")),
+        }
+        self.try_inject_failure(CudaFailureInjectionPoint::TransferH2D)?;
+        let host_size = std::mem::size_of_val(host);
+        // SAFETY: BufferElement admits scalar byte copies. This byte slice
+        // spans exactly the immutable source host slice, whose borrow remains live.
+        let host_bytes = unsafe { std::slice::from_raw_parts(host.as_ptr().cast::<u8>(), host_size) };
+        let raw = buffer.raw_mut().ok_or_else(|| invalid("missing storage"))?;
+        let chunk = if view.stride == 1 { view.len } else { 1 };
+        let chunk_bytes = chunk.checked_mul(element_size)
+            .ok_or_else(|| invalid("transfer byte count overflow"))?;
+        for index in (0..view.len).step_by(chunk) {
+            let start = view.checked_element_index(index)?.checked_mul(element_size)
+                .ok_or_else(|| invalid("view byte offset overflow"))?;
+            let end = start.checked_add(chunk_bytes)
+                .ok_or_else(|| invalid("view byte end overflow"))?;
+            let host_start = index * element_size;
+            let mut destination = raw.slice_mut(start..end);
+            self.stream.memcpy_htod(&host_bytes[host_start..host_start + chunk_bytes], &mut destination)
+                .map_err(|error| backend_driver_transfer_error(&self.pending_error, OP, error))?;
+        }
+        self.transfer_stats.record_h2d(host_size);
+        Ok(())
+    }
+
     fn try_copy_d2d<T: BufferElement>(
         &self,
         src: &Self::Buffer<T>,
@@ -11163,7 +11861,20 @@ impl Backend for CudaBackend {
                     reason: "non-empty destination has no device allocation".into(),
                 })?;
         let element_size = std::mem::size_of::<T>();
-        for index in 0..source_view.len {
+        // Contiguous columns need one device copy, not one driver call per
+        // scalar. Strided views retain the checked element-wise path.
+        let chunk_len = if source_view.stride == 1 && destination_view.stride == 1 {
+            source_view.len
+        } else {
+            1
+        };
+        let chunk_bytes = chunk_len.checked_mul(element_size).ok_or_else(|| {
+            BackendError::InvalidArgument {
+                operation: "copy_views_d2d",
+                reason: "copy byte count overflow".into(),
+            }
+        })?;
+        for index in (0..source_view.len).step_by(chunk_len) {
             let source_byte = source_view
                 .checked_element_index(index)?
                 .checked_mul(element_size)
@@ -11178,13 +11889,13 @@ impl Backend for CudaBackend {
                     operation: "copy_views_d2d",
                     reason: "destination byte offset overflow".into(),
                 })?;
-            let source_end = source_byte.checked_add(element_size).ok_or_else(|| {
+            let source_end = source_byte.checked_add(chunk_bytes).ok_or_else(|| {
                 BackendError::InvalidArgument {
                     operation: "copy_views_d2d",
                     reason: "source byte end overflow".into(),
                 }
             })?;
-            let destination_end = destination_byte.checked_add(element_size).ok_or_else(|| {
+            let destination_end = destination_byte.checked_add(chunk_bytes).ok_or_else(|| {
                 BackendError::InvalidArgument {
                     operation: "copy_views_d2d",
                     reason: "destination byte end overflow".into(),
@@ -15079,7 +15790,7 @@ impl Backend for CudaBackend {
                 desc: std::ptr::null_mut(),
                 x_desc: std::ptr::null_mut(),
                 y_desc: std::ptr::null_mut(),
-                desc_lock: Mutex::new(()),
+                desc_lock: Mutex::new(false),
                 workspace: None,
                 workspace_bytes: 0,
                 spmm_workspace: Mutex::new(CudaSpmmWorkspace::default()),
@@ -15262,7 +15973,7 @@ impl Backend for CudaBackend {
             desc,
             x_desc,
             y_desc,
-            desc_lock: Mutex::new(()),
+            desc_lock: Mutex::new(false),
             workspace,
             workspace_bytes: buffer_size,
             spmm_workspace: Mutex::new(CudaSpmmWorkspace::default()),
@@ -15328,7 +16039,7 @@ impl Backend for CudaBackend {
                 operation: "spmv_prebaked",
                 reason: "non-empty y has no device allocation".into(),
             })?;
-        let _desc_guard = prebaked
+        let mut preprocessed = prebaked
             .desc_lock
             .lock()
             .map_err(|_| BackendError::OperationFailed {
@@ -15368,6 +16079,33 @@ impl Backend for CudaBackend {
             }
         };
         self.try_inject_failure(CudaFailureInjectionPoint::Launch)?;
+        if let Some(preprocess) = self.csr_preprocess
+            && !*preprocessed
+        {
+            self.runtime_stats.record_library_operation();
+            // SAFETY: The live matrix/vector descriptors and workspace were validated
+            // above. This uses the same operation, scalar type and algorithm as SpMV.
+            // The dedicated workspace is retained and never reused by SpMM. The lock
+            // serializes preprocessing and descriptor changes; this stream orders use.
+            let status = unsafe {
+                preprocess(
+                    self.sparse,
+                    cusparse_sys::cusparseOperation_t::CUSPARSE_OPERATION_NON_TRANSPOSE,
+                    prebaked.alpha.as_ptr(),
+                    prebaked.desc.cast_const(),
+                    prebaked.x_desc.cast_const(),
+                    prebaked.beta.as_ptr(),
+                    prebaked.y_desc,
+                    prebaked.data_type,
+                    cusparse_sys::cusparseSpMVAlg_t::CUSPARSE_SPMV_ALG_DEFAULT,
+                    workspace_ptr,
+                )
+            };
+            if status != cusparse_sys::cusparseStatus_t::CUSPARSE_STATUS_SUCCESS {
+                return Err(self.cusparse_error("cusparseSpMV_preprocess", status));
+            }
+            *preprocessed = true;
+        }
         self.runtime_stats.record_library_operation();
         let status = unsafe {
             cusparse_sys::cusparseSpMV(
@@ -15497,6 +16235,12 @@ impl Backend for CudaBackend {
         if nrhs == 0 || prebaked.desc.is_null() {
             return Ok(());
         }
+        // SpMV preprocessing mutates descriptor analysis state. Serialize SpMM
+        // submissions against it as well as against scalar descriptor retargeting.
+        let _matrix_guard = prebaked.desc_lock.lock().map_err(|_| BackendError::OperationFailed {
+            operation: "spmm_prebaked",
+            reason: "sparse descriptor lock poisoned".into(),
+        })?;
 
         let (xp, _xg) = buf_ptr(x, &self.stream).ok_or_else(|| BackendError::InvalidArgument {
             operation: "spmm_prebaked",

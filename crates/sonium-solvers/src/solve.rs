@@ -6,8 +6,13 @@
 
 use crate::direct::SparseCholeskyFactorization;
 #[cfg(feature = "cuda")]
-use crate::iterative::{BackendKrylovConfig, BackendKrylovWorkspace, try_gmres_backend};
+use crate::iterative::{
+    BackendKrylovConfig, DeviceGmresSession, DeviceInitialGuess, DevicePcgAssumption,
+    DevicePcgSession,
+};
 use crate::iterative::{fgmres_preconditioned, gmres_pipelined, gmres_preconditioned_with_guess};
+#[cfg(feature = "cuda")]
+use crate::preconditioners::BackendAmgPreconditioner;
 use crate::preconditioners::{
     AdditiveSchwarzPreconditioner, AmgConfig, AmgPreconditioner, ChebyshevConfig,
     ChebyshevPreconditioner, DiagonalPreconditioner, IluPreconditioner, SaddlePointBlockAssumption,
@@ -26,11 +31,27 @@ use sonium_compute::CudaBackend;
 use sonium_compute::DeviceScalar;
 #[cfg(feature = "cuda")]
 use sonium_compute::{
-    Backend, DeviceCsr, HostCsrRef, IdentityDevicePreconditioner, MemoryPool, MemoryPoolConfig,
+    Backend, DevicePreconditioner, IdentityDevicePreconditioner, MemoryPool,
+    MemoryPoolConfig, PcgBackendConfig, PersistentDeviceCsr, PointJacobiBackend,
 };
 use std::any::TypeId;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use thiserror::Error;
+
+#[cfg(feature = "cuda")]
+mod cuda_session;
+#[cfg(feature = "cuda")]
+#[doc(inline)]
+pub use cuda_session::{CudaLinearSolveSession, CudaLinearSolveStatus, CudaLinearUpdateStatus};
+
+#[cfg(all(test, feature = "cuda"))]
+mod cuda_pcg_tests;
+#[cfg(all(test, feature = "cuda"))]
+mod cuda_session_tests;
+#[cfg(all(test, feature = "cuda"))]
+mod cuda_session_refresh_tests;
+#[cfg(all(test, feature = "cuda"))]
+mod cuda_prepared_tests;
 
 /// Default dispatch cutoffs between direct/ILU and iterative/FMM paths.
 ///
@@ -232,9 +253,9 @@ pub enum LinearSolverType {
     /// stationary Schwarz apply it reduces to right-preconditioned GMRES at
     /// the cost of one extra Krylov basis.
     FgmresSchwarz,
-    /// CG (for real SPD systems only).
+    /// CG for real SPD systems; the CUDA route also supports complex HPD systems.
     Cg,
-    /// CG with AMG preconditioning.
+    /// CG with AMG preconditioning; CUDA uses a stationary SPD/HPD backend cycle.
     CgAmg,
 }
 
@@ -278,7 +299,7 @@ pub enum AssumptionProvenance {
 ///
 /// The high-level facade defaults to [`LinearSolveBackend::Cpu`] for
 /// backwards compatibility.  CUDA requests are admitted only for the
-/// explicitly supported native CSR/GMRES path; callers can opt into an
+/// explicitly supported native CSR/GMRES and PCG paths; callers can opt into an
 /// explicitly labelled CPU fallback with [`LinearSolveFallback::AllowCpu`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinearSolveBackend {
@@ -971,8 +992,10 @@ pub fn solve_real(
 
 /// Solve through an explicitly selected backend.
 ///
-/// The facade currently promotes only native CSR/GMRES on CUDA.  Every other
-/// CUDA request fails before entering a Krylov loop unless the caller opts
+/// CUDA supports CG with identity or AMG, and GMRES with identity, Jacobi, or AMG.
+/// CUDA CG+AMG uses a stationary symmetric backend cycle for validated SPD/HPD
+/// systems. Setup remains on the host; each call owns a retained device session.
+/// Other CUDA requests fail before entering a Krylov loop unless the caller opts
 /// into [`LinearSolveFallback::AllowCpu`], in which case the returned result
 /// retains the CUDA request and explicitly reports that CPU executed it.
 pub fn solve_with_backend<T>(
@@ -986,10 +1009,38 @@ where
     T: ComplexField + DeviceScalar<Real = <T as ComplexField>::Real>,
     <T as ComplexField>::Real: FromPrimitive + Sync + Send,
 {
+    solve_with_backend_and_assumption(
+        matrix,
+        rhs,
+        config,
+        backend,
+        fallback,
+        LinearSystemAssumption::General,
+    )
+}
+
+/// Solve on an explicit backend with declared positive-definiteness assumptions.
+///
+/// Large SPD/HPD systems require an explicit assumption under the same validation
+/// policy as CPU solves. Structural and finite-value checks are never bypassed.
+///
+/// # Errors
+/// Returns validation, backend, preconditioner, or nonconvergence errors.
+pub fn solve_with_backend_and_assumption<T>(
+    matrix: &CsrMatrix<T>,
+    rhs: &[T],
+    config: &LinearSolveConfig,
+    backend: LinearSolveBackend,
+    fallback: LinearSolveFallback,
+    assumption: LinearSystemAssumption,
+) -> Result<LinearSolveResult<T>, LinearSolveError>
+where
+    T: ComplexField + DeviceScalar<Real = <T as ComplexField>::Real>,
+    <T as ComplexField>::Real: FromPrimitive + Sync + Send,
+{
     match backend {
         LinearSolveBackend::Cpu => {
-            let mut result =
-                solve_with_assumption(matrix, rhs, config, LinearSystemAssumption::General)?;
+            let mut result = solve_with_assumption(matrix, rhs, config, assumption)?;
             result.backend = LinearSolveBackendProvenance::cpu();
             result.validate_contract()?;
             Ok(result)
@@ -997,7 +1048,7 @@ where
         LinearSolveBackend::Cuda => {
             #[cfg(feature = "cuda")]
             {
-                match solve_cuda_backend(matrix, rhs, config) {
+                match solve_cuda_backend(matrix, rhs, config, assumption) {
                     Ok(mut result) => {
                         result.backend =
                             LinearSolveBackendProvenance::native(LinearSolveBackend::Cuda);
@@ -1007,12 +1058,7 @@ where
                     Err(error @ LinearSolveError::BackendUnavailable { .. })
                         if fallback == LinearSolveFallback::AllowCpu =>
                     {
-                        let mut result = solve_with_assumption(
-                            matrix,
-                            rhs,
-                            config,
-                            LinearSystemAssumption::General,
-                        )?;
+                        let mut result = solve_with_assumption(matrix, rhs, config, assumption)?;
                         result.backend =
                             LinearSolveBackendProvenance::cpu_fallback(LinearSolveBackend::Cuda);
                         let _ = error;
@@ -1025,12 +1071,7 @@ where
             #[cfg(not(feature = "cuda"))]
             {
                 if fallback == LinearSolveFallback::AllowCpu {
-                    let mut result = solve_with_assumption(
-                        matrix,
-                        rhs,
-                        config,
-                        LinearSystemAssumption::General,
-                    )?;
+                    let mut result = solve_with_assumption(matrix, rhs, config, assumption)?;
                     result.backend =
                         LinearSolveBackendProvenance::cpu_fallback(LinearSolveBackend::Cuda);
                     result.validate_contract()?;
@@ -1073,21 +1114,23 @@ fn solve_cuda_backend<T>(
     matrix: &CsrMatrix<T>,
     rhs: &[T],
     config: &LinearSolveConfig,
+    assumption: LinearSystemAssumption,
 ) -> Result<LinearSolveResult<T>, LinearSolveError>
 where
     T: ComplexField + DeviceScalar<Real = <T as ComplexField>::Real>,
     <T as ComplexField>::Real: FromPrimitive + Sync + Send,
 {
-    if config.solver != LinearSolverType::Gmres {
-        return Err(LinearSolveError::BackendUnavailable {
-            backend: LinearSolveBackend::Cuda,
-            reason: format!(
-                "high-level CUDA facade currently supports only explicit GMRES with identity preconditioning (requested {:?})",
-                config.solver
-            ),
-        });
-    }
+    cuda_session::validate_strategy(config)?;
     validate_linear_inputs(matrix, rhs, None, config)?;
+    if matches!(
+        config.solver,
+        LinearSolverType::Cg
+            | LinearSolverType::CgAmg
+            | LinearSolverType::GmresAmg
+            | LinearSolverType::GmresChebyshev
+    ) {
+        validate_spd_system(matrix, config.solver, assumption)?;
+    }
     let backend = CudaBackend::new(0).map_err(|error| LinearSolveError::BackendUnavailable {
         backend: LinearSolveBackend::Cuda,
         reason: format!("CUDA initialization failed: {error}"),
@@ -1098,109 +1141,8 @@ where
             reason: format!("CUDA memory-pool initialization failed: {error}"),
         }
     })?;
-    let host_matrix = HostCsrRef::try_new(
-        matrix.num_rows,
-        matrix.num_cols,
-        &matrix.row_ptrs,
-        &matrix.col_indices,
-        &matrix.values,
-    )
-    .map_err(|error| LinearSolveError::BackendFailure {
-        backend: LinearSolveBackend::Cuda,
-        reason: format!("CSR upload validation failed: {error}"),
-    })?;
-    let device_matrix =
-        DeviceCsr::try_from_host_csr_ref(pool.backend(), host_matrix).map_err(|error| {
-            LinearSolveError::BackendFailure {
-                backend: LinearSolveBackend::Cuda,
-                reason: format!("CSR upload failed: {error}"),
-            }
-        })?;
-    let mut device_rhs = pool.backend().raw_alloc::<T>(rhs.len()).map_err(|error| {
-        LinearSolveError::BackendFailure {
-            backend: LinearSolveBackend::Cuda,
-            reason: format!("RHS allocation failed: {error}"),
-        }
-    })?;
-    pool.backend()
-        .try_copy_h2d(rhs, &mut device_rhs)
-        .map_err(|error| LinearSolveError::BackendFailure {
-            backend: LinearSolveBackend::Cuda,
-            reason: format!("RHS upload failed: {error}"),
-        })?;
-    let mut device_out = pool
-        .backend()
-        .raw_alloc::<T>(matrix.num_cols)
-        .map_err(|error| LinearSolveError::BackendFailure {
-            backend: LinearSolveBackend::Cuda,
-            reason: format!("solution allocation failed: {error}"),
-        })?;
-    let tolerance = <<T as ComplexField>::Real as FromPrimitive>::from_f64(config.tolerance)
-        .ok_or_else(|| {
-            LinearSolveError::InvalidConfig(
-                "tolerance is not representable by device scalar".into(),
-            )
-        })?;
-    let backend_config = BackendKrylovConfig {
-        max_iterations: config.max_iterations,
-        restart: config.restart,
-        tolerance,
-        require_native: true,
-        exact_residual_check_interval: config.exact_residual_check_interval,
-    };
-    let mut workspace = BackendKrylovWorkspace::new(matrix.num_cols);
-    let status = try_gmres_backend(
-        pool.backend(),
-        &pool,
-        &mut workspace,
-        &device_matrix,
-        &IdentityDevicePreconditioner,
-        &device_rhs,
-        None,
-        &mut device_out,
-        &backend_config,
-        None,
-    )
-    .map_err(|error| LinearSolveError::BackendFailure {
-        backend: LinearSolveBackend::Cuda,
-        reason: error.to_string(),
-    })?;
-    let mut x = vec![<T as DeviceScalar>::zero(); matrix.num_cols];
-    pool.backend()
-        .try_copy_d2h(&device_out, &mut x)
-        .map_err(|error| LinearSolveError::BackendFailure {
-            backend: LinearSolveBackend::Cuda,
-            reason: format!("solution download failed: {error}"),
-        })?;
-    pool.backend()
-        .try_synchronize()
-        .map_err(|error| LinearSolveError::BackendFailure {
-            backend: LinearSolveBackend::Cuda,
-            reason: format!("CUDA synchronization failed: {error}"),
-        })?;
-    let residual = true_relative_residual(matrix, rhs, &x)?;
-    if !status.converged || residual > config.tolerance {
-        return Err(LinearSolveError::NotConverged {
-            iterations: status.iterations,
-            residual,
-        });
-    }
-    let backward_error = true_backward_error(matrix, rhs, &x)?;
-    let result = LinearSolveResult {
-        x,
-        iterations: status.iterations,
-        residual,
-        backward_error,
-        converged: true,
-        status: SolverStatus::Converged,
-        attainable_accuracy: AccuracyStatus::Attained,
-        assumption: LinearSystemAssumption::General,
-        assumption_provenance: AssumptionProvenance::NotRequired,
-        backend: LinearSolveBackendProvenance::native(LinearSolveBackend::Cuda),
-        saddle_assumptions: None,
-    };
-    result.validate_contract()?;
-    Ok(result)
+    CudaLinearSolveSession::from_validated(&pool, matrix, config, assumption)?
+        .solve_host(rhs, DeviceInitialGuess::Zero)
 }
 
 /// Solve a real linear system with an explicit SPD/HPD assumption.
@@ -2693,10 +2635,133 @@ mod finite_input_tests {
     }
 
     #[test]
+    fn explicit_backend_preserves_large_spd_assumptions() {
+        let n = SPD_EXACT_VALIDATION_MAX_ROWS + 1;
+        let matrix = CsrMatrix::<f64>::identity(n);
+        let rhs = vec![1.0; n];
+        let config = LinearSolveConfig {
+            solver: LinearSolverType::Cg,
+            ..Default::default()
+        };
+        assert!(
+            solve_with_backend(
+                &matrix,
+                &rhs,
+                &config,
+                LinearSolveBackend::Cpu,
+                LinearSolveFallback::Reject
+            )
+            .is_err()
+        );
+        let result = solve_with_backend_and_assumption(
+            &matrix,
+            &rhs,
+            &config,
+            LinearSolveBackend::Cpu,
+            LinearSolveFallback::Reject,
+            LinearSystemAssumption::PositiveDefiniteCertified,
+        )
+        .unwrap();
+        assert_eq!(
+            result.assumption,
+            LinearSystemAssumption::PositiveDefiniteCertified
+        );
+        assert_eq!(
+            result.assumption_provenance,
+            AssumptionProvenance::ScalableCertificate
+        );
+        result.validate_contract().unwrap();
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_spd_strategies_reject_indefinite_input_before_device_setup() {
+        let matrix = CsrMatrix::from_raw_parts(
+            2,
+            2,
+            vec![0, 2, 4],
+            vec![0, 1, 0, 1],
+            vec![1.0_f64, 2.0, 2.0, 1.0],
+        );
+        for solver in [
+            LinearSolverType::Cg,
+            LinearSolverType::CgAmg,
+            LinearSolverType::GmresAmg,
+        ] {
+            let config = LinearSolveConfig {
+                solver,
+                ..Default::default()
+            };
+            let error = solve_cuda_backend(
+                &matrix,
+                &[1.0, 1.0],
+                &config,
+                LinearSystemAssumption::PositiveDefinite,
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, LinearSolveError::InvalidConfig(_)),
+                "{error}"
+            );
+        }
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_jacobi_facade_certifies_original_system() {
+        if let Err(error) = CudaBackend::new(0) {
+            assert!(
+                std::env::var("SONIUM_REQUIRE_CUDA").as_deref() != Ok("1"),
+                "CUDA is required: {error}"
+            );
+            eprintln!("SKIP cuda_jacobi_facade_certifies_original_system: {error}");
+            return;
+        }
+        // Duplicate diagonal entries must add before Jacobi setup.
+        let matrix = CsrMatrix::from_raw_parts(
+            2,
+            2,
+            vec![0, 3, 5],
+            vec![0, 0, 1, 0, 1],
+            vec![2.0_f64, 2.0, 1.0, 1.0, 3.0],
+        );
+        let mut config = LinearSolveConfig {
+            solver: LinearSolverType::GmresJacobi,
+            max_iterations: 20,
+            restart: 2,
+            tolerance: 1e-10,
+            ..Default::default()
+        };
+        for solver in [
+            LinearSolverType::GmresJacobi,
+            LinearSolverType::Cg,
+            LinearSolverType::GmresAmg,
+            LinearSolverType::CgAmg,
+        ] {
+            config.solver = solver;
+            let result = solve_with_backend(
+                &matrix,
+                &[6.0, 7.0],
+                &config,
+                LinearSolveBackend::Cuda,
+                LinearSolveFallback::Reject,
+            )
+            .unwrap();
+            assert_eq!(result.backend.actual, LinearSolveBackend::Cuda);
+            assert!(!result.backend.fallback);
+            assert!(result.residual < config.tolerance);
+            assert!((result.x[0] - 1.0).abs() < 1e-9);
+            assert!((result.x[1] - 2.0).abs() < 1e-9);
+            result.validate_contract().unwrap();
+        }
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    #[test]
     fn explicit_backend_selector_preserves_cpu_fallback_provenance() {
         let matrix = CsrMatrix::identity(2);
         let config = LinearSolveConfig {
-            solver: LinearSolverType::GmresJacobi,
+            solver: LinearSolverType::Auto,
             ..Default::default()
         };
         let result = solve_with_backend(

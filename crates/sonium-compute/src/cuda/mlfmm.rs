@@ -13,7 +13,8 @@ use crate::error::{BackendError, BackendResult};
 use crate::pool::{Buffer, MemoryPool};
 use crate::scalar::BufferElement;
 
-use super::CudaBackend;
+use super::{CudaBackend, CudaBuffer};
+use crate::{DeviceBufferLike, DeviceOperator};
 
 /// A row-major dense transfer with explicit source and destination maps.
 ///
@@ -146,6 +147,85 @@ pub struct CudaMlfmmC64 {
     levels: Vec<DeviceLevelC64>,
     near_blocks: Vec<DeviceDenseC64>,
     workspace: std::sync::Mutex<DeviceWorkspaceC64>,
+}
+
+impl DeviceOperator<CudaBackend, Complex64> for CudaMlfmmC64 {
+    fn n(&self) -> usize {
+        self.num_dofs
+    }
+
+    fn apply(
+        &self,
+        backend: &CudaBackend,
+        x: &CudaBuffer<Complex64>,
+        y: &mut CudaBuffer<Complex64>,
+    ) {
+        if let Err(error) = DeviceOperator::try_apply(self, backend, x, y) {
+            log::error!("CUDA MLFMM action failed: {error}");
+        }
+    }
+
+    fn try_apply(
+        &self,
+        backend: &CudaBackend,
+        x: &CudaBuffer<Complex64>,
+        y: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        if !std::sync::Arc::ptr_eq(backend.stream(), self.pool.backend().stream()) {
+            return Err(invalid(
+                "cuda_mlfmm_operator",
+                "solver and operator stream mismatch",
+            ));
+        }
+        self.try_apply_raw(x, y, Transpose::NoTrans)
+    }
+
+    fn try_apply_colmajor(
+        &self,
+        backend: &CudaBackend,
+        rhs: usize,
+        x: &CudaBuffer<Complex64>,
+        y: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        if rhs == 1 {
+            return DeviceOperator::try_apply(self, backend, x, y);
+        }
+        if rhs == 0 && x.len() == 0 && y.len() == 0 {
+            return Ok(());
+        }
+        // The generic default stages whole vectors on the host. Do not expose
+        // that fallback through this native scalar adapter; block residency
+        // needs its own checked workspace and production integration.
+        Err(BackendError::Unsupported {
+            backend: "cuda",
+            operation: "cuda_mlfmm_block",
+            scalar: "Complex64 multi-RHS MLFMM",
+        })
+    }
+
+    fn try_residual(
+        &self,
+        backend: &CudaBackend,
+        x: &CudaBuffer<Complex64>,
+        b: &CudaBuffer<Complex64>,
+        out: &mut CudaBuffer<Complex64>,
+    ) -> BackendResult<()> {
+        if b.len() != self.num_dofs
+            || (self.num_dofs > 0
+                && b.raw().is_none_or(|raw| {
+                    !std::sync::Arc::ptr_eq(raw.stream(), self.pool.backend().stream())
+                        || b.len().checked_mul(std::mem::size_of::<Complex64>()) != Some(raw.len())
+                }))
+        {
+            return Err(invalid(
+                "cuda_mlfmm_residual",
+                "RHS dimension, allocation or stream mismatch",
+            ));
+        }
+        DeviceOperator::try_apply(self, backend, x, out)?;
+        backend.try_scale(Complex64::new(-1.0, 0.0), out)?;
+        backend.try_axpy(Complex64::new(1.0, 0.0), b, out)
+    }
 }
 
 fn invalid(operation: &'static str, reason: impl Into<String>) -> BackendError {
@@ -596,6 +676,22 @@ impl CudaMlfmmC64 {
         output: &mut Buffer<Complex64, CudaBackend>,
         transpose: Transpose,
     ) -> BackendResult<()> {
+        self.try_apply_raw(input.raw(), output.raw_mut(), transpose)
+    }
+
+    /// Apply an oriented MLFMM action to borrowed solver buffers.
+    ///
+    /// Reuses resident workspaces without allocating or staging vectors on the
+    /// host. Output publication follows `try_apply_device` synchronization.
+    ///
+    /// # Errors
+    /// Rejects dimension, allocation and stream mismatches and backend failures.
+    pub fn try_apply_raw(
+        &self,
+        input: &CudaBuffer<Complex64>,
+        output: &mut CudaBuffer<Complex64>,
+        transpose: Transpose,
+    ) -> BackendResult<()> {
         let operation = "cuda_mlfmm_apply";
         if input.len() != self.num_dofs || output.len() != self.num_dofs {
             return Err(invalid(
@@ -607,6 +703,20 @@ impl CudaMlfmmC64 {
                     output.len()
                 ),
             ));
+        }
+        if self.num_dofs > 0 {
+            for buffer in [input, &*output] {
+                if buffer.raw().is_none_or(|raw| {
+                    !std::sync::Arc::ptr_eq(raw.stream(), self.pool.backend().stream())
+                        || buffer.len().checked_mul(std::mem::size_of::<Complex64>())
+                            != Some(raw.len())
+                }) {
+                    return Err(invalid(
+                        operation,
+                        "buffer allocation or CUDA stream mismatch",
+                    ));
+                }
+            }
         }
         self.pool.backend().try_fmm_action_preflight()?;
         let action = match transpose {
@@ -643,13 +753,13 @@ impl CudaMlfmmC64 {
         self.pool.backend().try_synchronize()?;
         self.pool
             .backend()
-            .try_copy_d2d(workspace.result.raw(), output.raw_mut())
+            .try_copy_d2d(workspace.result.raw(), output)
     }
 
     fn apply_near(
         &self,
         action: Action,
-        input: &Buffer<Complex64, CudaBackend>,
+        input: &CudaBuffer<Complex64>,
         workspace: &mut DeviceWorkspaceC64,
     ) -> BackendResult<()> {
         self.pool
@@ -669,7 +779,7 @@ impl CudaMlfmmC64 {
         &self,
         dense: &DeviceDenseC64,
         action: Action,
-        input: &Buffer<Complex64, CudaBackend>,
+        input: &CudaBuffer<Complex64>,
         output: &mut Buffer<Complex64, CudaBackend>,
     ) -> BackendResult<()> {
         let (matrix, rows, cols, src, dst) = match action {
@@ -702,7 +812,7 @@ impl CudaMlfmmC64 {
                 rows,
                 cols,
                 cols,
-                input.raw(),
+                input,
                 src.raw(),
                 output.raw_mut(),
                 dst.raw(),
@@ -762,7 +872,7 @@ impl CudaMlfmmC64 {
 
     fn apply_forward_far(
         &self,
-        input: &Buffer<Complex64, CudaBackend>,
+        input: &CudaBuffer<Complex64>,
         workspace: &mut DeviceWorkspaceC64,
     ) -> BackendResult<()> {
         let last = self.levels.len().saturating_sub(1);
@@ -783,7 +893,7 @@ impl CudaMlfmmC64 {
             let destination = &mut parents[level_index];
             if self.levels[level_index].t_phase_transfers.is_empty() {
                 for transfer in &self.levels[level_index].t_transfers {
-                    self.apply_dense(transfer, Action::Forward, source, destination)?;
+                    self.apply_dense(transfer, Action::Forward, source.raw(), destination)?;
                 }
             } else {
                 for transfer in &self.levels[level_index].t_phase_transfers {
@@ -811,7 +921,7 @@ impl CudaMlfmmC64 {
             let destination = &mut children[0];
             if self.levels[level_index].s_phase_transfers.is_empty() {
                 for transfer in &self.levels[level_index].s_transfers {
-                    self.apply_dense(transfer, Action::Forward, source, destination)?;
+                    self.apply_dense(transfer, Action::Forward, source.raw(), destination)?;
                 }
             } else {
                 for transfer in &self.levels[level_index].s_phase_transfers {
@@ -838,7 +948,7 @@ impl CudaMlfmmC64 {
     fn apply_adjoint_far(
         &self,
         action: Action,
-        input: &Buffer<Complex64, CudaBackend>,
+        input: &CudaBuffer<Complex64>,
         workspace: &mut DeviceWorkspaceC64,
     ) -> BackendResult<()> {
         let last = self.levels.len().saturating_sub(1);
@@ -854,7 +964,7 @@ impl CudaMlfmmC64 {
             let destination = &mut parents[level_index];
             if self.levels[level_index].s_phase_transfers.is_empty() {
                 for transfer in &self.levels[level_index].s_transfers {
-                    self.apply_dense(transfer, action, source, destination)?;
+                    self.apply_dense(transfer, action, source.raw(), destination)?;
                 }
             } else {
                 for transfer in &self.levels[level_index].s_phase_transfers {
@@ -882,7 +992,7 @@ impl CudaMlfmmC64 {
             let destination = &mut children[0];
             if self.levels[level_index].t_phase_transfers.is_empty() {
                 for transfer in &self.levels[level_index].t_transfers {
-                    self.apply_dense(transfer, action, source, destination)?;
+                    self.apply_dense(transfer, action, source.raw(), destination)?;
                 }
             } else {
                 for transfer in &self.levels[level_index].t_phase_transfers {
@@ -980,7 +1090,7 @@ impl CudaMlfmmC64 {
             self.apply_dense(
                 transfer,
                 Action::Forward,
-                &workspace.locals[last],
+                workspace.locals[last].raw(),
                 &mut workspace.result,
             )?;
         }
@@ -1000,7 +1110,7 @@ impl CudaMlfmmC64 {
             self.apply_dense(
                 transfer,
                 action,
-                &workspace.multipoles[last],
+                workspace.multipoles[last].raw(),
                 &mut workspace.result,
             )?;
         }
